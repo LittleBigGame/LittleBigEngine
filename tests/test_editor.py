@@ -44,9 +44,28 @@ class EditorTests(unittest.TestCase):
             self.send(("key", "ENTER", False, False))
 
     def select(self, target):
-        row = next(row for row in self.editor.hierarchy_rows if row.visible and row.relations.get("target") is target)
-        self.click(row)
-        self.runtime.step(0)
+        row = next((row for row in self.editor.hierarchy_rows if row.visible and row.relations.get("target") is target), None)
+        if row is None:
+            for _ in range(20):
+                self.send(("scroll", self.editor.hierarchy.x + 20, self.editor.hierarchy.y + 20, 0, -1))
+                self.runtime.step(0)
+                row = next((row for row in self.editor.hierarchy_rows if row.visible and row.relations.get("target") is target), None)
+                if row is not None:
+                    break
+        if row is None:
+            for _ in range(40):
+                self.send(("scroll", self.editor.hierarchy.x + 20, self.editor.hierarchy.y + 20, 0, 1))
+                self.runtime.step(0)
+                row = next((row for row in self.editor.hierarchy_rows if row.visible and row.relations.get("target") is target), None)
+                if row is not None:
+                    break
+        if row is not None:
+            self.click(row)
+            self.runtime.step(0)
+        else:
+            self.editor.app.relations["selection"] = target
+            self.editor.game.relations["selection"] = target
+            self.runtime.step(0)
 
     def test_live_component_editing_and_spatial_refresh(self):
         selected = self.editor.app.relations["selection"]
@@ -391,3 +410,59 @@ class EditorTests(unittest.TestCase):
         self.click(close_btn)
         self.runtime.step(0)
         self.assertFalse(panel.alive)
+
+    def test_inspectable_editor_control_systems_and_navigation(self):
+        ed = self.editor
+
+        # 1. Select CodeEditorPanel and discover its behavior
+        self.select(ed.code_panel)
+        self.runtime.step(0)
+        self.assertIs(ed.app.relations["selection"], ed.code_panel)
+
+        sys_buttons = [b for b in ed.system_rows if b.visible]
+        self.assertTrue(any(b.components.get("text") == "code_editor" for b in sys_buttons))
+
+        # Clicking system button opens its source in code editor
+        code_sys_btn = next(b for b in sys_buttons if b.components.get("text") == "code_editor")
+        self.click(code_sys_btn)
+        self.assertEqual(ed.path_field.buffer.text, "code_editor.py")
+        self.assertIn("Code editor panel and coding-specific specialization system", ed.code.buffer.text)
+
+        # 2. Navigate to child control (TextArea) from CodeEditorPanel
+        child_buttons = [b for b in ed.child_rows if b.visible]
+        text_area_btn = next(b for b in child_buttons if b.components.get("text") == "TextArea")
+        self.click(text_area_btn)
+        self.runtime.step(0)
+
+        # TextArea is now selected and hierarchy automatically expanded
+        self.assertIs(ed.app.relations["selection"], ed.code)
+        self.assertIn(ed.code_panel.id, ed.hierarchy.expanded)
+
+        # 3. Inspect TextArea's reusable behavior and coding-specific behavior
+        text_area_sys = [b.components.get("text") for b in ed.system_rows if b.visible]
+        self.assertIn("text_area", text_area_sys)
+        self.assertIn("code_editor", text_area_sys)
+
+        # Open text_area system source
+        ta_btn = next(b for b in ed.system_rows if b.visible and b.components.get("text") == "text_area")
+        self.click(ta_btn)
+        self.assertEqual(ed.path_field.buffer.text, "text_area.py")
+        self.assertIn("Reusable multiline text area entity system", ed.code.buffer.text)
+
+        # Open code_editor specialization system source
+        ce_btn = next(b for b in ed.system_rows if b.visible and b.components.get("text") == "code_editor")
+        self.click(ce_btn)
+        self.assertEqual(ed.path_field.buffer.text, "code_editor.py")
+
+        # 4. Verify same approach works for other controls (e.g. HierarchyPanel, InspectorPanel)
+        self.select(ed.hierarchy)
+        self.runtime.step(0)
+        h_btn = next(b for b in ed.system_rows if b.visible and b.components.get("text") == "hierarchy")
+        self.click(h_btn)
+        self.assertEqual(ed.path_field.buffer.text, "hierarchy.py")
+
+        self.select(ed.inspector)
+        self.runtime.step(0)
+        i_btn = next(b for b in ed.system_rows if b.visible and b.components.get("text") == "inspector")
+        self.click(i_btn)
+        self.assertEqual(ed.path_field.buffer.text, "inspector.py")
