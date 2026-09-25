@@ -388,6 +388,12 @@ class Runtime:
             for phase in ("update", "draw"):
                 for instance in instances:
                     if instance.running:
+                        if phase == "update":
+                            paused = instance.entity.closest("paused")
+                            if paused is not None and paused.components.get("paused"):
+                                continue
+                            if instance.entity.closest(tags=("paused",)) is not None:
+                                continue
                         instance.call(phase, dt) if phase == "update" else instance.call(phase)
         finally:
             self._stepping = False
