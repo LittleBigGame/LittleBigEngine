@@ -232,3 +232,50 @@ class EditorTests(unittest.TestCase):
         row, col = code.buffer.position
         self.assertAlmostEqual(caret.x, code.x + 48 + (col - code.buffer.horizontal) * pitch, delta=0.01)
         self.assertAlmostEqual(caret.y, code.y + 6 + (row - code.buffer.scroll) * line_height, delta=0.01)
+
+    def test_selection_visual_highlight_in_hierarchy_and_viewport(self):
+        first, second = self.editor.game.children
+
+        # Initially, first entity is selected
+        self.select(first)
+        self.runtime.step(0)
+
+        # Check hierarchy row has clear visual highlight indicator
+        row_first = next(r for r in self.editor.hierarchy_rows if r.visible and r.relations.get("target") is first)
+        row_second = next(r for r in self.editor.hierarchy_rows if r.visible and r.relations.get("target") is second)
+        self.assertIn("> ", row_first.text)
+        self.assertNotIn("> ", row_second.text)
+        self.assertEqual(row_first.color, (45, 95, 125))
+        self.assertNotEqual(row_second.color, (45, 95, 125))
+
+        # Check viewport draws highlight around first entity
+        keys = [kwargs.get("key") for _, kwargs in self.graphics.rectangles]
+        self.assertIn((first.id, "sel_bot"), keys)
+        self.assertIn((first.id, "sel_top"), keys)
+        self.assertNotIn((second.id, "sel_bot"), keys)
+
+        # Switch selection to second entity
+        self.select(second)
+        self.graphics.rectangles.clear()
+        self.runtime.step(0)
+
+        self.assertNotIn("> ", row_first.text)
+        self.assertIn("> ", row_second.text)
+        self.assertNotEqual(row_first.color, (45, 95, 125))
+        self.assertEqual(row_second.color, (45, 95, 125))
+
+        keys = [kwargs.get("key") for _, kwargs in self.graphics.rectangles]
+        self.assertNotIn((first.id, "sel_bot"), keys)
+        self.assertIn((second.id, "sel_bot"), keys)
+
+        # Select an entity without drawable spatial bounds (e.g. Game)
+        self.select(self.editor.game)
+        self.graphics.rectangles.clear()
+        self.runtime.step(0)
+
+        row_game = next(r for r in self.editor.hierarchy_rows if r.visible and r.relations.get("target") is self.editor.game)
+        self.assertIn("> ", row_game.text)
+        self.assertEqual(row_game.color, (45, 95, 125))
+        # No selection borders drawn in viewport for Game
+        keys = [kwargs.get("key") for _, kwargs in self.graphics.rectangles]
+        self.assertFalse(any(isinstance(k, tuple) and len(k) == 2 and str(k[1]).startswith("sel_") for k in keys))

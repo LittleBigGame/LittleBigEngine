@@ -48,7 +48,9 @@ def initialize():
     state._saved_source = None
     state._pending_discard = None
     state.app.status = 'Ready | Select an entity to inspect its data'
-    state.app.relations['selection'] = state.game.children[0]
+    initial_sel = state.game.children[0] if state.game.children else state.game
+    state.app.relations['selection'] = initial_sel
+    state.game.relations['selection'] = initial_sel
     state.header = state.ui.create(state.app, 'Header', 'panel', text='LBE  /  LittleBigEngine', color=BG)
     state.hierarchy = state.ui.create(state.app, 'HierarchyPanel', 'panel', text='HIERARCHY', scroll=0, expanded={state.app.id, state.game.id})
     state.inspector = state.ui.create(state.app, 'InspectorPanel', 'panel', text='INSPECTOR', scroll=0)
@@ -86,13 +88,19 @@ def initialize():
 
 
 def selected():
-    return state.app.relations.get('selection', state.game)
+    sel = state.app.relations.get('selection')
+    if sel is None or not sel.alive:
+        sel = state.game
+        state.app.relations['selection'] = sel
+        state.game.relations['selection'] = sel
+    return sel
 
 def message(text):
     state.app.status = text
 
 def select(entity):
     state.app.relations['selection'] = entity
+    state.game.relations['selection'] = entity
     state.inspector.scroll = 0
     if 'focus' in state.app.relations:
         del state.app.relations['focus']
@@ -158,8 +166,13 @@ def hierarchy_sync():
             row.relations['target'] = target
         name = str(target.components.get('name', str(target.id)[:8]))
         marker = '-' if target.id in expanded else '+'
-        text = '  ' * min(depth, 8) + (marker if target.children else ' ') + ' ' + name
-        put(row, visible=True, x=state.hierarchy.x + 8, y=state.hierarchy.y + 32 + index * 22, w=state.hierarchy.w - 16, h=22, text=text, indent=min(depth, 8) * 16, color=(39, 78, 92) if target is selected() else PANEL)
+        is_selected = target is selected()
+        indicator = '> ' if is_selected else '  '
+        text = '  ' * min(depth, 8) + (marker if target.children else ' ') + ' ' + indicator + name
+        put(row, visible=True, x=state.hierarchy.x + 8, y=state.hierarchy.y + 32 + index * 22,
+            w=state.hierarchy.w - 16, h=22, text=text, indent=min(depth, 8) * 16,
+            color=(45, 95, 125) if is_selected else PANEL,
+            ink=(255, 255, 255, 255) if is_selected else INK)
 
 def inspector_sync():
     entity = selected()
