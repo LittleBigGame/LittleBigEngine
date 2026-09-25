@@ -1,8 +1,8 @@
 # LittleBigEngine - Design Overview
 
 LittleBigEngine aims to make complex behavior emerge from a small set of generic
-primitives. The entity and script runtime is implemented; rendering and the
-self-hosted editor remain under development.
+primitives. The entity/script runtime and desktop rendering adapter are implemented;
+the self-hosted editor remains under development.
 
 ## Entities and data
 
@@ -34,3 +34,14 @@ The editor is intended to use the same entities, components and systems as an
 application. Hierarchy views, inspectors and editing panels expose the structures
 from which they are built. New data and scripts can introduce behavior without
 adding domain-specific logic to the kernel.
+
+## Platform boundary
+
+The optional desktop adapter uses pyglet 2.1 for window events, font rendering and
+OpenGL batches. LBE retains control of the entity model, behavior and UI. Graphics
+objects are cached across frames; a spatial hash is derived from observable
+coordinate changes. The core has no third-party runtime dependency.
+
+This choice provides a direct GPU path without committing the public engine API
+to a GUI framework. Windows graphics smoke tests use a hidden native window;
+Linux headless tests use EGL.

@@ -11,7 +11,7 @@ class InstalledPackageTests(unittest.TestCase):
     def test_module_entry_point(self):
         with tempfile.TemporaryDirectory() as directory:
             result = subprocess.run(
-                [sys.executable, "-m", "lbe"],
+                [sys.executable, "-m", "lbe", "--check"],
                 cwd=directory,
                 capture_output=True,
                 text=True,
@@ -21,5 +21,5 @@ class InstalledPackageTests(unittest.TestCase):
                 check=True,
             )
         self.assertIn("LittleBigEngine (LBE)", result.stdout)
-        self.assertIn("not implemented yet", result.stdout)
+        self.assertIn("core ready", result.stdout)
         self.assertEqual(result.stderr, "")
