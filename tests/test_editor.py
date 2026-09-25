@@ -571,3 +571,149 @@ class EditorTests(unittest.TestCase):
         self.assertEqual(ed2.code_panel.split_y, 390)
         self.assertEqual((ed2.camera.x, ed2.camera.y, ed2.camera.zoom), (5.0, 10.0, 64.0))
 
+    def test_syntax_highlighting_in_code_editor(self):
+        code = self.editor.code
+        self.click(code)
+        # Type Python code
+        self.send(("key", "A", True, False), ("text", "def update(dt):\n    entity.x = 42\n    name = \"LBE\""))
+        self.runtime.step(0)
+
+        # Check line_spans on code
+        spans = code.components.get("line_spans")
+        self.assertIsNotNone(spans)
+        self.assertEqual(len(spans), 3)
+
+        # Verify line 0 spans (def in keyword color, update in definition color)
+        line0 = next(c for c in code.children if c.components.get("part") == "line:0")
+        line0_spans = line0.components.get("spans")
+        self.assertIsNotNone(line0_spans)
+        self.assertTrue(any(chunk == "def" and color == (255, 123, 114) for chunk, color in line0_spans))
+        self.assertTrue(any(chunk == "update" and color == (220, 180, 255) for chunk, color in line0_spans))
+
+        # Verify line 1 spans (number 42 in warm orange color)
+        line1 = next(c for c in code.children if c.components.get("part") == "line:1")
+        line1_spans = line1.components.get("spans")
+        self.assertTrue(any(chunk == "42" and color == (255, 166, 87) for chunk, color in line1_spans))
+
+        # Verify line 2 spans (string "LBE" in soft blue color)
+        line2 = next(c for c in code.children if c.components.get("part") == "line:2")
+        line2_spans = line2.components.get("spans")
+        self.assertTrue(any(chunk == '"LBE"' and color == (165, 214, 255) for chunk, color in line2_spans))
+
+    def test_inline_syntax_and_compile_error_diagnostics(self):
+        code = self.editor.code
+        info = self.editor.code_info
+        self.click(code)
+        # Type invalid syntax (unclosed parenthesis)
+        self.send(("key", "A", True, False), ("text", "def update(dt:\n    pass\n"))
+        self.runtime.step(0)
+
+        # Diagnostic component on code
+        diag = code.components.get("diagnostic")
+        self.assertIsNotNone(diag)
+        self.assertEqual(diag["type"], "syntax")
+        self.assertEqual(diag["line"], 1)
+
+        # Gutter number:0 ink is red (ERROR)
+        num0 = next(c for c in code.children if c.components.get("part") == "number:0")
+        self.assertEqual(num0.ink, (248, 81, 73, 255))
+
+        # Error underline rect is visible
+        err0 = next(c for c in code.children if c.components.get("part") == "error:0")
+        self.assertTrue(err0.visible)
+
+        # Status info displays error message in red
+        self.assertIn("SyntaxError", info.text)
+        self.assertEqual(info.ink, (248, 81, 73, 255))
+
+        # Fix syntax error
+        self.send(("key", "A", True, False), ("text", "def update(dt):\n    pass\n"))
+        self.runtime.step(0)
+        self.assertIsNone(code.components.get("diagnostic"))
+        self.assertFalse(err0.visible)
+        self.assertNotIn("SyntaxError", info.text)
+
+    def test_bracket_matching_and_auto_closing(self):
+        code = self.editor.code
+        self.click(code)
+        # Clear buffer
+        self.send(("key", "A", True, False), ("key", "BACKSPACE", False, False))
+
+        # 1. Auto-close opening parenthesis
+        self.send(("text", "("))
+        self.assertEqual(code.buffer.text, "()")
+        self.assertEqual(code.buffer.cursor, 1)
+
+        # 2. Type-over closing parenthesis
+        self.send(("text", ")"))
+        self.assertEqual(code.buffer.text, "()")
+        self.assertEqual(code.buffer.cursor, 2)
+
+        # 3. Backspace deleting empty pair
+        code.buffer.cursor = code.buffer.anchor = 1
+        self.send(("key", "BACKSPACE", False, False))
+        self.assertEqual(code.buffer.text, "")
+
+        # 4. Selection wrapping
+        self.send(("text", "target"))
+        self.assertEqual(code.buffer.text, "target")
+        self.send(("key", "A", True, False)) # select all
+        self.send(("text", "["))
+        self.assertEqual(code.buffer.text, "[target]")
+
+        # 5. Matching bracket visual highlight
+        code.buffer.cursor = code.buffer.anchor = 1 # inside [target], adjacent to [
+        self.runtime.step(0)
+        matching = code.components.get("matching_brackets")
+        self.assertIsNotNone(matching)
+        self.assertEqual(matching, ((0, 0), (0, 7)))
+        b0 = next(c for c in code.children if c.components.get("part") == "bracket:0")
+        b1 = next(c for c in code.children if c.components.get("part") == "bracket:1")
+        self.assertTrue(b0.visible)
+        self.assertTrue(b1.visible)
+
+    def test_autocomplete_and_code_completion(self):
+        code = self.editor.code
+        self.click(code)
+        self.send(("key", "A", True, False), ("key", "BACKSPACE", False, False))
+
+        # Type 'entity.c' to trigger autocomplete
+        self.send(("text", "entity.c"))
+        self.runtime.step(0)
+
+        ac_state = code.components.get("autocomplete_state")
+        self.assertIsNotNone(ac_state)
+        self.assertTrue(ac_state.get("active"))
+        match_names = [m[0] for m in ac_state.get("matches", [])]
+        self.assertIn("color", match_names)
+        self.assertIn("components", match_names)
+
+        # Popup panel entity is visible
+        popup = next(c for c in code.children if c.components.get("part") == "autocomplete_popup")
+        self.assertTrue(popup.visible)
+
+        # Press DOWN to select next suggestion and TAB to complete
+        orig_selected = ac_state.get("selected", 0)
+        self.send(("key", "DOWN", False, False))
+        self.assertEqual(ac_state.get("selected"), (orig_selected + 1) % len(match_names))
+        expected_chosen = ac_state["matches"][ac_state["selected"]][0]
+
+        self.send(("key", "TAB", False, False))
+        self.runtime.step(0)
+        self.assertEqual(code.buffer.text, f"entity.{expected_chosen}")
+        self.assertFalse(ac_state.get("active"))
+        self.assertFalse(popup.visible)
+
+        # Mouse click on autocomplete item
+        self.send(("key", "A", True, False), ("key", "BACKSPACE", False, False))
+        self.send(("text", "entity.t"))
+        self.runtime.step(0)
+        self.assertTrue(ac_state.get("active"))
+        item0 = next(c for c in code.children if c.components.get("part") == "ac_item:0")
+        self.assertTrue(item0.visible)
+        self.click(item0)
+        self.runtime.step(0)
+        self.assertIn("entity.tags", code.buffer.text)
+        self.assertFalse(ac_state.get("active"))
+
+

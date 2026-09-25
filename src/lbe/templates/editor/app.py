@@ -735,4 +735,8 @@ def update(dt):
     inspector_sync()
     panels_sync()
     row, column = state.code.buffer.position
-    put(state.code_info, text=f"Ln {row+1}, Col {column+1} | Attach target: {selected().components.get('name', selected().id)} | Ctrl+S save")
+    diag = state.code.components.get("diagnostic")
+    if diag:
+        put(state.code_info, text=f"SyntaxError Ln {diag['line']}, Col {diag['column']}: {diag['message']}", ink=(248, 81, 73, 255))
+    else:
+        put(state.code_info, text=f"Ln {row+1}, Col {column+1} | Attach target: {selected().components.get('name', selected().id)} | Ctrl+S save", ink=MUTED)

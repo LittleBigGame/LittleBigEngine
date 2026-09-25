@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+from .syntax import slice_spans
 from .text import TextBuffer
 
 PITCH = 8
@@ -12,6 +13,7 @@ FIELD = (34, 45, 59)
 ACCENT = (69, 182, 199)
 INK = (220, 230, 239, 255)
 MUTED = (145, 163, 183, 255)
+ERROR = (248, 81, 73, 255)
 
 
 def put(entity, **values):
@@ -372,6 +374,14 @@ class UI:
         control = self.focused
         if control is None or not self.visible(control) or "buffer" not in control.components:
             return
+        if kind == "key":
+            on_key = control.components.get("on_key")
+            if on_key and on_key(control, event):
+                return
+        elif kind == "text":
+            on_text = control.components.get("on_text")
+            if on_text and on_text(control, event):
+                return
         buffer = control.buffer
         multiline = "multiline" in control.tags
         if kind == "text":
@@ -453,6 +463,10 @@ class UI:
         selection_start, selection_end = buffer.selection
         offset = sum(len(line)+1 for line in lines[:buffer.scroll])
         used = {"cursor", "scrollbar"}
+        line_spans = control.components.get("line_spans")
+        diag = control.components.get("diagnostic")
+        err_row = (diag.get("line", 0) - 1) if diag else -1
+        matching_brackets = control.components.get("matching_brackets")
         for index in range(rows):
             row = index+buffer.scroll
             if row >= len(lines):
@@ -460,11 +474,22 @@ class UI:
             highlight = part(f"selection:{index}", "rect", color=(44, 76, 105), layer=control.layer)
             number = part(f"number:{index}", "label", text="", ink=MUTED, layer=control.layer)
             line = part(f"line:{index}", "label", text="", layer=control.layer)
-            used.update((highlight.part, number.part, line.part))
+            err_rect = part(f"error:{index}", "rect", color=ERROR, layer=control.layer+1)
+            used.update((highlight.part, number.part, line.part, err_rect.part))
             y = control.y+6+index*line_height
-            put(number, visible=True, x=control.x+6, y=y, w=40, h=line_height, text=str(row+1))
+            is_error = (row == err_row)
+            put(number, visible=True, x=control.x+6, y=y, w=40, h=line_height, text=str(row+1), ink=(ERROR if is_error else MUTED))
+            spans = slice_spans(line_spans[row], buffer.horizontal, columns) if (line_spans and row < len(line_spans)) else None
             put(line, visible=True, x=control.x+48, y=y, w=control.w-64, h=line_height,
-                text=lines[row][buffer.horizontal:buffer.horizontal+columns])
+                text=lines[row][buffer.horizontal:buffer.horizontal+columns], spans=spans)
+            if is_error:
+                col_start = max(0, diag.get("column", 1) - 1)
+                col_end = max(col_start + 1, diag.get("end_column", col_start + 1) - 1)
+                err_x = line.x + max(0, col_start - buffer.horizontal) * pitch
+                err_w = max(pitch, (col_end - col_start) * pitch)
+                put(err_rect, visible=True, x=err_x, y=y + line_height - 2, w=min(err_w, line.w), h=2)
+            else:
+                put(err_rect, visible=False)
             start = max(selection_start-offset-buffer.horizontal, 0)
             end = min(selection_end-offset-buffer.horizontal, len(lines[row])-buffer.horizontal, columns)
             has_selection = (end > start and
@@ -472,6 +497,20 @@ class UI:
                              selection_end > offset)
             put(highlight, visible=has_selection, x=line.x+start*pitch, y=y, w=max(0, end-start)*pitch, h=line_height)
             offset += len(lines[row])+1
+        used.update(("bracket:0", "bracket:1"))
+        for b_i in range(2):
+            b_part = part(f"bracket:{b_i}", "rect", color=(88, 166, 255, 120), layer=control.layer+1)
+            if matching_brackets and b_i < len(matching_brackets):
+                b_row, b_col = matching_brackets[b_i]
+                if (buffer.scroll <= b_row < buffer.scroll + rows and
+                        buffer.horizontal <= b_col <= buffer.horizontal + columns):
+                    b_x = control.x + 48 + (b_col - buffer.horizontal) * pitch
+                    b_y = control.y + 6 + (b_row - buffer.scroll) * line_height
+                    put(b_part, visible=True, x=b_x, y=b_y, w=pitch, h=line_height)
+                else:
+                    put(b_part, visible=False)
+            else:
+                put(b_part, visible=False)
         for name, child in children.items():
             if name not in used:
                 put(child, visible=False)
@@ -505,7 +544,7 @@ class UI:
                                       (44, 76, 105), key=(control.id, "selection"), layer=layer+1)
                     graphics.rect(control.x, control.y+control.h-2, control.w, 2, ACCENT, key=(control.id, "focus"), layer=layer+1)
                     graphics.rect(control.x+6+(buffer.cursor-buffer.horizontal)*pitch, control.y+4, 1, control.h-8,
-                                  ACCENT, key=(control.id, "caret"), layer=layer+2)
+                                   ACCENT, key=(control.id, "caret"), layer=layer+2)
                 text = buffer.text.replace("\n", " ")[buffer.horizontal:buffer.horizontal+width]
                 text = text or control.components.get("hint", "")[:width]
                 graphics.text(text, control.x+6, control.y+5, color=INK, key=(control.id, "text"), layer=layer+2)
@@ -513,5 +552,18 @@ class UI:
                 pitch = control.components.get("pitch", self.pitch)
                 inset = 8 if "panel" in control.tags or "button" in control.tags else 0
                 width = max(1, int((control.w-inset*2)//pitch))
-                graphics.text(str(control.text)[:width], control.x+inset, control.y+(8 if "panel" in control.tags else 4),
-                              color=control.components.get("ink", INK), key=(control.id, "text"), layer=layer+1)
+                spans = control.components.get("spans")
+                if spans:
+                    x_cursor = control.x + inset
+                    col = 0
+                    for span_idx, (chunk, ink) in enumerate(spans):
+                        if col >= width:
+                            break
+                        chunk_str = str(chunk)[:width - col]
+                        graphics.text(chunk_str, x_cursor, control.y+(8 if "panel" in control.tags else 4),
+                                      color=ink, key=(control.id, "span", span_idx), layer=layer+1)
+                        x_cursor += len(chunk_str) * pitch
+                        col += len(chunk_str)
+                else:
+                    graphics.text(str(control.text)[:width], control.x+inset, control.y+(8 if "panel" in control.tags else 4),
+                                  color=control.components.get("ink", INK), key=(control.id, "text"), layer=layer+1)
