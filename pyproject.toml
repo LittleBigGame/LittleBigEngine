@@ -11,6 +11,9 @@ requires-python = ">=3.11"
 authors = [{name = "LittleBigGame", email = "littlebiggame@proton.me"}]
 dependencies = []
 
+[project.optional-dependencies]
+desktop = ["pyglet>=2.1.16,<2.2"]
+
 [project.scripts]
 lbe = "lbe.__main__:main"
 

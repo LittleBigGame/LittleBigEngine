@@ -9,19 +9,22 @@ the same primitives as the applications it edits.
 ## Current release
 
 Little Core provides entities, arbitrary components, hierarchy, tags, relations,
-live queries, changes, events and independent Python script systems. Graphics and
-the editor are under development.
+live queries, changes, events and independent Python script systems. The desktop
+runtime renders a two-entity scene through an ordinary script, with camera
+transforms and automatically refreshed spatial indexing. The editor is under development.
 
 ## Run
 
 Requires Python 3.11 or later.
 
 ```console
-python -m pip install -e .
+python -m pip install -e ".[desktop]"
 python -m lbe
 ```
 
 The `lbe` command and `python main.py` launch the same entry point.
+Use `python -m lbe --check` to check the core without opening a window.
+The core alone installs with `python -m pip install -e .`.
 
 ## Test
 
