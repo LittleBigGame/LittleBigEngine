@@ -9,6 +9,7 @@ from lbe.project import load_project, template_path
 class RecordingGraphics:
     def __init__(self):
         self.rectangles = []
+        self.texts = []
 
     @contextmanager
     def view(self, camera, viewport):
@@ -18,7 +19,7 @@ class RecordingGraphics:
         self.rectangles.append((args, kwargs))
 
     def text(self, *args, **kwargs):
-        pass
+        self.texts.append((args, kwargs))
 
     def char_width(self, size=10):
         return 8.0
