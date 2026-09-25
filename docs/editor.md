@@ -15,7 +15,8 @@ and their controls appear in the same hierarchy as Game and its entities.
 
 Click a hierarchy row to select it. Click its `+` or `-` to expand or collapse it.
 Scroll the hierarchy to reach additional entities. Clicking a rectangle in the
-viewport selects that entity. Scroll the viewport to change camera zoom.
+viewport selects that entity. Drag inside the viewport to pan the camera, and
+scroll the viewport to zoom towards the cursor.
 
 ## Live data
 

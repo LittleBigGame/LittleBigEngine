@@ -117,7 +117,7 @@ def layout():
     put(state.hierarchy, x=8, y=52, w=left - 16, h=240)
     put(state.inspector, x=8, y=300, w=left - 16, h=h - 336)
     put(state.viewport, x=left + 8, y=80, w=w - left - 24, h=split - 92)
-    put(state.zoom_label, x=left + 12, y=56, w=500, h=20, text=f'WORLD  /  {state.camera.zoom:.0f} px per metre  /  scroll to zoom')
+    put(state.zoom_label, x=left + 12, y=56, w=500, h=20, text=f'WORLD  /  {state.camera.zoom:.0f} px per metre  /  drag to pan  /  scroll to zoom')
     put(state.code_panel, x=left + 8, y=split, w=w - left - 24, h=h - split - 36)
     put(state.status, x=16, y=h - 25, w=w - 32, h=20, text=state.app.status)
     cp = state.code_panel
@@ -431,6 +431,7 @@ def scroll_list(control, event):
 
 
 def viewport_click(control, event):
+    control.drag_pos = None
     wx, wy = screen_to_world(state.camera, control, event[1], event[2])
     hits = set(space.query(wx, wy))
     target = next((child for child in reversed(state.game.children) if child in hits), None)
@@ -438,8 +439,31 @@ def viewport_click(control, event):
         select(target)
 
 
+def viewport_drag(control, event):
+    x, y = event[1], event[2]
+    if len(event) >= 7:
+        dx, dy = event[5], event[6]
+    else:
+        last = control.components.get("drag_pos")
+        if last is None:
+            control.drag_pos = (x, y)
+            return True
+        dx, dy = x - last[0], y - last[1]
+    control.drag_pos = (x, y)
+    zoom = max(1.0, state.camera.zoom)
+    state.camera.x -= dx / zoom
+    state.camera.y += dy / zoom
+    return True
+
+
 def viewport_scroll(control, event):
-    state.camera.zoom = max(4, min(512, state.camera.zoom*1.1**event[4]))
+    sx, sy = event[1], event[2]
+    wx, wy = screen_to_world(state.camera, control, sx, sy)
+    old_zoom = state.camera.zoom
+    new_zoom = max(4.0, min(512.0, old_zoom * 1.1 ** event[4]))
+    state.camera.x = wx - (sx - (control.x + control.w / 2)) / new_zoom
+    state.camera.y = wy + (sy - (control.y + control.h / 2)) / new_zoom
+    state.camera.zoom = new_zoom
 
 
 def keyboard(event):
@@ -455,6 +479,7 @@ def bind_actions():
     state.hierarchy.on_scroll = scroll_list
     state.inspector.on_scroll = scroll_list
     state.viewport.on_click = viewport_click
+    state.viewport.on_drag = viewport_drag
     state.viewport.on_scroll = viewport_scroll
     for control, action in ((state.new_button, new_source), (state.open_button, open_path),
                             (state.save_button, save), (state.attach_button, attach),
