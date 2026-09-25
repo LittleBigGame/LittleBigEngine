@@ -4,7 +4,7 @@ from types import SimpleNamespace
 import unittest
 
 from lbe.desktop import Input
-from lbe.editor import build_editor
+from lbe.project import load_project, template_path
 from test_scene import RecordingGraphics
 
 
@@ -18,14 +18,14 @@ class EditorTests(unittest.TestCase):
         self.window = SimpleNamespace(width=1440, height=900,
                                       set_clipboard_text=lambda text: setattr(self, "clipboard", text),
                                       get_clipboard_text=lambda: self.clipboard)
-        self.runtime = build_editor(self.window, self.graphics, self.input, self.directory.name)
+        self.runtime = load_project(self.window, self.graphics, self.input, self.directory.name, template=template_path("editor"))
         self.addCleanup(self.runtime.close)
-        self.editor = self.runtime.services["editor"]
+        self.editor = self.runtime.entities[0].components["application_state"]
         self.runtime.step(0)
         self.assert_healthy()
 
     def assert_healthy(self):
-        instance = self.editor.app.systems["editor"]
+        instance = self.editor.app.systems["app"]
         self.assertTrue(instance.running, list(instance.errors))
         self.assertEqual(list(instance.errors), [])
 
@@ -49,7 +49,7 @@ class EditorTests(unittest.TestCase):
         self.runtime.step(0)
 
     def test_live_component_editing_and_spatial_refresh(self):
-        selected = self.editor.selected
+        selected = self.editor.app.relations["selection"]
         x_field = next(field for _, field in self.editor.component_rows if field.visible and field.component_key == "x")
         self.type(x_field, "10.0", commit=True)
         self.assertEqual(selected.x, 10)
@@ -99,7 +99,7 @@ class EditorTests(unittest.TestCase):
         self.runtime.step(0)
         button = self.editor.system_rows[0]
         self.click(button)
-        self.assertEqual(self.editor.path_field.buffer.text, "editor.py")
+        self.assertEqual(self.editor.path_field.buffer.text, "app.py")
         self.click(self.editor.save_button)
         self.runtime.step(0)
         self.assert_healthy()
@@ -108,7 +108,7 @@ class EditorTests(unittest.TestCase):
         self.assertIn(moving, self.runtime.services["space"].query(10, 0))
 
     def test_tags_relations_parent_and_generic_panel(self):
-        moving = self.editor.selected
+        moving = self.editor.app.relations["selection"]
         self.type(self.editor.tags_field, "visible, selected", commit=True)
         self.assertEqual(set(moving.tags), {"visible", "selected"})
         self.type(self.editor.relation_field, "friend=Entity B", commit=True)
@@ -129,13 +129,13 @@ class EditorTests(unittest.TestCase):
         self.assertEqual(self.editor.code.buffer.text, "hello")
 
     def test_unsupported_value_is_readonly(self):
-        self.editor.selected.components.clear()
-        self.editor.selected.opaque = object()
+        self.editor.app.relations["selection"].components.clear()
+        self.editor.app.relations["selection"].opaque = object()
         self.runtime.step(0)
         field = next(field for _, field in self.editor.component_rows if field.visible)
         self.assertTrue(field.readonly)
         self.click(field)
-        self.assertIsNot(self.editor.focused, field)
+        self.assertIsNot(self.editor.ui.focused, field)
 
     def test_source_cannot_escape_project_directory(self):
         self.type(self.editor.path_field, "../outside.py")
@@ -171,3 +171,16 @@ class EditorTests(unittest.TestCase):
         self.assert_healthy()
         self.click(self.editor.panel_button)
         self.assertEqual(len(self.editor.extra_panels), 1)
+
+    def test_project_source_reload_rebinds_actions_without_rebuilding_controls(self):
+        from lbe import SystemDefinition
+        root = self.editor.app
+        old = root.systems["app"]
+        source = old.definition.source.replace("New source:", "Revised source:")
+        before = set(self.runtime.entities)
+        replacement = root.systems.reload("app", SystemDefinition(source, old.definition.path))
+        self.assertIsNot(replacement, old)
+        self.assertEqual(set(self.runtime.entities), before)
+        self.click(self.editor.new_button)
+        self.assertIn("Revised source:", root.status)
+        self.assertNotIn("editor", self.runtime.services)

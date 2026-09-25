@@ -9,7 +9,7 @@ import tempfile
 
 from lbe import SystemDefinition
 from lbe.desktop import launch
-from lbe.editor import build_editor
+from lbe.project import load_project, template_path
 
 
 SOURCE = '''def update(dt):
@@ -23,8 +23,8 @@ def main():
     completed = []
     with tempfile.TemporaryDirectory() as directory:
         def build(window, graphics, input_state):
-            runtime = build_editor(window, graphics, input_state, directory)
-            editor = runtime.services["editor"]
+            runtime = load_project(window, graphics, input_state, directory, template=template_path("editor"))
+            editor = runtime.entities[0].components["application_state"]
             moving, still = editor.game.children
             initial = moving.x, moving.y
             stationary = still.x, still.y

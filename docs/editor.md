@@ -2,6 +2,11 @@
 
 Launch with `python -m lbe` after installing `.[desktop]`.
 
+On first launch, a project is initialized from the editor template. `app.py` is
+the editor application; `ui.py` attaches general UI behavior, and `render.py` draws
+the game entities. These are ordinary editable system sources. Existing project
+files are not overwritten by later launches.
+
 ## Workspace
 
 The hierarchy is at the upper left, the inspector below it, the world viewport
@@ -75,5 +80,5 @@ The behavior comes from this script. There is no physics-specific code in the ke
   or full Unicode grapheme layout yet.
 - Native nested Python containers use the core's explicit edit/touch mechanism.
 - Scripts execute trusted Python. Deliberately breaking the editor's own runtime
-  script can interrupt its UI; restore `editor.py` externally if necessary.
+  script can interrupt its UI; restore `app.py` externally if necessary.
 - Inspection panels show a compact view; larger structured objects may be truncated.

@@ -31,6 +31,15 @@ System sources are saved under `workspace/` by default. Choose a different folde
 with `python -m lbe --project path/to/project`. Use `--demo` for the rendering-only scene.
 
 See the [editor guide](docs/editor.md) for controls and the live movement walkthrough.
+The editor is a project template made with the public APIs, not an engine-side
+application service. Its `app.py`, `ui.py` and `render.py` are editable project files.
+Try an unrelated application built with the same UI API:
+
+```console
+python -m lbe --template counter
+```
+
+See [UI and application scripting](docs/ui.md) to build your own application.
 
 ## Test
 

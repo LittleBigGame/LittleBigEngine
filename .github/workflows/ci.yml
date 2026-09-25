@@ -31,3 +31,4 @@ jobs:
       - run: python -m pip install '.[desktop]'
       - run: python -m lbe --headless --frames 3
       - run: python tests/desktop_walkthrough.py
+      - run: python -m lbe --template counter --headless --frames 3

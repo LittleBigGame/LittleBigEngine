@@ -1,0 +1,74 @@
+# UI and Application Scripting
+
+The engine loads a project directory's `app.py` as a normal script attachment on
+an Application entity. The file uses the same public API as any other system.
+It receives platform services such as `window`, `graphics`, `input`, `space` and
+the project directory `project`, alongside `entity`, `create`, `query` and `assets`.
+
+## A small application
+
+Place this in a new project's `app.py`:
+
+```python
+from lbe.ui import UI, stack
+
+ui = UI(entity, window, graphics, input)
+panel = ui.create(entity, "Panel", "panel", x=20, y=20, w=400, h=300)
+label = ui.create(panel, "Greeting", "label", text="Hello", w=340, h=28)
+notes = ui.multiline(panel, "Notes", w=340, h=150)
+
+def greet():
+    label.text = "Hello from an ordinary button entity"
+
+button = ui.button(panel, "Greet", "Greet", greet, w=160, h=30)
+
+def start():
+    ui.install()
+
+def update(dt):
+    stack(panel, (label, button, notes), padding=32)
+```
+
+Run `python -m lbe --project path/to/project`. An existing `app.py` is loaded
+directly; no editor panels or game objects are created by the loader.
+
+## Controls and state
+
+`create`, `button`, `field` and `multiline` return normal entities. Their components
+hold bounds, text, buffers, colors, visibility and callbacks. You can construct
+equivalent entities yourself: no required widget classes exist.
+
+- `x`, `y`, `w`, `h` use screen coordinates with a top-left origin.
+- `layer` controls drawing and hit-test priority.
+- `visible=False` hides a control and its descendants and blocks their input.
+- `modal=True` prevents a hit on that surface from reaching underlying controls.
+- `buffer` is a `TextBuffer` for single-line or multiline editing.
+- `action()` handles a button activation; `on_commit()` applies a field on Enter.
+- `on_click(control, event)` and `on_scroll(control, event)` add custom behavior.
+  Return `False` to continue default handling.
+- The UI root's `on_key(event)` may consume shortcuts by returning `True`.
+- `on_ui_error(message)` receives callback errors; `ui_error` records the latest.
+
+`ui.focus(control)` sets focus through a relation on the UI root. `ui.focus()`
+clears it. `ui.controls()` queries descendants of that root, so separate UI roots
+do not share a widget registry or focus state.
+
+`put(entity, **values)` applies changed control properties. `stack(parent, children,
+axis="y", gap=8, padding=8)` positions ordinary entities in a vertical or horizontal
+stack without introducing transform inheritance into the entity hierarchy.
+
+## Systems and composition
+
+`ui.install()` attaches a generic input/render system. Pass a compiled definition
+with `ui.install(definition=assets.system(project / "ui.py"))` to use a project-owned
+system source. The standard source calls `entity.components["ui"].process()` during
+update and `.draw()` during drawing.
+
+Multiline controls generate their own line, gutter, selection, cursor and scrollbar
+entities. They do not know about source files, compilers or script attachment. The
+editor application adds those policies by composing controls and public runtime
+operations. The counter template uses the same text control for notes.
+
+For custom interaction, compose components and callbacks or attach another normal
+system. Game selection, tree expansion, property inspection and saving Python
+files are application-level behavior, not built-in UI control rules.

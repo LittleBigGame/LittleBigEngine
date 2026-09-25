@@ -2,7 +2,8 @@ from contextlib import contextmanager
 from types import SimpleNamespace
 import unittest
 
-from lbe.scene import build_demo
+import tempfile
+from lbe.project import load_project, template_path
 
 
 class RecordingGraphics:
@@ -24,7 +25,9 @@ class SceneTests(unittest.TestCase):
     def test_render_is_an_ordinary_inspectable_system(self):
         window = SimpleNamespace(width=900, height=600)
         graphics = RecordingGraphics()
-        runtime = build_demo(window, graphics, None)
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        runtime = load_project(window, graphics, None, directory.name, template=template_path("demo"))
         runtime.step(0)
         self.assertEqual(len(graphics.rectangles), 2)
         game = next(e for e in runtime.entities if e.components.get("name") == "Game")
