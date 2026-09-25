@@ -12,6 +12,15 @@ class TextBuffer:
         self._redo = []
 
     @property
+    def text(self):
+        return self._text
+
+    @text.setter
+    def text(self, value):
+        self._text = value.replace("\r\n", "\n").replace("\r", "\n") if value else ""
+
+
+    @property
     def selection(self):
         return tuple(sorted((self.anchor, self.cursor)))
 
@@ -34,6 +43,10 @@ class TextBuffer:
         return self.text, self.cursor, self.anchor
 
     def insert(self, text):
+        if not text:
+            text = ""
+        else:
+            text = text.replace("\r\n", "\n").replace("\r", "\n")
         self._undo.append(self._snapshot())
         del self._undo[:-200]
         self._redo.clear()

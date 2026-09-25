@@ -534,7 +534,7 @@ def save_project_action():
 def save():
     path = source_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', dir=path.parent, delete=False, suffix='.tmp') as stream:
+    with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', newline='\n', dir=path.parent, delete=False, suffix='.tmp') as stream:
         stream.write(state.code.buffer.text)
         temporary = Path(stream.name)
     temporary.replace(path)
