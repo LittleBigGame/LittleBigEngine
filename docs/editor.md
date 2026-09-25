@@ -75,8 +75,8 @@ The behavior comes from this script. There is no physics-specific code in the ke
 
 ## Current boundaries
 
-- System source files persist. Entity edits, attachments and panel layout currently
-  reset on relaunch; project serialization is not implemented yet.
+- System source files, entity component edits, hierarchy changes, system attachments
+  and panel layout persist across relaunches in versioned project serialization format (`project.json`).
 - The source editor is intentionally small: no syntax coloring, completion, search
   or full Unicode grapheme layout yet.
 - Native nested Python containers use the core's explicit edit/touch mechanism.

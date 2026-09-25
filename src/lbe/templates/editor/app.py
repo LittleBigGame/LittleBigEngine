@@ -4,12 +4,14 @@ import ast
 from pathlib import Path
 from types import SimpleNamespace
 import tempfile
+from uuid import UUID
 
 from lbe.ui import (UI, put, contains, parse_box, content_rect, stack, dock,
                     row, column, apply_layout, Layout, BG, PANEL, FIELD, ACCENT,
                     INK, MUTED, PITCH, LINE)
 from lbe.text import TextBuffer
 from lbe.space import screen_to_world
+from lbe.project import save_project, load_project_data, deserialize_entities
 
 state = entity.components.get("application_state")
 
@@ -35,14 +37,25 @@ def initialize():
     entity.components["application_state"] = state
     state.ui = UI(entity, window, graphics, input)
     state.background = state.ui.create(entity, "Background", "rect", color=BG, layer=0)
-    state.game = create(parent=entity, name="Game", tags=["root"])
+
+    project_data = load_project_data(project)
+    if project_data is not None and project_data.get("entities"):
+        restored = deserialize_entities(project_data["entities"], state.runtime, default_parent=entity, project_dir=project)
+        state.game = next((e for e in restored.values() if "root" in e.tags and e.components.get("name") == "Game"), None)
+        if state.game is None:
+            state.game = next((e for e in restored.values() if e.parent is entity), next(iter(restored.values())))
+    else:
+        state.game = create(parent=entity, name="Game", tags=["root"])
+        create(parent=state.game, name="Entity A", x=-3.0, y=-1.0, w=2.0, h=2.0, color=(75, 185, 210))
+        create(parent=state.game, name="Entity B", x=1.0, y=0.0, w=1.5, h=1.5, color=(232, 165, 80))
+        if (project / "render.py").exists():
+            state.game.systems.attach("render", assets.system(project / "render.py"))
+
     state.camera = create(parent=entity, name="Camera", x=0.0, y=0.0, zoom=48.0)
     state.viewport = state.ui.create(entity, "Viewport", "surface", color=(12, 18, 25), layer=0)
     state.game.relations["camera"] = state.camera
     state.game.relations["viewport"] = state.viewport
-    create(parent=state.game, name="Entity A", x=-3.0, y=-1.0, w=2.0, h=2.0, color=(75, 185, 210))
-    create(parent=state.game, name="Entity B", x=1.0, y=0.0, w=1.5, h=1.5, color=(232, 165, 80))
-    state.game.systems.attach("render", assets.system(project / "render.py"))
+
     state.hierarchy_rows = []
     state.component_rows = []
     state.system_rows = []
@@ -51,14 +64,58 @@ def initialize():
     state._saved_source = None
     state._pending_discard = None
     state.app.status = 'Ready | Select an entity to inspect its data'
-    initial_sel = state.game.children[0] if state.game.children else state.game
+
+    layout_data = project_data.get("layout", {}) if project_data else {}
+    saved_sel_id = layout_data.get("selection")
+    initial_sel = None
+    if saved_sel_id:
+        try:
+            initial_sel = state.runtime.resolve(UUID(saved_sel_id))
+        except (KeyError, ValueError):
+            initial_sel = None
+    if initial_sel is None or not initial_sel.alive:
+        initial_sel = state.game.children[0] if state.game.children else state.game
     state.app.relations['selection'] = initial_sel
     state.game.relations['selection'] = initial_sel
-    state.app.components.setdefault('left_column_w', 370)
+
+    state.app.components["left_column_w"] = layout_data.get("left_column_w", 370)
     state.header = state.ui.create(state.app, 'Header', 'panel', text='LBE  /  LittleBigEngine', color=BG, dock='top', h=44, padding=(8, 16, 8, 16))
-    state.hierarchy = state.ui.create(state.app, 'HierarchyPanel', 'panel', text='HIERARCHY', scroll=0, expanded={state.app.id, state.game.id}, dock='left_top', panel_h=240, margin=(8, 8, 4, 8), resizable=True)
-    state.inspector = state.ui.create(state.app, 'InspectorPanel', 'panel', text='INSPECTOR', scroll=0, dock='left_bottom', margin=(4, 8, 6, 8), resizable=True)
-    state.code_panel = state.ui.create(state.app, 'CodeEditorPanel', 'panel', text='SYSTEM SOURCE', dock='right_bottom', padding=(8, 12, 8, 12), resizable=True)
+
+    h_conf = layout_data.get("hierarchy", {})
+    state.hierarchy = state.ui.create(state.app, 'HierarchyPanel', 'panel', text='HIERARCHY', scroll=0,
+                                     expanded={state.app.id, state.game.id}, dock=h_conf.get("dock", 'left_top'),
+                                     panel_h=h_conf.get("panel_h", 240), margin=(8, 8, 4, 8), resizable=True)
+    if "expanded" in h_conf:
+        state.hierarchy.expanded = {UUID(x) for x in h_conf["expanded"]} | {state.app.id, state.game.id}
+    if "panel_w" in h_conf and h_conf["panel_w"] is not None:
+        state.hierarchy.components["panel_w"] = h_conf["panel_w"]
+
+    i_conf = layout_data.get("inspector", {})
+    state.inspector = state.ui.create(state.app, 'InspectorPanel', 'panel', text='INSPECTOR', scroll=0,
+                                     dock=i_conf.get("dock", 'left_bottom'), margin=(4, 8, 6, 8), resizable=True)
+    if "panel_h" in i_conf and i_conf["panel_h"] is not None:
+        state.inspector.components["panel_h"] = i_conf["panel_h"]
+    if "panel_w" in i_conf and i_conf["panel_w"] is not None:
+        state.inspector.components["panel_w"] = i_conf["panel_w"]
+
+    cp_conf = layout_data.get("code_panel", {})
+    state.code_panel = state.ui.create(state.app, 'CodeEditorPanel', 'panel', text='SYSTEM SOURCE',
+                                       dock=cp_conf.get("dock", 'right_bottom'), padding=(8, 12, 8, 12), resizable=True)
+    if "split_y" in cp_conf and cp_conf["split_y"] is not None:
+        state.code_panel.components["split_y"] = cp_conf["split_y"]
+    if "panel_h" in cp_conf and cp_conf["panel_h"] is not None:
+        state.code_panel.components["panel_h"] = cp_conf["panel_h"]
+    if "panel_w" in cp_conf and cp_conf["panel_w"] is not None:
+        state.code_panel.components["panel_w"] = cp_conf["panel_w"]
+
+    cam_conf = layout_data.get("camera", {})
+    if "x" in cam_conf:
+        state.camera.x = cam_conf["x"]
+    if "y" in cam_conf:
+        state.camera.y = cam_conf["y"]
+    if "zoom" in cam_conf:
+        state.camera.zoom = cam_conf["zoom"]
+
     state.status = state.ui.create(state.app, 'StatusBar', 'label', text='', dock='bottom', h=20, margin=(0, 16, 5, 16))
     state.code = state.ui.multiline(state.code_panel, 'TextArea')
     state.path_field = state.ui.field(state.code_panel, 'SourcePath', 'render.py', hint='system_name.py')
@@ -67,6 +124,7 @@ def initialize():
     state.open_button = state.ui.button(state.code_panel, 'OpenSource', 'Open', open_path)
     state.save_button = state.ui.button(state.code_panel, 'SaveSource', 'Save / reload', save)
     state.attach_button = state.ui.button(state.code_panel, 'AttachSource', 'Attach', attach)
+    state.save_project_button = state.ui.button(state.header, 'SaveProject', 'Save project', save_project_action)
     state.panel_button = state.ui.button(state.header, 'OpenPanel', 'Inspect in panel', open_panel)
     state.system_panel_button = state.ui.button(state.header, 'InspectSystem', 'Inspect system', inspect_system)
     state.detach_button = state.ui.button(state.header, 'DetachSystem', 'Detach system', detach_system)
@@ -102,7 +160,10 @@ def initialize():
         state.hierarchy.systems.attach('hierarchy', assets.system(project / 'hierarchy.py'))
     if (project / 'inspector.py').exists() and 'inspector' not in state.inspector.systems:
         state.inspector.systems.attach('inspector', assets.system(project / 'inspector.py'))
-    open_system(state.game, "render")
+    if "render" in state.game.systems:
+        open_system(state.game, "render")
+    elif state.game.systems:
+        open_system(state.game, next(iter(state.game.systems)))
 
 
 def selected():
@@ -136,7 +197,8 @@ def layout():
     # Header action buttons: aligned along right edge with margins
     btn_gap = 10
     rx = w - 16
-    for btn, width in ((state.panel_button, 174), (state.system_panel_button, 150), (state.detach_button, 150)):
+    for btn, width in ((state.panel_button, 174), (state.system_panel_button, 150),
+                       (state.detach_button, 150), (state.save_project_button, 130)):
         rx -= width
         put(btn, x=rx, y=8, w=width, h=28)
         rx -= btn_gap
@@ -420,6 +482,55 @@ def confirm_discard(action):
     state._pending_discard = None
     return True
 
+def get_project_entities():
+    editor_roots = (state.background, state.camera, state.viewport,
+                    state.header, state.hierarchy, state.inspector,
+                    state.code_panel, state.status, state.zoom_label, *state.extra_panels)
+    def is_editor_entity(e):
+        return e is state.app or any(e is r or r in e.ancestors for r in editor_roots)
+    return [e for e in state.runtime.entities if not is_editor_entity(e)]
+
+
+def get_editor_layout():
+    sel = state.app.relations.get('selection')
+    return {
+        "left_column_w": state.app.components.get("left_column_w", 370),
+        "hierarchy": {
+            "panel_h": state.hierarchy.components.get("panel_h", 240),
+            "panel_w": state.hierarchy.components.get("panel_w"),
+            "dock": state.hierarchy.components.get("dock", "left_top"),
+            "expanded": [str(eid) for eid in state.hierarchy.components.get("expanded", set()) if isinstance(eid, UUID)],
+        },
+        "inspector": {
+            "panel_h": state.inspector.components.get("panel_h"),
+            "panel_w": state.inspector.components.get("panel_w"),
+            "dock": state.inspector.components.get("dock", "left_bottom"),
+        },
+        "code_panel": {
+            "split_y": state.code_panel.components.get("split_y"),
+            "panel_w": state.code_panel.components.get("panel_w"),
+            "panel_h": state.code_panel.components.get("panel_h"),
+            "dock": state.code_panel.components.get("dock", "right_bottom"),
+        },
+        "camera": {
+            "x": state.camera.x,
+            "y": state.camera.y,
+            "zoom": state.camera.zoom,
+        },
+        "selection": str(sel.id) if sel is not None and sel.alive else None,
+    }
+
+
+def save_editor_project():
+    entities_to_save = get_project_entities()
+    save_project(state.project, entities=entities_to_save, layout=get_editor_layout())
+
+
+def save_project_action():
+    save_editor_project()
+    message("Saved project state and editor layout")
+
+
 def save():
     path = source_path()
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -437,6 +548,7 @@ def save():
                 if updated.definition is not definition or not updated.running:
                     raise RuntimeError(f"{name}: {(updated.errors[-1].message if updated.errors else 'reload failed')}")
                 count += 1
+    save_editor_project()
     message(f'Saved {path.name}; reloaded {count} attachment(s)')
 
 def attach():
@@ -451,6 +563,7 @@ def attach():
         raise RuntimeError(instance.errors[-1].message)
     state.code.system_name = path.stem
     state.code.relations['owner'] = selected()
+    save_editor_project()
     message(f"Attached {path.stem} to {selected().components.get('name', selected().id)}")
 
 def inspect_system():
@@ -592,6 +705,7 @@ def bind_actions():
     state.viewport.on_scroll = viewport_scroll
     for control, action in ((state.new_button, new_source), (state.open_button, open_path),
                             (state.save_button, save), (state.attach_button, attach),
+                            (state.save_project_button, save_project_action),
                             (state.panel_button, open_panel), (state.system_panel_button, inspect_system),
                             (state.detach_button, detach_system), (state.add_button, add_component)):
         control.action = action
