@@ -1,8 +1,8 @@
 # LittleBigEngine - Design Overview
 
 LittleBigEngine aims to make complex behavior emerge from a small set of generic
-primitives. This describes the intended design; the current release contains the
-package and launcher only.
+primitives. The entity and script runtime is implemented; rendering and the
+self-hosted editor remain under development.
 
 ## Entities and data
 
