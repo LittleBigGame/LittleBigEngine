@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "littlebigengine"
+version = "0.1.0.dev0"
+description = "LittleBigEngine: a composable hierarchical ECS and self-hosted editor"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [{name = "LittleBigGame", email = "littlebiggame@proton.me"}]
+dependencies = []
+
+[project.scripts]
+lbe = "lbe.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
