@@ -229,9 +229,9 @@ class UI:
         rows = max(1, int((control.h-12)//line_height))
         columns = max(1, int((control.w-64)//pitch))
         lines = buffer.text.split("\n")
-        buffer.scroll = max(0, min(buffer.scroll, max(0, len(lines)-1)))
+        buffer.scroll = max(0, min(buffer.scroll, max(0, len(lines)-rows)))
         max_col = max((len(l) for l in lines), default=0)
-        buffer.horizontal = max(0, min(buffer.horizontal, max_col))
+        buffer.horizontal = max(0, min(buffer.horizontal, max(0, max_col-columns)))
         if self.focused is control:
             buffer.reveal(rows, columns)
         children = {child.components.get("part"): child for child in control.children}
