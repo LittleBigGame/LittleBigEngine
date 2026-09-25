@@ -46,6 +46,7 @@ def initialize():
     state.hierarchy_rows = []
     state.component_rows = []
     state.system_rows = []
+    state.child_rows = []
     state.extra_panels = []
     state._saved_source = None
     state._pending_discard = None
@@ -87,6 +88,20 @@ def initialize():
     state.parent_label = state.ui.create(state.inspector, 'ParentLabel', 'label', text='Parent', ink=MUTED)
     state.relations_label = state.ui.create(state.inspector, 'RelationsLabel', 'label', text='Link', ink=MUTED)
     state.code_info = state.ui.create(state.code_panel, 'SourceInfo', 'label', text='', ink=MUTED)
+    if (project / 'code_editor.py').exists():
+        if 'code_editor' not in state.code_panel.systems:
+            state.code_panel.systems.attach('code_editor', assets.system(project / 'code_editor.py'))
+        if 'code_editor' not in state.code.systems:
+            state.code.systems.attach('code_editor', assets.system(project / 'code_editor.py'))
+    if (project / 'text_area.py').exists():
+        if 'text_area' in state.code.systems:
+            state.code.systems.reload('text_area', assets.system(project / 'text_area.py'))
+        else:
+            state.code.systems.attach('text_area', assets.system(project / 'text_area.py'))
+    if (project / 'hierarchy.py').exists() and 'hierarchy' not in state.hierarchy.systems:
+        state.hierarchy.systems.attach('hierarchy', assets.system(project / 'hierarchy.py'))
+    if (project / 'inspector.py').exists() and 'inspector' not in state.inspector.systems:
+        state.inspector.systems.attach('inspector', assets.system(project / 'inspector.py'))
     open_system(state.game, "render")
 
 
@@ -107,6 +122,8 @@ def select(entity):
     state.inspector.scroll = 0
     if 'focus' in state.app.relations:
         del state.app.relations['focus']
+    for ancestor in entity.ancestors:
+        state.hierarchy.expanded.add(ancestor.id)
 
 def layout():
     w, h = (state.window.width, state.window.height)
@@ -278,10 +295,29 @@ def inspector_sync():
         put(button, visible=index < len(systems))
         if index < len(systems):
             name, instance = systems[index]
-            put(button, x=state.inspector.x + 12 + index * 108, y=state.inspector.y + state.inspector.h - 32, w=102, h=24, text=name + (' !' if instance.errors else ''))
+            put(button, x=state.inspector.x + 12 + (index % 3) * 108,
+                y=state.inspector.y + state.inspector.h - 32 - (index // 3) * 26,
+                w=102, h=24, text=name + (' !' if instance.errors else ''))
             if button.components.get('system_key') != (entity.id, name):
                 button.system_key = (entity.id, name)
                 button.action = lambda e=entity, n=name: open_system(e, n)
+    children = tuple(entity.children)
+    while len(state.child_rows) < len(children):
+        index = len(state.child_rows)
+        button = state.ui.button(state.inspector, f'Child{index}', '', lambda: None)
+        state.child_rows.append(button)
+    for index, button in enumerate(state.child_rows):
+        shown = index < len(children)
+        put(button, visible=shown)
+        if shown:
+            child = children[index]
+            c_name = str(child.components.get('name', str(child.id)[:8]))
+            put(button, x=state.inspector.x + 12 + (index % 3) * 108,
+                y=state.inspector.y + state.inspector.h - 64 - (index // 3) * 24,
+                w=102, h=22, text=c_name)
+            if button.components.get('child_id') != child.id:
+                button.child_id = child.id
+                button.action = lambda c=child: select(c)
     for owner in state.runtime.entities:
         for name, instance in owner.systems.items():
             if instance.errors:

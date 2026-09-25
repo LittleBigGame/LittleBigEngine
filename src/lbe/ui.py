@@ -299,7 +299,11 @@ class UI:
         values.setdefault("color", BG)
         values.setdefault("pitch", self.pitch)
         values.setdefault("line_height", self.line_height)
-        return self.create(parent, name, "multiline", **values)
+        control = self.create(parent, name, "multiline", **values)
+        bundled = Path(__file__).parent / "scripts" / "text_area.py"
+        if bundled.exists() and "text_area" not in control.systems:
+            control.systems.attach("text_area", self.runtime.assets.system(bundled))
+        return control
 
     def set_text(self, field, text):
         if self.focused is not field and field.buffer.text != text:
