@@ -49,6 +49,9 @@ The source editor supports multiline typing, cursor movement, mouse selection,
 Shift selection, Home/End, page and word navigation, indentation, scrolling,
 Ctrl+A/C/X/V, Ctrl+Z and Ctrl+Shift+Z. Ctrl+S saves. Repeating New or Open after an
 unsaved-change warning discards the current edits; save first to retain them.
+F5 (or the Run / Pause button in the header) toggles the game between running and paused,
+pausing game entity updates while viewport rendering and the editor remain fully active.
+Typing `.` (period) in the editor or text fields operates solely as text input and never runs the game.
 
 Syntax errors leave existing attachments running and appear in the status bar.
 A game script's runtime error stops that attachment while the editor continues.

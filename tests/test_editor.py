@@ -716,4 +716,63 @@ class EditorTests(unittest.TestCase):
         self.assertIn("entity.tags", code.buffer.text)
         self.assertFalse(ac_state.get("active"))
 
+    def test_f5_toggles_game_run_pause_and_period_does_not_run_game(self):
+        # 1. Verify initial running state and attach a movement system
+        moving, still = self.editor.game.children
+        moving.vx, moving.vy = 2.0, 0.0
+        self.click(self.editor.new_button)
+        self.type(self.editor.path_field, "mover.py")
+        self.type(self.editor.code, 'def update(dt):\n    for child in query("x", "y", "vx", "vy"):\n        child.x += child.vx * dt\n')
+        self.click(self.editor.save_button)
+        self.select(self.editor.game)
+        self.click(self.editor.attach_button)
+
+        # Initial state: running, moving entity advances
+        pos_before = moving.x
+        self.runtime.step(0.5)
+        self.assertEqual(moving.x, pos_before + 1.0)
+        self.assertFalse(self.editor.game.components.get("paused", False))
+        self.assertEqual(self.editor.run_button.text, "Pause (F5)")
+
+        # 2. Press F5: pauses the game
+        self.send(("key", "F5", False, False))
+        self.runtime.step(0)
+        self.assertTrue(self.editor.game.components.get("paused"))
+        self.assertEqual(self.editor.run_button.text, "Run (F5)")
+        self.assertIn("Game paused", self.editor.app.status)
+
+        # Stepping when paused does NOT advance game entities
+        pos_paused = moving.x
+        self.runtime.step(0.5)
+        self.assertEqual(moving.x, pos_paused)
+
+        # 3. Type '.' in the code editor: must insert '.' and MUST NOT unpause/run the game
+        self.click(self.editor.code)
+        text_before = self.editor.code.buffer.text
+        self.send(("key", "PERIOD", False, False), ("text", "."))
+        self.runtime.step(0)
+        # Still paused!
+        self.assertTrue(self.editor.game.components.get("paused"))
+        self.assertEqual(self.editor.code.buffer.text, text_before + ".")
+        # Position did not advance
+        self.runtime.step(0.5)
+        self.assertEqual(moving.x, pos_paused)
+
+        # 4. Press F5 again while focused in the editor: resumes/runs the game
+        self.send(("key", "F5", False, False))
+        self.runtime.step(0)
+        self.assertFalse(self.editor.game.components.get("paused"))
+        self.assertEqual(self.editor.run_button.text, "Pause (F5)")
+        self.assertIn("Game running", self.editor.app.status)
+
+        # Position now advances again
+        self.runtime.step(0.5)
+        self.assertEqual(moving.x, pos_paused + 1.0)
+
+        # 5. Clicking the header Run/Pause button also toggles state
+        self.click(self.editor.run_button)
+        self.runtime.step(0)
+        self.assertTrue(self.editor.game.components.get("paused"))
+        self.assertEqual(self.editor.run_button.text, "Run (F5)")
+
 

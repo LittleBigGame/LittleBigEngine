@@ -128,6 +128,7 @@ def initialize():
     state.panel_button = state.ui.button(state.header, 'OpenPanel', 'Inspect in panel', open_panel)
     state.system_panel_button = state.ui.button(state.header, 'InspectSystem', 'Inspect system', inspect_system)
     state.detach_button = state.ui.button(state.header, 'DetachSystem', 'Detach system', detach_system)
+    state.run_button = state.ui.button(state.header, 'ToggleRun', 'Pause (F5)', toggle_game_running)
     state.zoom_label = state.ui.create(state.app, 'ViewportCaption', 'label', text='WORLD', ink=MUTED)
     state.selection_label = state.ui.create(state.inspector, 'Selection', 'label', text='')
     state.identity_label = state.ui.create(state.inspector, 'Identity', 'label', text='', ink=MUTED)
@@ -197,8 +198,11 @@ def layout():
     # Header action buttons: aligned along right edge with margins
     btn_gap = 10
     rx = w - 16
+    is_paused = bool(state.game.components.get("paused", False))
+    put(state.run_button, text='Run (F5)' if is_paused else 'Pause (F5)')
     for btn, width in ((state.panel_button, 174), (state.system_panel_button, 150),
-                       (state.detach_button, 150), (state.save_project_button, 130)):
+                       (state.detach_button, 150), (state.save_project_button, 130),
+                       (state.run_button, 110)):
         rx -= width
         put(btn, x=rx, y=8, w=width, h=28)
         rx -= btn_gap
@@ -688,9 +692,19 @@ def viewport_scroll(control, event):
     state.camera.zoom = new_zoom
 
 
+def toggle_game_running():
+    is_paused = bool(state.game.components.get("paused", False))
+    state.game.components["paused"] = not is_paused
+    status = "Game paused (F5 to run)" if not is_paused else "Game running (F5 to pause)"
+    message(status)
+
+
 def keyboard(event):
     if event[1] == "S" and event[2]:
         save()
+        return True
+    if event[1] == "F5":
+        toggle_game_running()
         return True
     return False
 
@@ -707,7 +721,8 @@ def bind_actions():
                             (state.save_button, save), (state.attach_button, attach),
                             (state.save_project_button, save_project_action),
                             (state.panel_button, open_panel), (state.system_panel_button, inspect_system),
-                            (state.detach_button, detach_system), (state.add_button, add_component)):
+                            (state.detach_button, detach_system), (state.add_button, add_component),
+                            (state.run_button, toggle_game_running)):
         control.action = action
     for control, action in ((state.path_field, open_path), (state.tags_field, commit_tags),
                             (state.parent_field, commit_parent), (state.relation_field, commit_relation)):
@@ -736,7 +751,8 @@ def update(dt):
     panels_sync()
     row, column = state.code.buffer.position
     diag = state.code.components.get("diagnostic")
+    run_status = "paused" if state.game.components.get("paused") else "running"
     if diag:
         put(state.code_info, text=f"SyntaxError Ln {diag['line']}, Col {diag['column']}: {diag['message']}", ink=(248, 81, 73, 255))
     else:
-        put(state.code_info, text=f"Ln {row+1}, Col {column+1} | Attach target: {selected().components.get('name', selected().id)} | Ctrl+S save", ink=MUTED)
+        put(state.code_info, text=f"Ln {row+1}, Col {column+1} | Attach target: {selected().components.get('name', selected().id)} | Ctrl+S save | F5 {run_status}", ink=MUTED)
