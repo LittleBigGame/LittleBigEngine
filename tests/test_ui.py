@@ -6,7 +6,7 @@ import unittest
 from lbe import Runtime
 from lbe.desktop import Input
 from lbe.project import load_project, template_path
-from lbe.ui import UI, stack
+from lbe.ui import UI, stack, row, column, dock, apply_layout, Layout, parse_box, content_rect
 from test_scene import RecordingGraphics
 
 
@@ -72,6 +72,63 @@ class UITests(unittest.TestCase):
         b = runtime.create(parent=parent, w=50, h=60)
         stack(parent, (a, b), padding=5, gap=3)
         self.assertEqual((a.x, a.y, b.x, b.y), (15, 25, 15, 68))
+
+    def test_layout_box_and_content_rect(self):
+        self.assertEqual(parse_box(10), (10, 10, 10, 10))
+        self.assertEqual(parse_box((5, 12)), (5, 12, 5, 12))
+        self.assertEqual(parse_box((1, 2, 3, 4)), (1, 2, 3, 4))
+        self.assertEqual(parse_box(None, default=8), (8, 8, 8, 8))
+
+        runtime = Runtime()
+        e = runtime.create(x=100, y=50, w=200, h=100, padding=(5, 10, 15, 20))
+        self.assertEqual(content_rect(e), (120, 55, 170, 80))
+
+    def test_stack_with_margins_padding_and_flex(self):
+        runtime = Runtime()
+        parent = runtime.create(x=0, y=0, w=300, h=400, padding=10, gap=5)
+        c1 = runtime.create(parent=parent, h=50, margin=(5, 10, 5, 10))
+        c2 = runtime.create(parent=parent, flex=1, margin=(0, 10, 0, 10))
+        stack(parent, (c1, c2), axis="y", align="stretch")
+
+        self.assertEqual(c1.y, 15)
+        self.assertEqual(c1.x, 20)
+        self.assertEqual(c1.w, 260)
+        self.assertEqual(c2.h, 315)
+        self.assertEqual(c2.y, 75)
+        self.assertEqual(c2.w, 260)
+
+    def test_dock_layout_and_reflow(self):
+        runtime = Runtime()
+        root = runtime.create(x=0, y=0, w=800, h=600, padding=10)
+        header = runtime.create(parent=root, dock="top", h=50, margin=0)
+        footer = runtime.create(parent=root, dock="bottom", h=40, margin=(5, 0, 5, 0))
+        sidebar = runtime.create(parent=root, dock="left", w=200, margin=0)
+        content = runtime.create(parent=root, dock="fill", margin=0)
+        floating = runtime.create(parent=root, dock="float", x=350, y=250, w=100, h=100)
+
+        dock(root, (header, footer, sidebar, content, floating))
+
+        self.assertEqual((header.x, header.y, header.w, header.h), (10, 10, 780, 50))
+        self.assertEqual((footer.x, footer.y, footer.w, footer.h), (10, 545, 780, 40))
+        self.assertEqual((sidebar.x, sidebar.y, sidebar.w, sidebar.h), (10, 60, 200, 480))
+        self.assertEqual((content.x, content.y, content.w, content.h), (210, 60, 580, 480))
+        self.assertEqual((floating.x, floating.y, floating.w, floating.h), (350, 250, 100, 100))
+
+        root.w, root.h = 1000, 800
+        dock(root, (header, footer, sidebar, content, floating))
+        self.assertEqual((header.x, header.y, header.w, header.h), (10, 10, 980, 50))
+        self.assertEqual((content.x, content.y, content.w, content.h), (210, 60, 780, 680))
+
+    def test_apply_layout_and_layout_system(self):
+        runtime = Runtime()
+        container = runtime.create(x=0, y=0, w=400, h=300, layout="dock", padding=5)
+        top_bar = runtime.create(parent=container, dock="top", h=30)
+        main_area = runtime.create(parent=container, dock="fill")
+
+        sys = Layout(container)
+        sys.update(0)
+        self.assertEqual((top_bar.x, top_bar.y, top_bar.w, top_bar.h), (5, 5, 390, 30))
+        self.assertEqual((main_area.x, main_area.y, main_area.w, main_area.h), (5, 35, 390, 260))
 
     def test_existing_project_is_not_populated_with_template_files(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -5,7 +5,9 @@ from pathlib import Path
 from types import SimpleNamespace
 import tempfile
 
-from lbe.ui import UI, put, contains, BG, PANEL, FIELD, ACCENT, INK, MUTED, PITCH, LINE
+from lbe.ui import (UI, put, contains, parse_box, content_rect, stack, dock,
+                    row, column, apply_layout, Layout, BG, PANEL, FIELD, ACCENT,
+                    INK, MUTED, PITCH, LINE)
 from lbe.text import TextBuffer
 from lbe.space import screen_to_world
 
@@ -51,11 +53,12 @@ def initialize():
     initial_sel = state.game.children[0] if state.game.children else state.game
     state.app.relations['selection'] = initial_sel
     state.game.relations['selection'] = initial_sel
-    state.header = state.ui.create(state.app, 'Header', 'panel', text='LBE  /  LittleBigEngine', color=BG)
-    state.hierarchy = state.ui.create(state.app, 'HierarchyPanel', 'panel', text='HIERARCHY', scroll=0, expanded={state.app.id, state.game.id})
-    state.inspector = state.ui.create(state.app, 'InspectorPanel', 'panel', text='INSPECTOR', scroll=0)
-    state.code_panel = state.ui.create(state.app, 'CodeEditorPanel', 'panel', text='SYSTEM SOURCE')
-    state.status = state.ui.create(state.app, 'StatusBar', 'label', text='')
+    state.app.components.setdefault('left_column_w', 370)
+    state.header = state.ui.create(state.app, 'Header', 'panel', text='LBE  /  LittleBigEngine', color=BG, dock='top', h=44, padding=(8, 16, 8, 16))
+    state.hierarchy = state.ui.create(state.app, 'HierarchyPanel', 'panel', text='HIERARCHY', scroll=0, expanded={state.app.id, state.game.id}, dock='left_top', panel_h=240, margin=(8, 8, 4, 8), resizable=True)
+    state.inspector = state.ui.create(state.app, 'InspectorPanel', 'panel', text='INSPECTOR', scroll=0, dock='left_bottom', margin=(4, 8, 6, 8), resizable=True)
+    state.code_panel = state.ui.create(state.app, 'CodeEditorPanel', 'panel', text='SYSTEM SOURCE', dock='right_bottom', padding=(8, 12, 8, 12), resizable=True)
+    state.status = state.ui.create(state.app, 'StatusBar', 'label', text='', dock='bottom', h=20, margin=(0, 16, 5, 16))
     state.code = state.ui.multiline(state.code_panel, 'TextArea')
     state.path_field = state.ui.field(state.code_panel, 'SourcePath', 'render.py', hint='system_name.py')
     state.path_field.on_commit = open_path
@@ -107,49 +110,109 @@ def select(entity):
 
 def layout():
     w, h = (state.window.width, state.window.height)
-    left = 370
-    split = max(330, int(h * 0.45))
-    put(state.header, x=0, y=0, w=w, h=44)
+    put(state.app, x=0, y=0, w=w, h=h)
     put(state.background, x=0, y=0, w=w, h=h)
-    put(state.panel_button, x=w - 190, y=8, w=174, h=28)
-    put(state.system_panel_button, x=w - 350, y=8, w=150, h=28)
-    put(state.detach_button, x=w - 510, y=8, w=150, h=28)
-    put(state.hierarchy, x=8, y=52, w=left - 16, h=240)
-    put(state.inspector, x=8, y=300, w=left - 16, h=h - 336)
-    put(state.viewport, x=left + 8, y=80, w=w - left - 24, h=split - 92)
-    put(state.zoom_label, x=left + 12, y=56, w=500, h=20, text=f'WORLD  /  {state.camera.zoom:.0f} px per metre  /  drag to pan  /  scroll to zoom')
-    put(state.code_panel, x=left + 8, y=split, w=w - left - 24, h=h - split - 36)
-    put(state.status, x=16, y=h - 25, w=w - 32, h=20, text=state.app.status)
+
+    # Header layout (docked top with padding)
+    header_h = state.header.components.get("h", 44)
+    put(state.header, x=0, y=0, w=w, h=header_h)
+    # Header action buttons: aligned along right edge with margins
+    btn_gap = 10
+    rx = w - 16
+    for btn, width in ((state.panel_button, 174), (state.system_panel_button, 150), (state.detach_button, 150)):
+        rx -= width
+        put(btn, x=rx, y=8, w=width, h=28)
+        rx -= btn_gap
+
+    # Status bar layout (docked bottom with margin)
+    status_m = parse_box(state.status.components.get("margin", (0, 16, 5, 16)))
+    status_h = state.status.components.get("h", 20)
+    status_y = h - status_m[2] - status_h
+    put(state.status, x=status_m[3], y=status_y, w=max(0, w - status_m[3] - status_m[1]), h=status_h, text=state.app.status)
+
+    # Workspace columns between header and status
+    left_col_w = state.app.components.get("left_column_w", 370)
+    top_y = state.header.y + state.header.h
+
+    # Hierarchy panel (left top, movable/resizable)
+    hm = parse_box(state.hierarchy.components.get("margin", (8, 8, 4, 8)))
+    if state.hierarchy.components.get("dock") == "float":
+        pass  # Preserves custom/user-dragged x, y, w, h
+    else:
+        hw = state.hierarchy.components.get("panel_w", left_col_w - hm[3] - hm[1])
+        hh = state.hierarchy.components.get("panel_h", 240)
+        put(state.hierarchy, x=hm[3], y=top_y + hm[0], w=hw, h=hh)
+
+    # Inspector panel (left bottom, fills remaining height below hierarchy or custom float)
+    if state.inspector.components.get("dock") == "float":
+        pass
+    else:
+        im = parse_box(state.inspector.components.get("margin", (4, 8, 6, 8)))
+        iw = state.inspector.components.get("panel_w", left_col_w - im[3] - im[1])
+        iy = state.hierarchy.y + state.hierarchy.h + hm[2] + im[0] if state.hierarchy.components.get("dock") != "float" else top_y + im[0]
+        ih = max(100, status_y - iy - im[2] - 5)
+        put(state.inspector, x=im[3], y=iy, w=iw, h=ih)
+
+    # Right column (Viewport and Code editor panels)
+    right_x = left_col_w + 8
+    right_w = max(100, w - left_col_w - 24)
+    split_y = state.code_panel.components.get("split_y", max(330, int(h * 0.45)))
+
+    # Viewport panel (right top)
+    if state.viewport.components.get("dock") == "float":
+        pass
+    else:
+        put(state.zoom_label, x=right_x + 4, y=top_y + 12, w=500, h=20,
+            text=f'WORLD  /  {state.camera.zoom:.0f} px per metre  /  drag to pan  /  scroll to zoom')
+        put(state.viewport, x=right_x, y=top_y + 36, w=right_w, h=max(50, split_y - top_y - 48))
+
+    # Code editor panel (right bottom)
+    if state.code_panel.components.get("dock") == "float":
+        pass
+    else:
+        put(state.code_panel, x=right_x, y=split_y, w=right_w, h=max(100, status_y - split_y - 11))
+
+    # Internal code panel layout:
     cp = state.code_panel
-    put(state.path_field, x=cp.x + 12, y=cp.y + 32, w=max(130, cp.w - 380), h=28)
-    for button, offset, width in ((state.new_button, -360, 52), (state.open_button, -302, 52), (state.save_button, -244, 126), (state.attach_button, -112, 100)):
-        put(button, x=cp.x + cp.w + offset, y=cp.y + 32, w=width, h=28)
-    put(state.code, x=cp.x + 12, y=cp.y + 68, w=cp.w - 24, h=cp.h - 100)
-    put(state.code_info, x=cp.x + 12, y=cp.y + cp.h - 25, w=cp.w - 24, h=20)
+    c_pad = parse_box(cp.components.get("padding", (8, 12, 8, 12)))
+    tb_y = cp.y + 32
+    put(state.path_field, x=cp.x + c_pad[3], y=tb_y, w=max(130, cp.w - 380), h=28)
+    for button, offset, width in ((state.new_button, -360, 52), (state.open_button, -302, 52),
+                                  (state.save_button, -244, 126), (state.attach_button, -112, 100)):
+        put(button, x=cp.x + cp.w + offset, y=tb_y, w=width, h=28)
+    put(state.code, x=cp.x + c_pad[3], y=cp.y + 68, w=max(0, cp.w - c_pad[3] - c_pad[1]), h=max(0, cp.h - 100))
+    put(state.code_info, x=cp.x + c_pad[3], y=cp.y + cp.h - 25, w=max(0, cp.w - c_pad[3] - c_pad[1]), h=20)
+
+    # Internal inspector layout:
     ip = state.inspector
-    put(state.selection_label, x=ip.x + 12, y=ip.y + 32, w=ip.w - 24, h=20, text=selected().components.get('name', str(selected().id)))
-    put(state.identity_label, x=ip.x + 12, y=ip.y + 54, w=ip.w - 24, h=20, text=str(selected().id))
+    i_pad = parse_box(ip.components.get("padding", (8, 12, 8, 12)))
+    put(state.selection_label, x=ip.x + i_pad[3], y=ip.y + 32, w=max(0, ip.w - i_pad[3] - i_pad[1]), h=20,
+        text=selected().components.get('name', str(selected().id)))
+    put(state.identity_label, x=ip.x + i_pad[3], y=ip.y + 54, w=max(0, ip.w - i_pad[3] - i_pad[1]), h=20,
+        text=str(selected().id))
     bottom = ip.y + ip.h
     put(state.add_name, x=ip.x + 12, y=bottom - 206, w=120, h=26)
-    put(state.add_value, x=ip.x + 138, y=bottom - 206, w=ip.w - 186, h=26)
+    put(state.add_value, x=ip.x + 138, y=bottom - 206, w=max(30, ip.w - 186), h=26)
     put(state.add_button, x=ip.x + ip.w - 42, y=bottom - 206, w=30, h=26)
-    put(state.tags_field, x=ip.x + 76, y=bottom - 172, w=ip.w - 88, h=26)
-    put(state.parent_field, x=ip.x + 76, y=bottom - 140, w=ip.w - 88, h=26)
-    put(state.relation_field, x=ip.x + 76, y=bottom - 108, w=ip.w - 88, h=26)
-    for label, field in ((state.tags_label, state.tags_field), (state.parent_label, state.parent_field), (state.relations_label, state.relation_field)):
+    put(state.tags_field, x=ip.x + 76, y=bottom - 172, w=max(30, ip.w - 88), h=26)
+    put(state.parent_field, x=ip.x + 76, y=bottom - 140, w=max(30, ip.w - 88), h=26)
+    put(state.relation_field, x=ip.x + 76, y=bottom - 108, w=max(30, ip.w - 88), h=26)
+    for label, field in ((state.tags_label, state.tags_field), (state.parent_label, state.parent_field),
+                         (state.relations_label, state.relation_field)):
         put(label, x=ip.x + 12, y=field.y + 4, w=64, h=22)
-    put(state.metadata, x=ip.x + 12, y=bottom - 78, w=ip.w - 24, h=18, text=f'{len(selected().children)} children | {len(selected().relations)} relations')
+    put(state.metadata, x=ip.x + 12, y=bottom - 78, w=max(0, ip.w - 24), h=18,
+        text=f'{len(selected().children)} children | {len(selected().relations)} relations')
     put(state.system_label, x=ip.x + 12, y=bottom - 55, w=90, h=18)
 
 def hierarchy_sync():
     visible = []
-    stack = [(e, 0) for e in reversed(state.runtime.entities) if e.parent is None]
+    traversal_stack = [(e, 0) for e in reversed(state.runtime.entities) if e.parent is None]
     expanded = state.hierarchy.expanded
-    while stack and len(visible) < 10000:
-        entity, depth = stack.pop()
+    while traversal_stack and len(visible) < 10000:
+        entity, depth = traversal_stack.pop()
         visible.append((entity, depth))
         if entity.id in expanded:
-            stack.extend(((child, depth + 1) for child in reversed(entity.children)))
+            traversal_stack.extend(((child, depth + 1) for child in reversed(entity.children)))
     capacity = int((state.hierarchy.h - 34) // 22)
     put(state.hierarchy, scroll=max(0, min(state.hierarchy.scroll, max(0, len(visible) - capacity))))
     while len(state.hierarchy_rows) < capacity:
@@ -375,7 +438,10 @@ def open_panel(system_name=None, target=None, component=None):
     target = target or selected()
     n = len(state.extra_panels)
     view_type = 'system' if system_name else 'component' if component else 'entity'
-    panel = state.ui.create(state.app, f'InspectionPanel{n}', 'panel', text=view_type.upper() + ' INSPECTION', x=state.viewport.x + 20 + n * 20, y=state.viewport.y + 20 + n * 20, w=440, h=270, layer=4, modal=True, view_type=view_type, system_name=system_name, component=component)
+    panel = state.ui.create(state.app, f'InspectionPanel{n}', 'panel', text=view_type.upper() + ' INSPECTION',
+                            x=state.viewport.x + 20 + n * 20, y=state.viewport.y + 20 + n * 20, w=440, h=270,
+                            layer=4, modal=True, view_type=view_type, system_name=system_name, component=component,
+                            dock='float', movable=True, resizable=True)
     panel.relations['target'] = target
     close = state.ui.button(panel, f'ClosePanel{n}', 'X', panel.destroy)
     put(close, x=panel.x + 400, y=panel.y + 5, w=30, h=24, layer=6)
@@ -386,6 +452,13 @@ def open_panel(system_name=None, target=None, component=None):
 def panels_sync():
     state.extra_panels[:] = [panel for panel in state.extra_panels if panel.alive]
     for panel in state.extra_panels:
+        close = next((c for c in panel.children if 'button' in c.tags), None)
+        if close:
+            put(close, x=panel.x + max(10, panel.w - 40), y=panel.y + 5, w=30, h=24)
+        for child in panel.children:
+            if 'line_index' in child.components:
+                idx = child.components['line_index']
+                put(child, x=panel.x + 12, y=panel.y + 35 + idx * 22, w=max(0, panel.w - 24), h=20)
         target = panel.relations.get('target')
         if target is None:
             lines = ['Target no longer exists']
