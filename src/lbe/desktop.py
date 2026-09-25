@@ -52,6 +52,10 @@ class Graphics:
     def rect(self, x, y, w, h, color=(255, 255, 255), *, key=None, layer=0):
         import pyglet
 
+        if w < 0:
+            x, w = x+w, -w
+        if h < 0:
+            y, h = y+h, -h
         if self._view:
             camera, viewport = self._view
             x, y = world_to_screen(camera, viewport, x, y + h)
@@ -155,8 +159,31 @@ def launch(build, *, headless=False, frames=None, screenshot=None):
 
     @window.event
     def on_key_press(symbol, modifiers):
+        if symbol in (key.LEFT, key.RIGHT, key.UP, key.DOWN, key.HOME, key.END,
+                      key.PAGEUP, key.PAGEDOWN, key.BACKSPACE, key.DELETE):
+            return pyglet.event.EVENT_HANDLED
         input_state.pending.append(("key", key.symbol_string(symbol),
                                     bool(modifiers & key.MOD_CTRL), bool(modifiers & key.MOD_SHIFT)))
+        return pyglet.event.EVENT_HANDLED
+
+    motions = {
+        key.MOTION_LEFT: "LEFT", key.MOTION_RIGHT: "RIGHT", key.MOTION_UP: "UP", key.MOTION_DOWN: "DOWN",
+        key.MOTION_BEGINNING_OF_LINE: "HOME", key.MOTION_END_OF_LINE: "END",
+        key.MOTION_BEGINNING_OF_FILE: "FILE_HOME", key.MOTION_END_OF_FILE: "FILE_END",
+        key.MOTION_PREVIOUS_PAGE: "PAGEUP", key.MOTION_NEXT_PAGE: "PAGEDOWN",
+        key.MOTION_PREVIOUS_WORD: "WORD_LEFT", key.MOTION_NEXT_WORD: "WORD_RIGHT",
+        key.MOTION_BACKSPACE: "BACKSPACE", key.MOTION_DELETE: "DELETE",
+    }
+
+    @window.event
+    def on_text_motion(motion):
+        if motion in motions:
+            input_state.pending.append(("key", motions[motion], False, False))
+
+    @window.event
+    def on_text_motion_select(motion):
+        if motion in motions:
+            input_state.pending.append(("key", motions[motion], False, True))
 
     @window.event
     def on_close():
@@ -176,6 +203,9 @@ def launch(build, *, headless=False, frames=None, screenshot=None):
     try:
         pyglet.app.run(interval=1 / 60)
     finally:
+        space = runtime.services.get("space")
+        if space is not None:
+            space.close()
         if not closed:
             runtime.close()
             graphics.close()

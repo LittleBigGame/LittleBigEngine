@@ -9,6 +9,9 @@ def main() -> None:
     parser.add_argument("--headless", action="store_true", help="Use an offscreen graphics context")
     parser.add_argument("--frames", type=int, help="Close after this many rendered frames")
     parser.add_argument("--screenshot", help="Save the final frame as a PNG")
+    parser.add_argument("--project", help="Directory containing app.py and application scripts")
+    parser.add_argument("--demo", action="store_true", help="Show only the two-entity rendering demo")
+    parser.add_argument("--template", default="editor", help="Template used to initialize a new project (editor, demo, counter)")
     args = parser.parse_args()
     if args.check:
         from . import Runtime
@@ -24,8 +27,12 @@ def main() -> None:
     except ImportError:
         parser.error('Desktop support requires: python -m pip install -e ".[desktop]"')
     from .desktop import launch
-    from .scene import build_demo
-    launch(build_demo, headless=args.headless, frames=args.frames, screenshot=args.screenshot)
+    from .project import load_project, template_path
+    name = "demo" if args.demo else args.template
+    template = template_path(name)
+    directory = args.project or ("workspace" if name == "editor" else f"workspace-{name}")
+    build = lambda w, g, i: load_project(w, g, i, directory, template=template)
+    launch(build, headless=args.headless, frames=args.frames, screenshot=args.screenshot)
 
 
 if __name__ == "__main__":

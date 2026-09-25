@@ -1,8 +1,8 @@
 # LittleBigEngine - Design Overview
 
 LittleBigEngine aims to make complex behavior emerge from a small set of generic
-primitives. The entity/script runtime and desktop rendering adapter are implemented;
-the self-hosted editor remains under development.
+primitives. The entity/script runtime, desktop rendering adapter and initial
+entity-based editor are implemented.
 
 ## Entities and data
 
@@ -30,10 +30,21 @@ component values and remain implementation details.
 
 ## A self-hosted editor
 
-The editor is intended to use the same entities, components and systems as an
-application. Hierarchy views, inspectors and editing panels expose the structures
-from which they are built. New data and scripts can introduce behavior without
-adding domain-specific logic to the kernel.
+The editor uses the same entities, components and systems as an application.
+Hierarchy rows, inspector fields, source lines, selections, buttons and panels
+are entities. The editor is a bundled application template, loaded from the user's
+project directory. Its `app.py` owns selection, hierarchy views, inspection,
+source-file operations and system attachment decisions. Those policies are absent
+from the engine and generic UI layer.
+
+The public UI API supplies control creation, focus, input routing, text editing,
+stack layout and rendering. A separate ordinary `ui.py` attachment drives those
+facilities. The same facilities power the independent counter/notes template.
+There is no engine-side Editor class or editor runtime service.
+
+The text buffer is an independent editing data structure stored as a component;
+it does not use an external code editor. New data and scripts introduce behavior
+without adding domain-specific logic to the kernel.
 
 ## Platform boundary
 
@@ -45,3 +56,18 @@ coordinate changes. The core has no third-party runtime dependency.
 This choice provides a direct GPU path without committing the public engine API
 to a GUI framework. Windows graphics smoke tests use a hidden native window;
 Linux headless tests use EGL.
+
+## Dependency boundary
+
+```text
+Project app.py / render.py / ui.py
+              |
+      Public entity + UI APIs
+              |
+   Generic runtime and platform services
+```
+
+The project loader knows how to load script files; it does not construct scenes or
+editor panels. Templates initialize new projects without overwriting existing
+project files. Applications can omit the UI entirely or replace it with their own
+systems while retaining the entity/runtime APIs.
