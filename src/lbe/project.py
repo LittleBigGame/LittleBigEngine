@@ -236,7 +236,7 @@ def save_project(directory, *, entities=None, layout=None, filename="project.jso
         "layout": serialize_value(layout, project_dir=directory, on_unsupported=on_unsupported) if layout is not None else {},
     }
 
-    with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=directory, delete=False, suffix=".tmp") as f:
+    with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", newline="\n", dir=directory, delete=False, suffix=".tmp") as f:
         json.dump(data, f, indent=2)
         temp_path = Path(f.name)
     temp_path.replace(project_file)

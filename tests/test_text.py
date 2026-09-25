@@ -58,3 +58,29 @@ class TextTests(unittest.TestCase):
         buffer.move("FILE_END")
         buffer.move("WORD_LEFT")
         self.assertEqual(buffer.cursor, 8)
+
+    def test_crlf_normalization_and_cursor_alignment(self):
+        buffer = TextBuffer("first line\r\nsecond line\r\n")
+        self.assertEqual(buffer.text, "first line\nsecond line\n")
+        # Moving to end of first line
+        buffer.move("END")
+        self.assertEqual(buffer.position, (0, 10))
+        self.assertEqual(buffer.cursor, 10)
+        # Type character at end of line
+        buffer.insert("!")
+        self.assertEqual(buffer.text, "first line!\nsecond line\n")
+        self.assertEqual(buffer.position, (0, 11))
+        # Move down to second line end
+        buffer.move("DOWN")
+        buffer.move("END")
+        self.assertEqual(buffer.position, (1, 11))
+        self.assertEqual(buffer.cursor, 23)
+
+    def test_crlf_paste_and_assignment_normalization(self):
+        buffer = TextBuffer("alpha\nbeta")
+        buffer.cursor = buffer.anchor = 5
+        buffer.insert("\r\ngamma\r\n")
+        self.assertEqual(buffer.text, "alpha\ngamma\n\nbeta")
+        # Direct property assignment normalizes as well
+        buffer.text = "line1\r\nline2\rline3"
+        self.assertEqual(buffer.text, "line1\nline2\nline3")

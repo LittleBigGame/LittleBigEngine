@@ -375,7 +375,7 @@ class UI:
         buffer = control.buffer
         multiline = "multiline" in control.tags
         if kind == "text":
-            buffer.insert(event[1] if multiline else event[1].replace("\n", " "))
+            buffer.insert(event[1] if multiline else event[1].replace("\r\n", " ").replace("\r", " ").replace("\n", " "))
         elif kind == "key":
             key, ctrl, shift = event[1:]
             if ctrl and key == "A":
@@ -387,7 +387,7 @@ class UI:
                 buffer.insert("")
             elif ctrl and key == "V":
                 text = self.window.get_clipboard_text()
-                buffer.insert(text if multiline else text.replace("\n", " "))
+                buffer.insert(text if multiline else text.replace("\r\n", " ").replace("\r", " ").replace("\n", " "))
             elif ctrl and key == "Z":
                 buffer.undo(redo=shift)
             elif key in ("LEFT", "RIGHT", "UP", "DOWN", "HOME", "END", "FILE_HOME", "FILE_END", "PAGEUP", "PAGEDOWN", "WORD_LEFT", "WORD_RIGHT"):

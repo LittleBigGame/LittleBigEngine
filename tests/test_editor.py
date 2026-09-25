@@ -252,6 +252,31 @@ class EditorTests(unittest.TestCase):
         self.assertAlmostEqual(caret.x, code.x + 48 + (col - code.buffer.horizontal) * pitch, delta=0.01)
         self.assertAlmostEqual(caret.y, code.y + 6 + (row - code.buffer.scroll) * line_height, delta=0.01)
 
+    def test_source_editor_crlf_pasting_and_cursor_alignment(self):
+        code = self.editor.code
+        pitch = code.components.get("pitch", 8.0)
+        line_height = code.components.get("line_height", 20)
+        self.click(code)
+        # Select all and paste text containing CRLF
+        self.window.set_clipboard_text("hello world\r\nnext line\r\n")
+        self.send(("key", "A", True, False), ("key", "V", True, False))
+        self.assertEqual(code.buffer.text, "hello world\nnext line\n")
+
+        # Move to line 0 end (END key)
+        code.buffer.cursor = code.buffer.anchor = 0
+        code.components.touch("buffer")
+        self.runtime.step(0)
+        self.send(("key", "END", False, False))
+        self.assertEqual(code.buffer.position, (0, 11))
+        caret = next(c for c in code.children if c.components.get("part") == "cursor")
+        self.assertAlmostEqual(caret.x, code.x + 48 + 11 * pitch, delta=0.01)
+
+        # Type character at line end; typed character appears directly at previous cursor position
+        self.send(("text", "!"))
+        self.assertEqual(code.buffer.position, (0, 12))
+        self.assertEqual(code.buffer.text, "hello world!\nnext line\n")
+        self.assertAlmostEqual(caret.x, code.x + 48 + 12 * pitch, delta=0.01)
+
     def test_selection_visual_highlight_in_hierarchy_and_viewport(self):
         first, second = self.editor.game.children
 
