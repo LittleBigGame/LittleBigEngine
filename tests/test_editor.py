@@ -466,3 +466,83 @@ class EditorTests(unittest.TestCase):
         i_btn = next(b for b in ed.system_rows if b.visible and b.components.get("text") == "inspector")
         self.click(i_btn)
         self.assertEqual(ed.path_field.buffer.text, "inspector.py")
+
+    def test_project_persistence_and_movement_scene_recovery(self):
+        ed = self.editor
+        moving, still = ed.game.children
+        orig_game_id = ed.game.id
+        orig_moving_id = moving.id
+        orig_still_id = still.id
+        orig_moving_pos = (moving.x, moving.y)
+        orig_still_pos = (still.x, still.y)
+
+        # 1. Edit components on moving entity
+        self.select(moving)
+        for name, value in (("vx", "2.0"), ("vy", "-1.0")):
+            self.type(ed.add_name, name)
+            self.type(ed.add_value, value)
+            self.click(ed.add_button)
+        self.assertEqual((moving.vx, moving.vy), (2, -1))
+
+        # 2. Add relation with reference to another entity
+        moving.relations["partner"] = still
+
+        # 3. Author physics system and attach to Game
+        self.click(ed.new_button)
+        self.type(ed.path_field, "physics.py")
+        self.type(ed.code, 'def update(dt):\n    for child in query("x", "y", "vx", "vy"):\n        child.x += child.vx * dt\n        child.y += child.vy * dt\n')
+        self.click(ed.save_button)
+        self.select(ed.game)
+        self.click(ed.attach_button)
+        self.assertIn("physics", ed.game.systems)
+
+        # 4. Modify panel layout
+        ed.app.left_column_w = 420
+        ed.hierarchy.panel_h = 280
+        ed.code_panel.split_y = 390
+        ed.camera.x = 5.0
+        ed.camera.y = 10.0
+        ed.camera.zoom = 64.0
+
+        # 5. Save project state
+        self.click(ed.save_project_button)
+        project_json = Path(self.directory.name) / "project.json"
+        self.assertTrue(project_json.exists())
+
+        # 6. Close runtime
+        self.runtime.close()
+
+        # 7. Reopen project
+        runtime2 = load_project(self.window, self.graphics, self.input, self.directory.name, template=template_path("editor"))
+        self.addCleanup(runtime2.close)
+        ed2 = runtime2.entities[0].components["application_state"]
+        runtime2.step(0)
+
+        # 8. Verify recovered entities and UUID identity
+        game2 = ed2.game
+        self.assertEqual(game2.id, orig_game_id)
+        self.assertEqual(len(game2.children), 2)
+        moving2, still2 = game2.children
+        self.assertEqual(moving2.id, orig_moving_id)
+        self.assertEqual(still2.id, orig_still_id)
+        self.assertEqual((moving2.vx, moving2.vy), (2, -1))
+
+        # 9. Verify reference integrity
+        self.assertIn("partner", moving2.relations)
+        self.assertIs(moving2.relations["partner"], still2)
+
+        # 10. Verify system attachment is reconstructed and running
+        self.assertIn("physics", game2.systems)
+        self.assertTrue(game2.systems["physics"].running)
+
+        # 11. Verify movement execution
+        runtime2.step(0.5)
+        self.assertEqual((moving2.x, moving2.y), (orig_moving_pos[0] + 1.0, orig_moving_pos[1] - 0.5))
+        self.assertEqual((still2.x, still2.y), orig_still_pos)
+
+        # 12. Verify panel layout recovery
+        self.assertEqual(ed2.app.left_column_w, 420)
+        self.assertEqual(ed2.hierarchy.panel_h, 280)
+        self.assertEqual(ed2.code_panel.split_y, 390)
+        self.assertEqual((ed2.camera.x, ed2.camera.y, ed2.camera.zoom), (5.0, 10.0, 64.0))
+

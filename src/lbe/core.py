@@ -321,7 +321,7 @@ class Runtime:
             raise ValueError("Entity must belong to this runtime")
         entity._check()
 
-    def create(self, *, parent=None, tags=(), components=None, **values):
+    def create(self, *, identity=None, parent=None, tags=(), components=None, **values):
         if parent is not None:
             self._validate(parent)
             if parent._destroying:
@@ -333,7 +333,13 @@ class Runtime:
             raise ValueError("Component names must be nonempty strings")
         if any(not isinstance(t, str) or not t for t in tags):
             raise ValueError("Tags must be nonempty strings")
-        entity = Entity(self, uuid4())
+        if identity is not None:
+            identity = UUID(str(identity))
+            if identity in self._entities:
+                raise ValueError(f"Entity with id {identity} already exists")
+        else:
+            identity = uuid4()
+        entity = Entity(self, identity)
         entity._components._values.update(data)
         entity._tags._values.update(tags)
         object.__setattr__(entity, "_parent", parent)

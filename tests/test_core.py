@@ -145,3 +145,13 @@ class CoreTests(unittest.TestCase):
         for value in (-1, float("inf"), float("nan")):
             with self.assertRaises(ValueError):
                 self.runtime.step(value)
+
+    def test_create_with_explicit_identity(self):
+        from uuid import uuid4
+        custom_id = uuid4()
+        entity = self.runtime.create(identity=custom_id)
+        self.assertEqual(entity.id, custom_id)
+        self.assertIs(self.runtime.resolve(custom_id), entity)
+        with self.assertRaises(ValueError):
+            self.runtime.create(identity=custom_id)
+
