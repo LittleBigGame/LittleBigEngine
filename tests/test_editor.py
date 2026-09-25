@@ -316,3 +316,78 @@ class EditorTests(unittest.TestCase):
         self.click(code)
         self.send(("drag", code.x + 60, code.y + 20, 1, 0, 50, 50))
         self.assertEqual((cam.x, cam.y, cam.zoom), cam_state)
+
+    def test_editor_panel_layout_and_window_reflow(self):
+        ed = self.editor
+        self.assertEqual((ed.header.x, ed.header.y, ed.header.w, ed.header.h), (0, 0, 1440, 44))
+        self.assertEqual(ed.hierarchy.x, 8)
+        self.assertEqual(ed.hierarchy.w, 354)
+        self.assertEqual(ed.inspector.x, 8)
+        self.assertEqual(ed.inspector.w, 354)
+        self.assertEqual(ed.status.y, 875)
+
+        # Window resized to 1600x1000
+        self.window.width, self.window.height = 1600, 1000
+        self.runtime.step(0)
+
+        # Check reflow
+        self.assertEqual((ed.header.x, ed.header.y, ed.header.w, ed.header.h), (0, 0, 1600, 44))
+        self.assertEqual((ed.status.x, ed.status.y, ed.status.w, ed.status.h), (16, 975, 1568, 20))
+        self.assertEqual(ed.viewport.w, 1600 - 370 - 24)
+        self.assertEqual(ed.code_panel.w, 1600 - 370 - 24)
+
+        # Hit test in reflowed header button
+        self.assertEqual(ed.panel_button.x, 1600 - 190)
+        self.click(ed.panel_button)
+        self.assertEqual(len(ed.extra_panels), 1)
+
+    def test_editor_resizable_and_movable_panels(self):
+        ed = self.editor
+
+        # 1. Resize left column width from 370 to 420
+        ed.app.components["left_column_w"] = 420
+        self.runtime.step(0)
+        self.assertEqual(ed.hierarchy.w, 404)
+        self.assertEqual(ed.inspector.w, 404)
+        self.assertEqual(ed.viewport.x, 428)
+        self.assertEqual(ed.code_panel.x, 428)
+        self.assertEqual(ed.viewport.w, 1440 - 420 - 24)
+
+        # 2. Resize hierarchy panel height from 240 to 300
+        ed.hierarchy.panel_h = 300
+        self.runtime.step(0)
+        self.assertEqual(ed.hierarchy.h, 300)
+        self.assertEqual(ed.inspector.y, 52 + 300 + 4 + 4)
+
+        # 3. Resize split position between viewport and code panel
+        ed.code_panel.split_y = 500
+        self.runtime.step(0)
+        self.assertEqual(ed.code_panel.y, 500)
+        self.assertEqual(ed.viewport.h, 500 - 44 - 48)
+
+        # 4. Floating panel: dock="float" preserves custom moved coordinates
+        ed.hierarchy.dock = "float"
+        ed.hierarchy.x = 250
+        ed.hierarchy.y = 150
+        self.runtime.step(0)
+        self.assertEqual((ed.hierarchy.x, ed.hierarchy.y), (250, 150))
+
+        # 5. Inspection panels from open_panel are movable floating panels
+        self.click(ed.panel_button)
+        panel = ed.extra_panels[-1]
+        self.assertEqual(panel.dock, "float")
+        close_btn = next(c for c in panel.children if "button" in c.tags)
+        line0 = next(c for c in panel.children if c.components.get("line_index") == 0)
+
+        initial_close_x = close_btn.x
+        initial_line_x = line0.x
+        panel.x += 100
+        panel.y += 50
+        self.runtime.step(0)
+        self.assertEqual(close_btn.x, initial_close_x + 100)
+        self.assertEqual(line0.x, initial_line_x + 100)
+
+        # 6. Verify input hit testing after layout changes
+        self.click(close_btn)
+        self.runtime.step(0)
+        self.assertFalse(panel.alive)

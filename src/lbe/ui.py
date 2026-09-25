@@ -25,15 +25,216 @@ def contains(entity, x, y):
     return entity.x <= x < entity.x+entity.w and entity.y <= y < entity.y+entity.h
 
 
-def stack(parent, children, *, axis="y", gap=8, padding=8):
-    """Lay out ordinary child entities along an axis; sizes remain explicit."""
+def parse_box(value, default=0):
+    """Normalize padding/margin into a (top, right, bottom, left) tuple."""
+    if value is None:
+        return (default, default, default, default)
+    if isinstance(value, (int, float)):
+        v = int(value)
+        return (v, v, v, v)
+    if isinstance(value, (tuple, list)):
+        if len(value) == 0:
+            return (default, default, default, default)
+        if len(value) == 1:
+            v = int(value[0])
+            return (v, v, v, v)
+        if len(value) == 2:
+            y, x = int(value[0]), int(value[1])
+            return (y, x, y, x)
+        if len(value) == 3:
+            top, x, bottom = int(value[0]), int(value[1]), int(value[2])
+            return (top, x, bottom, x)
+        if len(value) >= 4:
+            return (int(value[0]), int(value[1]), int(value[2]), int(value[3]))
+    return (default, default, default, default)
+
+
+def content_rect(entity):
+    """Return the content bounding box (x, y, w, h) of an entity inside its padding."""
+    top, right, bottom, left = parse_box(entity.components.get("padding", 0) if hasattr(entity, "components") else 0)
+    x = entity.x + left
+    y = entity.y + top
+    w = max(0, entity.w - left - right)
+    h = max(0, entity.h - top - bottom)
+    return (x, y, w, h)
+
+
+def stack(parent, children=None, *, axis="y", gap=None, padding=None, align=None):
+    """Lay out ordinary child entities along an axis; supports padding, margins, flex, and alignment."""
     if axis not in ("x", "y"):
         raise ValueError("axis must be x or y")
-    offset = padding
+    if children is None:
+        children = [c for c in parent.children if c.components.get("visible", True) and not c.components.get("ignore_layout", False)]
+    else:
+        children = list(children)
+    if not children:
+        return
+
+    if padding is not None:
+        pad_top, pad_right, pad_bottom, pad_left = parse_box(padding)
+    elif hasattr(parent, "components") and "padding" in parent.components:
+        pad_top, pad_right, pad_bottom, pad_left = parse_box(parent.components["padding"])
+    else:
+        pad_top, pad_right, pad_bottom, pad_left = parse_box(8)
+
+    gap_val = gap if gap is not None else (parent.components.get("gap", 8) if hasattr(parent, "components") else 8)
+
+    parent_w = getattr(parent, "w", 0)
+    parent_h = getattr(parent, "h", 0)
+    content_w = max(0, parent_w - pad_left - pad_right)
+    content_h = max(0, parent_h - pad_top - pad_bottom)
+
+    flex_children = [c for c in children if hasattr(c, "components") and c.components.get("flex", 0) > 0]
+    if flex_children:
+        total_flex = sum(c.components.get("flex", 1) for c in flex_children)
+        if axis == "x" and content_w > 0:
+            fixed = sum(c.w + parse_box(c.components.get("margin", 0))[3] + parse_box(c.components.get("margin", 0))[1]
+                        for c in children if c not in flex_children)
+            total_gaps = (len(children) - 1) * gap_val
+            flex_margins = sum(parse_box(c.components.get("margin", 0))[3] + parse_box(c.components.get("margin", 0))[1]
+                               for c in flex_children)
+            rem = max(0, content_w - fixed - total_gaps - flex_margins)
+            for c in flex_children:
+                put(c, w=max(0, int(rem * (c.components.get("flex", 1) / total_flex))))
+        elif axis == "y" and content_h > 0:
+            fixed = sum(c.h + parse_box(c.components.get("margin", 0))[0] + parse_box(c.components.get("margin", 0))[2]
+                        for c in children if c not in flex_children)
+            total_gaps = (len(children) - 1) * gap_val
+            flex_margins = sum(parse_box(c.components.get("margin", 0))[0] + parse_box(c.components.get("margin", 0))[2]
+                               for c in flex_children)
+            rem = max(0, content_h - fixed - total_gaps - flex_margins)
+            for c in flex_children:
+                put(c, h=max(0, int(rem * (c.components.get("flex", 1) / total_flex))))
+
+    offset = pad_left if axis == "x" else pad_top
     for child in children:
-        put(child, x=parent.x+(offset if axis == "x" else padding),
-            y=parent.y+(offset if axis == "y" else padding))
-        offset += (child.w if axis == "x" else child.h)+gap
+        m_top, m_right, m_bottom, m_left = parse_box(child.components.get("margin", 0) if hasattr(child, "components") else 0)
+        c_align = child.components.get("align", align) if hasattr(child, "components") else align
+
+        if axis == "x":
+            child_x = parent.x + offset + m_left
+            if c_align == "stretch" and parent_h > 0:
+                child_y = parent.y + pad_top + m_top
+                child_h = max(0, content_h - m_top - m_bottom)
+                put(child, x=child_x, y=child_y, h=child_h)
+            elif c_align == "start":
+                child_y = parent.y + pad_top + m_top
+                put(child, x=child_x, y=child_y)
+            elif c_align == "end" and parent_h > 0:
+                child_y = parent.y + parent_h - pad_bottom - m_bottom - child.h
+                put(child, x=child_x, y=child_y)
+            elif c_align == "center" and parent_h > 0:
+                child_y = parent.y + pad_top + m_top + max(0, (content_h - m_top - m_bottom - child.h) // 2)
+                put(child, x=child_x, y=child_y)
+            else:
+                child_y = parent.y + pad_top + m_top
+                put(child, x=child_x, y=child_y)
+            offset += m_left + child.w + m_right + gap_val
+        else:
+            child_y = parent.y + offset + m_top
+            if c_align == "stretch" and parent_w > 0:
+                child_x = parent.x + pad_left + m_left
+                child_w = max(0, content_w - m_left - m_right)
+                put(child, x=child_x, y=child_y, w=child_w)
+            elif c_align == "start":
+                child_x = parent.x + pad_left + m_left
+                put(child, x=child_x, y=child_y)
+            elif c_align == "end" and parent_w > 0:
+                child_x = parent.x + parent_w - pad_right - m_right - child.w
+                put(child, x=child_x, y=child_y)
+            elif c_align == "center" and parent_w > 0:
+                child_x = parent.x + pad_left + m_left + max(0, (content_w - m_left - m_right - child.w) // 2)
+                put(child, x=child_x, y=child_y)
+            else:
+                child_x = parent.x + pad_left + m_left
+                put(child, x=child_x, y=child_y)
+            offset += m_top + child.h + m_bottom + gap_val
+
+
+def row(parent, children=None, *, gap=None, padding=None, align=None):
+    """Lay out child entities horizontally."""
+    return stack(parent, children, axis="x", gap=gap, padding=padding, align=align)
+
+
+def column(parent, children=None, *, gap=None, padding=None, align=None):
+    """Lay out child entities vertically."""
+    return stack(parent, children, axis="y", gap=gap, padding=padding, align=align)
+
+
+def dock(parent, children=None, *, padding=None):
+    """Arrange child entities by docking edges (top, bottom, left, right, fill, float/none)."""
+    if children is None:
+        children = [c for c in parent.children if c.components.get("visible", True) and not c.components.get("ignore_layout", False)]
+    else:
+        children = list(children)
+
+    pad_top, pad_right, pad_bottom, pad_left = parse_box(
+        padding if padding is not None else parent.components.get("padding", 0) if hasattr(parent, "components") else 0
+    )
+
+    cur_x = parent.x + pad_left
+    cur_y = parent.y + pad_top
+    cur_w = max(0, parent.w - pad_left - pad_right)
+    cur_h = max(0, parent.h - pad_top - pad_bottom)
+
+    for child in children:
+        mode = child.components.get("dock") if hasattr(child, "components") else None
+        if mode in ("float", "none", None):
+            if hasattr(child, "components") and "rel_x" in child.components and "rel_y" in child.components:
+                put(child, x=parent.x + child.components["rel_x"], y=parent.y + child.components["rel_y"])
+            continue
+
+        m_top, m_right, m_bottom, m_left = parse_box(child.components.get("margin", 0) if hasattr(child, "components") else 0)
+
+        if mode == "top":
+            h = child.components.get("h", child.h)
+            put(child, x=cur_x + m_left, y=cur_y + m_top, w=max(0, cur_w - m_left - m_right), h=h)
+            advance = h + m_top + m_bottom
+            cur_y += advance
+            cur_h = max(0, cur_h - advance)
+        elif mode == "bottom":
+            h = child.components.get("h", child.h)
+            advance = h + m_top + m_bottom
+            cur_h = max(0, cur_h - advance)
+            put(child, x=cur_x + m_left, y=cur_y + cur_h + m_top, w=max(0, cur_w - m_left - m_right), h=h)
+        elif mode == "left":
+            w = child.components.get("w", child.w)
+            put(child, x=cur_x + m_left, y=cur_y + m_top, w=w, h=max(0, cur_h - m_top - m_bottom))
+            advance = w + m_left + m_right
+            cur_x += advance
+            cur_w = max(0, cur_w - advance)
+        elif mode == "right":
+            w = child.components.get("w", child.w)
+            advance = w + m_left + m_right
+            cur_w = max(0, cur_w - advance)
+            put(child, x=cur_x + cur_w + m_left, y=cur_y + m_top, w=w, h=max(0, cur_h - m_top - m_bottom))
+        elif mode == "fill":
+            put(child, x=cur_x + m_left, y=cur_y + m_top, w=max(0, cur_w - m_left - m_right), h=max(0, cur_h - m_top - m_bottom))
+
+
+def apply_layout(entity, recursive=False):
+    """Apply layout to entity based on its layout component ('dock', 'column', 'row', etc.)."""
+    mode = entity.components.get("layout") if hasattr(entity, "components") else None
+    if mode == "dock":
+        dock(entity)
+    elif mode in ("column", "stack", "stack_y"):
+        stack(entity, axis="y")
+    elif mode in ("row", "stack_x"):
+        stack(entity, axis="x")
+
+    if recursive:
+        for child in entity.children:
+            if hasattr(child, "components") and "layout" in child.components:
+                apply_layout(child, recursive=True)
+
+
+class Layout:
+    """Attached entity system that automatically evaluates layout rules on update."""
+    def __init__(self, entity):
+        self.entity = entity
+
+    def update(self, dt):
+        apply_layout(self.entity, recursive=True)
 
 
 class UI:
