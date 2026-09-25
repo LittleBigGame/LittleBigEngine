@@ -90,6 +90,24 @@ class Graphics:
         if obj.font_size != size:
             obj.font_size = size
 
+    def char_width(self, size=10):
+        if not hasattr(self, "_char_widths"):
+            self._char_widths = {}
+        if size not in self._char_widths:
+            import pyglet
+            sample = pyglet.text.Label("X" * 100, font_name="Consolas", font_size=size)
+            self._char_widths[size] = sample.content_width / 100.0
+        return self._char_widths[size]
+
+    def line_height(self, size=10):
+        if not hasattr(self, "_line_heights"):
+            self._line_heights = {}
+        if size not in self._line_heights:
+            import pyglet
+            sample = pyglet.text.Label("X", font_name="Consolas", font_size=size)
+            self._line_heights[size] = sample.content_height
+        return self._line_heights[size]
+
     def finish(self):
         for key in self._pool.keys() - self._used:
             self._pool.pop(key).delete()
