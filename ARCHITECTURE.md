@@ -1,8 +1,8 @@
 # LittleBigEngine - Design Overview
 
 LittleBigEngine aims to make complex behavior emerge from a small set of generic
-primitives. The entity/script runtime and desktop rendering adapter are implemented;
-the self-hosted editor remains under development.
+primitives. The entity/script runtime, desktop rendering adapter and initial
+entity-based editor are implemented.
 
 ## Entities and data
 
@@ -30,10 +30,15 @@ component values and remain implementation details.
 
 ## A self-hosted editor
 
-The editor is intended to use the same entities, components and systems as an
-application. Hierarchy views, inspectors and editing panels expose the structures
-from which they are built. New data and scripts can introduce behavior without
-adding domain-specific logic to the kernel.
+The editor uses the same entities, components and systems as an application.
+Hierarchy rows, inspector fields, source lines, selections, buttons and panels
+are entities. The editor coordinator holds references to those entities rather
+than maintaining a second widget tree. An ordinary script on Application updates
+and draws the UI. Its source can be opened like the Game render system.
+
+The text buffer is an independent editing data structure stored as a component;
+it does not use an external code editor. New data and scripts introduce behavior
+without adding domain-specific logic to the kernel.
 
 ## Platform boundary
 

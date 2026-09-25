@@ -18,3 +18,4 @@ dist/
 .env.*
 !.env.example
 .idea/
+workspace/

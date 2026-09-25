@@ -27,8 +27,6 @@ def update(dt):
         viewport.w, viewport.h = window.width, window.height
 def draw():
     graphics.text("LittleBigEngine | two entities, one ordinary render system", 24, 20)
-def stop():
-    space.close()
 '''))
     viewport.tags.add("viewport")
     return runtime

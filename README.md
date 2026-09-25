@@ -1,6 +1,6 @@
 # LittleBigEngine
 
-**A small foundation for a composable engine.**
+**A small engine that can inspect and extend itself.**
 
 LittleBigEngine (LBE) is a Python project exploring a hierarchical entity model:
 entities hold arbitrary data, systems supply behavior, and an editor is built from
@@ -11,7 +11,9 @@ the same primitives as the applications it edits.
 Little Core provides entities, arbitrary components, hierarchy, tags, relations,
 live queries, changes, events and independent Python script systems. The desktop
 runtime renders a two-entity scene through an ordinary script, with camera
-transforms and automatically refreshed spatial indexing. The editor is under development.
+transforms and automatically refreshed spatial indexing. The first entity-based
+editor includes a hierarchy, live component inspector, source editor and script
+attachment/reload. This is an early functional release, not a finished production engine.
 
 ## Run
 
@@ -25,14 +27,20 @@ python -m lbe
 The `lbe` command and `python main.py` launch the same entry point.
 Use `python -m lbe --check` to check the core without opening a window.
 The core alone installs with `python -m pip install -e .`.
+System sources are saved under `workspace/` by default. Choose a different folder
+with `python -m lbe --project path/to/project`. Use `--demo` for the rendering-only scene.
+
+See the [editor guide](docs/editor.md) for controls and the live movement walkthrough.
 
 ## Test
 
 ```console
 python -m unittest discover -s tests -v
+python tests/desktop_walkthrough.py
 ```
 
 Continuous integration checks Python 3.11 and 3.14 on Windows and Linux.
+The desktop walkthrough uses real graphics and synthetic editor input.
 
 ## Design
 
