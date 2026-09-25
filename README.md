@@ -8,9 +8,9 @@ the same primitives as the applications it edits.
 
 ## Current release
 
-The initial source package provides a command-line entry point and automated
-installation checks. The entity runtime, graphics and editor are in development
-and are not included in this release.
+Little Core provides entities, arbitrary components, hierarchy, tags, relations,
+live queries, changes, events and independent Python script systems. Graphics and
+the editor are under development.
 
 ## Run
 
@@ -34,5 +34,7 @@ Continuous integration checks Python 3.11 and 3.14 on Windows and Linux.
 ## Design
 
 See [Architecture](ARCHITECTURE.md) for the intended engine model.
+See [Little Core](docs/core.md) for the implemented API. Run
+`python examples/movement.py` for a script-driven movement example.
 
 Created by **LittleBigGame**.
