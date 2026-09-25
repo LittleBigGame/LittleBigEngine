@@ -43,12 +43,19 @@ class UI:
     on_scroll(control,event), on_key(event), and on_ui_error(message).
     """
 
-    def __init__(self, root, window, graphics, input_state):
+    def __init__(self, root, window, graphics, input_state, *, pitch=None, line_height=LINE):
         self.root = root
         self.runtime = root.runtime
         self.window = window
         self.graphics = graphics
         self.input = input_state
+        if pitch is not None:
+            self.pitch = pitch
+        elif hasattr(graphics, "char_width") and callable(graphics.char_width):
+            self.pitch = graphics.char_width(10)
+        else:
+            self.pitch = PITCH
+        self.line_height = line_height
 
     def install(self, name="ui", definition=None):
         self.root.components["ui"] = self
@@ -79,6 +86,7 @@ class UI:
     def field(self, parent, name, text="", **values):
         values.setdefault("buffer", TextBuffer(text))
         values.setdefault("color", FIELD)
+        values.setdefault("pitch", self.pitch)
         return self.create(parent, name, "field", **values)
 
     def button(self, parent, name, text, action, **values):
@@ -88,6 +96,8 @@ class UI:
     def multiline(self, parent, name, text="", **values):
         values.setdefault("buffer", TextBuffer(text))
         values.setdefault("color", BG)
+        values.setdefault("pitch", self.pitch)
+        values.setdefault("line_height", self.line_height)
         return self.create(parent, name, "multiline", **values)
 
     def set_text(self, field, text):
@@ -113,6 +123,9 @@ class UI:
         if kind == "drag" and self.focused is not None and "multiline" in self.focused.tags:
             control = self.focused
             control.buffer.cursor = self.text_index(control, event[1], event[2])
+            pitch = control.components.get("pitch", self.pitch)
+            line = control.components.get("line_height", self.line_height)
+            control.buffer.reveal(max(1, int((control.h-12)//line)), max(1, int((control.w-64)//pitch)))
             control.components.touch("buffer")
             return
         if kind in ("click", "scroll"):
@@ -139,6 +152,9 @@ class UI:
                 if "multiline" in control.tags:
                     self.focus(control)
                     control.buffer.cursor = control.buffer.anchor = self.text_index(control, event[1], event[2])
+                    pitch = control.components.get("pitch", self.pitch)
+                    line = control.components.get("line_height", self.line_height)
+                    control.buffer.reveal(max(1, int((control.h-12)//line)), max(1, int((control.w-64)//pitch)))
                     return
                 if control.components.get("modal", False):
                     return
@@ -188,21 +204,36 @@ class UI:
         if control.alive:
             control.components.touch("buffer")
             if multiline:
-                buffer.reveal(max(1, int((control.h-12)//LINE)), max(1, int((control.w-64)//PITCH)))
+                pitch = control.components.get("pitch", self.pitch)
+                line = control.components.get("line_height", self.line_height)
+                buffer.reveal(max(1, int((control.h-12)//line)), max(1, int((control.w-64)//pitch)))
 
-    @staticmethod
-    def text_index(control, x, y):
+    def text_index(self, control, x=None, y=None):
+        if y is None and x is not None:
+            control, x, y = self, control, x
+            ui = getattr(control, "root", control).components.get("ui") if hasattr(control, "components") else None
+            pitch = getattr(ui, "pitch", PITCH)
+            line = getattr(ui, "line_height", LINE)
+        else:
+            pitch = control.components.get("pitch", getattr(self, "pitch", PITCH))
+            line = control.components.get("line_height", getattr(self, "line_height", LINE))
         buffer = control.buffer
-        row = max(0, int((y-control.y-6)//LINE))+buffer.scroll
-        column = max(0, round((x-control.x-48)/PITCH))+buffer.horizontal
+        row = max(0, int((y-control.y-6)//line))+buffer.scroll
+        column = max(0, round((x-control.x-48)/pitch))+buffer.horizontal
         return buffer.index(row, column)
 
     def _sync_text(self, control):
+        pitch = control.components.get("pitch", self.pitch)
+        line_height = control.components.get("line_height", self.line_height)
         buffer = control.buffer
-        rows = max(1, int((control.h-12)//LINE))
-        columns = max(1, int((control.w-64)//PITCH))
+        rows = max(1, int((control.h-12)//line_height))
+        columns = max(1, int((control.w-64)//pitch))
         lines = buffer.text.split("\n")
         buffer.scroll = max(0, min(buffer.scroll, max(0, len(lines)-1)))
+        max_col = max((len(l) for l in lines), default=0)
+        buffer.horizontal = max(0, min(buffer.horizontal, max_col))
+        if self.focused is control:
+            buffer.reveal(rows, columns)
         children = {child.components.get("part"): child for child in control.children}
 
         def part(name, kind, **values):
@@ -223,20 +254,26 @@ class UI:
             number = part(f"number:{index}", "label", text="", ink=MUTED, layer=control.layer)
             line = part(f"line:{index}", "label", text="", layer=control.layer)
             used.update((highlight.part, number.part, line.part))
-            y = control.y+6+index*LINE
-            put(number, visible=True, x=control.x+6, y=y, w=40, h=LINE, text=str(row+1))
-            put(line, visible=True, x=control.x+48, y=y, w=control.w-64, h=LINE,
+            y = control.y+6+index*line_height
+            put(number, visible=True, x=control.x+6, y=y, w=40, h=line_height, text=str(row+1))
+            put(line, visible=True, x=control.x+48, y=y, w=control.w-64, h=line_height,
                 text=lines[row][buffer.horizontal:buffer.horizontal+columns])
             start = max(selection_start-offset-buffer.horizontal, 0)
             end = min(selection_end-offset-buffer.horizontal, len(lines[row])-buffer.horizontal, columns)
-            put(highlight, visible=True, x=line.x+start*PITCH, y=y, w=max(0, end-start)*PITCH, h=LINE)
+            has_selection = (end > start and
+                             selection_start < offset + len(lines[row]) + 1 and
+                             selection_end > offset)
+            put(highlight, visible=has_selection, x=line.x+start*pitch, y=y, w=max(0, end-start)*pitch, h=line_height)
             offset += len(lines[row])+1
         for name, child in children.items():
             if name not in used:
                 put(child, visible=False)
         row, column = buffer.position
-        put(caret, visible=self.focused is control and buffer.scroll <= row < buffer.scroll+rows,
-            x=control.x+48+(column-buffer.horizontal)*PITCH, y=control.y+6+(row-buffer.scroll)*LINE, w=2, h=LINE)
+        caret_visible = (self.focused is control and
+                         buffer.scroll <= row < buffer.scroll+rows and
+                         buffer.horizontal <= column <= buffer.horizontal+columns)
+        put(caret, visible=caret_visible,
+            x=control.x+48+(column-buffer.horizontal)*pitch, y=control.y+6+(row-buffer.scroll)*line_height, w=2, h=line_height)
         put(scrollbar, x=control.x+control.w-5, y=control.y+control.h*buffer.scroll/max(len(lines), rows),
             w=3, h=max(12, control.h*min(1, rows/len(lines))))
 
@@ -249,23 +286,25 @@ class UI:
             if "label" not in control.tags:
                 graphics.rect(control.x, control.y, control.w, control.h, control.color, key=control.id, layer=layer)
             if "field" in control.tags:
+                pitch = control.components.get("pitch", self.pitch)
                 buffer = control.buffer
-                width = max(1, int((control.w-12)//PITCH))
+                width = max(1, int((control.w-12)//pitch))
                 if self.focused is control:
                     buffer.reveal(1, width)
                     start, end = buffer.selection
                     start, end = max(0, start-buffer.horizontal), min(width, end-buffer.horizontal)
                     if end > start:
-                        graphics.rect(control.x+6+start*PITCH, control.y+3, (end-start)*PITCH, control.h-6,
+                        graphics.rect(control.x+6+start*pitch, control.y+3, (end-start)*pitch, control.h-6,
                                       (44, 76, 105), key=(control.id, "selection"), layer=layer+1)
                     graphics.rect(control.x, control.y+control.h-2, control.w, 2, ACCENT, key=(control.id, "focus"), layer=layer+1)
-                    graphics.rect(control.x+6+(buffer.cursor-buffer.horizontal)*PITCH, control.y+4, 1, control.h-8,
+                    graphics.rect(control.x+6+(buffer.cursor-buffer.horizontal)*pitch, control.y+4, 1, control.h-8,
                                   ACCENT, key=(control.id, "caret"), layer=layer+2)
                 text = buffer.text.replace("\n", " ")[buffer.horizontal:buffer.horizontal+width]
                 text = text or control.components.get("hint", "")[:width]
                 graphics.text(text, control.x+6, control.y+5, color=INK, key=(control.id, "text"), layer=layer+2)
             elif "text" in control.components:
+                pitch = control.components.get("pitch", self.pitch)
                 inset = 8 if "panel" in control.tags or "button" in control.tags else 0
-                width = max(1, int((control.w-inset*2)//PITCH))
+                width = max(1, int((control.w-inset*2)//pitch))
                 graphics.text(str(control.text)[:width], control.x+inset, control.y+(8 if "panel" in control.tags else 4),
                               color=control.components.get("ink", INK), key=(control.id, "text"), layer=layer+1)

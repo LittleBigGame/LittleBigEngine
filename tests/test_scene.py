@@ -20,6 +20,12 @@ class RecordingGraphics:
     def text(self, *args, **kwargs):
         pass
 
+    def char_width(self, size=10):
+        return 8.0
+
+    def line_height(self, size=10):
+        return 20
+
 
 class SceneTests(unittest.TestCase):
     def test_render_is_an_ordinary_inspectable_system(self):

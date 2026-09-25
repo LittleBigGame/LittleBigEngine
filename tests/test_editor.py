@@ -184,3 +184,51 @@ class EditorTests(unittest.TestCase):
         self.click(self.editor.new_button)
         self.assertIn("Revised source:", root.status)
         self.assertNotIn("editor", self.runtime.services)
+
+    def test_source_editor_cursor_and_selection_alignment(self):
+        code = self.editor.code
+        pitch = code.components.get("pitch", 8.0)
+        line_height = code.components.get("line_height", 20)
+        self.click(code)
+        self.send(("key", "A", True, False), ("text", "abcdefghijklmnopqrstuvwxyz\n1234567890"))
+
+        # Click on character 15 of line 0 (before midpoint)
+        click_x = code.x + 48 + 15 * pitch + pitch * 0.2
+        click_y = code.y + 6 + line_height / 2
+        self.send(("click", click_x, click_y, 1, 0))
+        self.assertEqual(code.buffer.cursor, 15)
+
+        # Click on character 15 of line 0 (after midpoint -> rounds to caret 16)
+        self.send(("click", code.x + 48 + 15 * pitch + pitch * 0.8, click_y, 1, 0))
+        self.assertEqual(code.buffer.cursor, 16)
+
+        # Restore cursor to 15
+        self.send(("click", click_x, click_y, 1, 0))
+        self.assertEqual(code.buffer.cursor, 15)
+
+        # Caret entity alignment
+        caret = next(c for c in code.children if c.components.get("part") == "cursor")
+        self.assertTrue(caret.visible)
+        self.assertAlmostEqual(caret.x, code.x + 48 + 15 * pitch, delta=0.01)
+        self.assertAlmostEqual(caret.y, code.y + 6, delta=0.01)
+
+        # Select columns 5 to 12 on line 0
+        code.buffer.anchor = 5
+        code.buffer.cursor = 12
+        code.components.touch("buffer")
+        self.runtime.step(0)
+
+        highlight = next(c for c in code.children if c.components.get("part") == "selection:0")
+        self.assertTrue(highlight.visible)
+        line = next(c for c in code.children if c.components.get("part") == "line:0")
+        self.assertAlmostEqual(highlight.x, line.x + 5 * pitch, delta=0.01)
+        self.assertAlmostEqual(highlight.w, (12 - 5) * pitch, delta=0.01)
+
+        # Caret reveal and alignment on line 1
+        code.buffer.cursor = code.buffer.anchor = len(code.buffer.text)
+        code.components.touch("buffer")
+        self.runtime.step(0)
+        caret = next(c for c in code.children if c.components.get("part") == "cursor")
+        row, col = code.buffer.position
+        self.assertAlmostEqual(caret.x, code.x + 48 + (col - code.buffer.horizontal) * pitch, delta=0.01)
+        self.assertAlmostEqual(caret.y, code.y + 6 + (row - code.buffer.scroll) * line_height, delta=0.01)
