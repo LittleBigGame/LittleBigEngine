@@ -120,15 +120,7 @@ class UI:
 
     def dispatch(self, event):
         kind = event[0]
-        if kind == "drag" and self.focused is not None and "multiline" in self.focused.tags:
-            control = self.focused
-            control.buffer.cursor = self.text_index(control, event[1], event[2])
-            pitch = control.components.get("pitch", self.pitch)
-            line = control.components.get("line_height", self.line_height)
-            control.buffer.reveal(max(1, int((control.h-12)//line)), max(1, int((control.w-64)//pitch)))
-            control.components.touch("buffer")
-            return
-        if kind in ("click", "scroll"):
+        if kind in ("click", "scroll", "drag"):
             controls = [e for e in self.controls() if self.visible(e) and contains(e, event[1], event[2])]
             controls.sort(key=lambda e: (e.components.get("layer", 2), e.depth), reverse=True)
             for control in controls:
@@ -141,6 +133,8 @@ class UI:
                         control.buffer.scroll = max(0, control.buffer.scroll-int(event[4])*3)
                         control.components.touch("buffer")
                         return
+                    continue
+                if kind == "drag":
                     continue
                 if "button" in control.tags:
                     control.action()
@@ -158,6 +152,14 @@ class UI:
                     return
                 if control.components.get("modal", False):
                     return
+            if kind == "drag" and self.focused is not None and "multiline" in self.focused.tags:
+                control = self.focused
+                control.buffer.cursor = self.text_index(control, event[1], event[2])
+                pitch = control.components.get("pitch", self.pitch)
+                line = control.components.get("line_height", self.line_height)
+                control.buffer.reveal(max(1, int((control.h-12)//line)), max(1, int((control.w-64)//pitch)))
+                control.components.touch("buffer")
+                return
             return
         callback = self.root.components.get("on_key")
         if kind == "key" and callback and callback(event):

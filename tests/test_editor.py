@@ -279,3 +279,40 @@ class EditorTests(unittest.TestCase):
         # No selection borders drawn in viewport for Game
         keys = [kwargs.get("key") for _, kwargs in self.graphics.rectangles]
         self.assertFalse(any(isinstance(k, tuple) and len(k) == 2 and str(k[1]).startswith("sel_") for k in keys))
+
+    def test_viewport_camera_mouse_navigation(self):
+        vp = self.editor.viewport
+        cam = self.editor.camera
+        initial_cam_x, initial_cam_y = cam.x, cam.y
+        initial_zoom = cam.zoom
+
+        # Drag inside viewport with dx=48, dy=-24
+        self.send(("drag", vp.x + 100, vp.y + 100, 1, 0, 48, -24))
+        self.assertAlmostEqual(cam.x, initial_cam_x - 48 / initial_zoom, delta=0.01)
+        self.assertAlmostEqual(cam.y, initial_cam_y - 24 / initial_zoom, delta=0.01)
+
+        # Drag using incremental positions (without explicit dx/dy in event)
+        self.editor.viewport.drag_pos = None
+        cam_x_before = cam.x
+        cam_y_before = cam.y
+        self.send(("drag", vp.x + 200, vp.y + 200, 1, 0))
+        self.send(("drag", vp.x + 248, vp.y + 224, 1, 0))
+        self.assertAlmostEqual(cam.x, cam_x_before - 48 / initial_zoom, delta=0.01)
+        self.assertAlmostEqual(cam.y, cam_y_before + 24 / initial_zoom, delta=0.01)
+
+        # Scroll inside viewport zooms camera towards cursor
+        cam_before_zoom = (cam.x, cam.y, cam.zoom)
+        from lbe.space import screen_to_world
+        cursor_world = screen_to_world(cam, vp, vp.x + 100, vp.y + 100)
+        self.send(("scroll", vp.x + 100, vp.y + 100, 0, 1))
+        self.assertGreater(cam.zoom, cam_before_zoom[2])
+        cursor_world_after = screen_to_world(cam, vp, vp.x + 100, vp.y + 100)
+        self.assertAlmostEqual(cursor_world[0], cursor_world_after[0], delta=0.01)
+        self.assertAlmostEqual(cursor_world[1], cursor_world_after[1], delta=0.01)
+
+        # Dragging outside viewport (e.g. in code editor) does not move camera
+        cam_state = (cam.x, cam.y, cam.zoom)
+        code = self.editor.code
+        self.click(code)
+        self.send(("drag", code.x + 60, code.y + 20, 1, 0, 50, 50))
+        self.assertEqual((cam.x, cam.y, cam.zoom), cam_state)

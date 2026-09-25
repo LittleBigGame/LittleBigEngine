@@ -160,7 +160,7 @@ def launch(build, *, headless=False, frames=None, screenshot=None):
 
     @window.event
     def on_mouse_drag(x, y, dx, dy, buttons, modifiers):
-        input_state.pending.append(("drag", x, window.height - y, buttons, modifiers))
+        input_state.pending.append(("drag", x, window.height - y, buttons, modifiers, dx, -dy))
 
     @window.event
     def on_mouse_motion(x, y, dx, dy):
