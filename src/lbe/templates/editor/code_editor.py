@@ -195,6 +195,7 @@ def handle_editor_key(control, event):
             return True
         elif key == "ESCAPE":
             ac_state["active"] = False
+            ac_state["dismissed_at"] = (buffer.cursor, buffer.text)
             control.components.touch("autocomplete_state")
             return True
 
@@ -226,11 +227,11 @@ def sync_autocomplete_popup(target, ui, ac_state):
             children[name] = ui.create(target, name, kind, part=name, **values)
         return children[name]
 
-    popup = part("autocomplete_popup", "panel", color=PANEL, layer=target.layer + 5)
+    popup = part("autocomplete_popup", "panel", color=PANEL, layer=target.layer + 3)
     if not ac_state.get("active") or not ac_state.get("matches"):
         put(popup, visible=False)
         for i in range(6):
-            item = part(f"ac_item:{i}", "button", layer=target.layer + 6)
+            item = part(f"ac_item:{i}", "button", layer=target.layer + 4)
             put(item, visible=False)
         return
 
@@ -252,7 +253,7 @@ def sync_autocomplete_popup(target, ui, ac_state):
 
     put(popup, visible=True, x=pop_x, y=pop_y, w=pop_w, h=pop_h)
     for i in range(6):
-        item = part(f"ac_item:{i}", "button", layer=target.layer + 6)
+        item = part(f"ac_item:{i}", "button", layer=target.layer + 4)
         if i < len(matches):
             name, kind = matches[i]
             is_sel = (i == selected)
@@ -313,7 +314,9 @@ def update(dt):
         line_prefix = text[:buffer.cursor].rsplit("\n", 1)[-1]
         word_prefix, candidates = get_completion_candidates(line_prefix, text)
         is_member_access = bool(re.search(r'\.[a-zA-Z_]*$', line_prefix))
-        if word_prefix or (is_member_access and candidates):
+        if ac_state.get("dismissed_at") == (buffer.cursor, text):
+            ac_state["active"] = False
+        elif word_prefix or (is_member_access and candidates):
             matches = [c for c in candidates if c[0].lower().startswith(word_prefix.lower()) and c[0] != word_prefix]
             matches.sort(key=lambda c: (not c[0].startswith(word_prefix), len(c[0]), c[0]))
             matches = matches[:6]

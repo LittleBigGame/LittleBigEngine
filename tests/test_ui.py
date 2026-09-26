@@ -4,7 +4,7 @@ from types import SimpleNamespace
 import unittest
 
 from lbe import Runtime
-from lbe.desktop import Input
+from lbe.desktop import Input, Graphics
 from lbe.project import load_project, template_path
 from lbe.ui import UI, stack, row, column, dock, apply_layout, Layout, parse_box, content_rect
 from test_scene import RecordingGraphics
@@ -139,3 +139,18 @@ class UITests(unittest.TestCase):
             self.assertEqual(runtime.entities[0].answer, 42)
             self.assertEqual({p.name for p in Path(directory).iterdir()}, {"app.py"})
             runtime.close()
+
+    def test_desktop_graphics_dynamic_layer_groups(self):
+        graphics = Graphics(self.window)
+        # Test layers that exceed the old fixed 0..7 range and negative layers
+        for layer in (-2, 0, 2, 7, 8, 9, 15, 42):
+            graphics.rect(10, 10, 40, 20, layer=layer)
+            graphics.text("label", 10, 10, layer=layer)
+            group = graphics._group(layer)
+            self.assertEqual(group.order, layer)
+            self.assertIn(layer, graphics._groups)
+
+        # Confirm arbitrary layer lookup via dictionary key also auto-instantiates
+        self.assertEqual(graphics._groups[99].order, 99)
+        graphics.close()
+

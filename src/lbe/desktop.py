@@ -18,17 +18,29 @@ class Input:
         return pending
 
 
+class _LayerGroups(dict):
+    def __missing__(self, layer):
+        import pyglet
+
+        group = pyglet.graphics.Group(order=int(layer))
+        self[layer] = group
+        return group
+
+
 class Graphics:
     def __init__(self, window):
         import pyglet
 
         self.window = window
         self.batch = pyglet.graphics.Batch()
-        self._groups = {i: pyglet.graphics.Group(order=i) for i in range(8)}
+        self._groups = _LayerGroups()
         self._pool = {}
         self._used = set()
         self._counter = 0
         self._view = None
+
+    def _group(self, layer):
+        return self._groups[int(layer)]
 
     def begin(self):
         self._used.clear()
@@ -67,7 +79,7 @@ class Graphics:
         obj = self._pool.get(identity)
         if obj is None:
             obj = pyglet.shapes.Rectangle(x, self.window.height - y - h, w, h,
-                                          color=color, batch=self.batch, group=self._groups[layer])
+                                          color=color, batch=self.batch, group=self._group(layer))
             self._pool[identity] = obj
         obj.x, obj.y = x, self.window.height - y - h
         obj.width, obj.height = max(0, w), max(0, h)
@@ -81,7 +93,7 @@ class Graphics:
         if obj is None:
             obj = pyglet.text.Label(str(text), font_name="Consolas", font_size=size,
                                     x=x, y=self.window.height - y, anchor_y="top",
-                                    color=color, batch=self.batch, group=self._groups[layer])
+                                    color=color, batch=self.batch, group=self._group(layer))
             self._pool[identity] = obj
         if obj.text != str(text):
             obj.text = str(text)
