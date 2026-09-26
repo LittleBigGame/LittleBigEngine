@@ -12,6 +12,7 @@ from lbe.ui import (UI, put, contains, parse_box, content_rect, stack, dock,
 from lbe.text import TextBuffer
 from lbe.space import screen_to_world
 from lbe.project import save_project, load_project_data, deserialize_entities
+from lbe.menus import open_menu
 
 state = entity.components.get("application_state")
 
@@ -195,8 +196,11 @@ def initialize():
     state.quick_size_btn = state.ui.button(state.inspector, 'QuickSizeBtn', '+ Size', quick_add_size)
     state.quick_vel_btn = state.ui.button(state.inspector, 'QuickVelBtn', '+ Vel', quick_add_vel)
     state.quick_color_btn = state.ui.button(state.inspector, 'QuickColorBtn', '+ Color', quick_add_color)
+    state.components_title = state.ui.create(state.inspector, 'ComponentsTitle', 'label', text='COMPONENTS', ink=MUTED)
+    state.add_comp_menu_button = state.ui.button(state.inspector, 'AddCompMenuBtn', '+ Component', open_add_component_menu)
     state.component_delete_buttons = []
     state.relation_rows = []
+    state.relation_edit_buttons = []
     state.hierarchy_scroll_track = state.ui.create(state.hierarchy, 'HierarchyScrollTrack', 'scrollbar_track', color=(28, 36, 48))
     state.hierarchy_scroll_track.on_click = hierarchy_track_click
     state.hierarchy_scroll_thumb = state.ui.create(state.hierarchy, 'HierarchyScrollThumb', 'scrollbar_thumb', color=(55, 75, 95), hover_color=(75, 115, 155), layer=3)
@@ -206,14 +210,17 @@ def initialize():
     state.inspector_scroll_thumb = state.ui.create(state.inspector, 'InspectorScrollThumb', 'scrollbar_thumb', color=(55, 75, 95), hover_color=(75, 115, 155), layer=3)
     state.inspector_scroll_thumb.on_drag = inspector_scroll_drag
     state.add_name = state.ui.field(state.inspector, 'ComponentName', '', hint='component name')
+    state.add_name.on_commit = lambda: state.ui.focus(state.add_value) if not state.add_value.buffer.text else add_component()
     state.add_value = state.ui.field(state.inspector, 'ComponentValue', '', hint='value, e.g. 2.0')
+    state.add_value.on_commit = add_component
     state.add_button = state.ui.button(state.inspector, 'AddComponent', '+', add_component)
     state.tags_field = state.ui.field(state.inspector, 'Tags', '', hint='tags, comma separated')
     state.tags_field.on_commit = commit_tags
     state.parent_field = state.ui.field(state.inspector, 'Parent', '', hint='parent name or UUID; blank detaches')
     state.parent_field.on_commit = commit_parent
-    state.relation_field = state.ui.field(state.inspector, 'Relations', '', hint='relation=entity name (blank target removes)')
+    state.relation_field = state.ui.field(state.inspector, 'Relations', '', hint='relation=target or target name')
     state.relation_field.on_commit = commit_relation
+    state.link_add_button = state.ui.button(state.inspector, 'AddLinkBtn', '+', commit_relation)
     state.metadata = state.ui.create(state.inspector, 'Metadata', 'label', text='', ink=MUTED)
     state.system_label = state.ui.create(state.inspector, 'SystemsTitle', 'label', text='SYSTEMS', ink=MUTED)
     state.tags_label = state.ui.create(state.inspector, 'TagsLabel', 'label', text='Tags', ink=MUTED)
@@ -424,21 +431,27 @@ def inspector_sync():
     state.ui.set_text(state.name_field, ent_name)
     put(state.selection_label, visible=False, text=ent_name or str(entity.id))
 
-    # Subheader: Identity label & Quick Entity Actions (+ Child, Duplicate, Delete)
-    put(state.identity_label, x=ip.x + 12, y=ip.y + 58, w=max(30, ip.w - 220), h=20,
+    # Row 2: Identity label
+    put(state.identity_label, x=ip.x + 12, y=ip.y + 56, w=max(30, ip.w - 24), h=18,
         text=f'id: {str(entity.id)[:8]}')
-    btn_del_w = 52
-    right_edge = ip.x + ip.w - 12
-    put(state.delete_button, x=right_edge - btn_del_w, y=ip.y + 56, w=btn_del_w, h=22)
-    put(state.duplicate_button, x=right_edge - btn_del_w - 4 - 68, y=ip.y + 56, w=68, h=22)
-    put(state.add_child_button, x=right_edge - btn_del_w - 4 - 68 - 4 - 56, y=ip.y + 56, w=56, h=22)
 
-    # Quick Preset Chips (+ Pos, + Size, + Vel, + Color)
+    # Row 3: Quick Entity Actions (+ Child, Duplicate, Delete) with ample room to prevent text clipping
+    btn_w = max(60, (ip.w - 24 - 12) // 3)
+    put(state.add_child_button, x=ip.x + 12 + 0 * (btn_w + 6), y=ip.y + 76, w=btn_w, h=24, text='+ Child')
+    put(state.duplicate_button, x=ip.x + 12 + 1 * (btn_w + 6), y=ip.y + 76, w=btn_w, h=24, text='Duplicate')
+    put(state.delete_button, x=ip.x + 12 + 2 * (btn_w + 6), y=ip.y + 76, w=btn_w, h=24, text='Delete')
+
+    # Row 4: Quick Preset Chips (+ Pos, + Size, + Vel, + Color)
     preset_w = max(36, (ip.w - 24 - 18) // 4)
-    put(state.quick_pos_btn, x=ip.x + 12 + 0 * (preset_w + 6), y=ip.y + 84, w=preset_w, h=22)
-    put(state.quick_size_btn, x=ip.x + 12 + 1 * (preset_w + 6), y=ip.y + 84, w=preset_w, h=22)
-    put(state.quick_vel_btn, x=ip.x + 12 + 2 * (preset_w + 6), y=ip.y + 84, w=preset_w, h=22)
-    put(state.quick_color_btn, x=ip.x + 12 + 3 * (preset_w + 6), y=ip.y + 84, w=preset_w, h=22)
+    put(state.quick_pos_btn, x=ip.x + 12 + 0 * (preset_w + 6), y=ip.y + 104, w=preset_w, h=22)
+    put(state.quick_size_btn, x=ip.x + 12 + 1 * (preset_w + 6), y=ip.y + 104, w=preset_w, h=22)
+    put(state.quick_vel_btn, x=ip.x + 12 + 2 * (preset_w + 6), y=ip.y + 104, w=preset_w, h=22)
+    put(state.quick_color_btn, x=ip.x + 12 + 3 * (preset_w + 6), y=ip.y + 104, w=preset_w, h=22)
+
+    # Row 5: Components Section Header & Quick Add Menu Button
+    put(state.components_title, x=ip.x + 12, y=ip.y + 130, w=120, h=22, text='COMPONENTS')
+    comp_btn_w = 96
+    put(state.add_comp_menu_button, x=ip.x + ip.w - 12 - comp_btn_w, y=ip.y + 130, w=comp_btn_w, h=22, text='+ Component')
 
     # Dynamic calculation of bottom section height
     num_rel_rows = min(len(relations), 3) if relations else 0
@@ -450,7 +463,7 @@ def inspector_sync():
     bottom_h = 30 * 4 + rel_rows_h + 22 + sys_h + child_h + 8
 
     # Component rows capacity & scroll
-    comp_start_y = ip.y + 112
+    comp_start_y = ip.y + 156
     avail_comp_h = max(28, ip.h - (comp_start_y - ip.y) - bottom_h)
     capacity = max(1, int(avail_comp_h // 28))
     max_scroll = max(0, len(items) - capacity)
@@ -491,6 +504,10 @@ def inspector_sync():
         put(field, x=ip.x + 126, y=y, w=field_w, h=25, readonly=not editable)
         put(del_btn, x=del_x, y=y, w=del_w, h=25, text='x')
         del_btn.action = lambda k=key: delete_component(k)
+        label.component_key = key
+        label.relations['target'] = entity
+        del_btn.component_key = key
+        del_btn.relations['target'] = entity
         if field.components.get('component_key') != key or field.relations.get('target') is not entity:
             if state.ui.focused is field:
                 del state.app.relations['focus']
@@ -539,34 +556,54 @@ def inspector_sync():
     state.ui.set_text(state.parent_field, str(entity.parent.components.get('name', entity.parent.id)) if entity.parent else '')
     cur_y += 30
 
-    # 4. Relations row
+    # 4. Relations row (with '+' commit button)
     put(state.relations_label, x=ip.x + 12, y=cur_y + 4, w=60, h=22)
-    put(state.relation_field, x=ip.x + 76, y=cur_y, w=max(30, ip.w - 88), h=26)
+    put(state.relation_field, x=ip.x + 76, y=cur_y, w=max(30, ip.w - 88 - 36), h=26)
+    put(state.link_add_button, x=ip.x + ip.w - 42, y=cur_y, w=30, h=26, text='+')
     cur_y += 30
 
-    # Interactive existing relations list (up to 3 rows)
+    # Interactive existing relations list (up to 3 rows) with Edit button
     while len(state.relation_rows) < num_rel_rows:
         n = len(state.relation_rows)
         r_btn = state.ui.button(state.inspector, f'RelNav{n}', '', lambda: None)
         u_btn = state.ui.button(state.inspector, f'RelUnlink{n}', 'x', lambda: None, color=(60, 30, 35))
         state.relation_rows.append((r_btn, u_btn))
+        edit_btn = state.ui.button(state.inspector, f'RelEdit{n}', 'Edit', lambda: None)
+        state.relation_edit_buttons.append(edit_btn)
+
+    while len(state.relation_edit_buttons) < len(state.relation_rows):
+        n = len(state.relation_edit_buttons)
+        edit_btn = state.ui.button(state.inspector, f'RelEdit{n}', 'Edit', lambda: None)
+        state.relation_edit_buttons.append(edit_btn)
 
     for index, (r_btn, u_btn) in enumerate(state.relation_rows):
         shown = index < num_rel_rows
         put(r_btn, visible=shown)
         put(u_btn, visible=shown)
+        edit_btn = state.relation_edit_buttons[index]
+        put(edit_btn, visible=shown)
         if shown:
             r_name, r_target = relations[index]
             tgt_name = str(r_target.components.get('name', str(r_target.id)[:8]))
-            r_w = max(40, ip.w - 24 - 26)
+            btn_del_w = 22
+            btn_edit_w = 40
+            r_w = max(40, ip.w - 24 - btn_del_w - btn_edit_w - 8)
             put(r_btn, x=ip.x + 12, y=cur_y, w=r_w, h=22, text=f"{r_name} -> {tgt_name}")
-            put(u_btn, x=ip.x + 12 + r_w + 4, y=cur_y, w=22, h=22, text='x')
+            put(edit_btn, x=ip.x + 12 + r_w + 4, y=cur_y, w=btn_edit_w, h=22, text='Edit')
+            put(u_btn, x=ip.x + 12 + r_w + 4 + btn_edit_w + 4, y=cur_y, w=btn_del_w, h=22, text='x')
             r_btn.action = lambda t=r_target: select(t)
+            edit_btn.action = lambda n=r_name, tn=tgt_name: start_edit_link(n, tn)
             u_btn.action = lambda n=r_name: unlink_relation(n)
+            r_btn.relation_key = r_name
+            r_btn.relations['target'] = entity
+            edit_btn.relation_key = r_name
+            edit_btn.relations['target'] = entity
             cur_y += 24
     for r_btn, u_btn in state.relation_rows[num_rel_rows:]:
         put(r_btn, visible=False)
         put(u_btn, visible=False)
+    for edit_btn in state.relation_edit_buttons[num_rel_rows:]:
+        put(edit_btn, visible=False)
     if num_rel_rows > 0:
         cur_y += 4
 
@@ -663,13 +700,36 @@ def commit_tags():
 
 def resolve_name(text):
     text = text.strip()
+    if not text:
+        raise ValueError('Enter an entity name or UUID')
     try:
         return state.runtime.resolve(text)
     except (ValueError, KeyError):
-        matches = [e for e in state.runtime.entities if e.components.get('name') == text]
-        if len(matches) != 1:
-            raise ValueError('Use a unique entity name or UUID') from None
-        return matches[0]
+        exact = [e for e in state.runtime.entities if e.components.get('name') == text]
+        if len(exact) == 1:
+            return exact[0]
+        if len(exact) > 1:
+            raise ValueError(f"Ambiguous entity name '{text}'. Use UUID instead.")
+
+        lower_matches = [e for e in state.runtime.entities if str(e.components.get('name', '')).lower() == text.lower()]
+        if len(lower_matches) == 1:
+            return lower_matches[0]
+        if len(lower_matches) > 1:
+            raise ValueError(f"Ambiguous entity name '{text}'. Use UUID instead.")
+
+        uuid_matches = [e for e in state.runtime.entities if str(e.id).lower().startswith(text.lower())]
+        if len(uuid_matches) == 1:
+            return uuid_matches[0]
+        if len(uuid_matches) > 1:
+            raise ValueError(f"Ambiguous UUID prefix '{text}'. Use full UUID.")
+
+        tag_matches = [e for e in state.runtime.entities if text in e.tags]
+        if len(tag_matches) == 1:
+            return tag_matches[0]
+        if len(tag_matches) > 1:
+            raise ValueError(f"Multiple entities share tag '{text}'. Use UUID or unique name.")
+
+        raise ValueError(f"No entity found matching '{text}'")
 
 def commit_parent():
     text = state.parent_field.buffer.text.strip()
@@ -679,15 +739,62 @@ def commit_parent():
     inspector_sync()
 
 def commit_relation():
-    name, separator, text = state.relation_field.buffer.text.partition('=')
-    if not separator or not name.strip():
-        raise ValueError('Use relation=entity name or UUID')
-    if text.strip():
-        selected().relations[name.strip()] = resolve_name(text)
+    raw = state.relation_field.buffer.text.strip()
+    if not raw:
+        raise ValueError('Enter relation=target or target name')
+    editing_rel = state.relation_field.components.pop("editing_relation", None)
+    if '=' in raw:
+        name, _, text = raw.partition('=')
+        name = name.strip()
+        text = text.strip()
+        if not name:
+            raise ValueError('Use relation=entity name or UUID')
+        if text:
+            target = resolve_name(text)
+            if editing_rel and editing_rel != name:
+                selected().relations.pop(editing_rel, None)
+            selected().relations[name] = target
+            tgt_name = str(target.components.get('name', str(target.id)[:8]))
+            message(f"Linked '{name}' -> '{tgt_name}'")
+        else:
+            rel_to_remove = editing_rel or name
+            selected().relations.pop(rel_to_remove, None)
+            message(f"Unlinked relation '{rel_to_remove}'")
     else:
-        selected().relations.pop(name.strip(), None)
+        target = resolve_name(raw)
+        tgt_name = str(target.components.get('name', str(target.id)[:8]))
+        name = editing_rel or tgt_name.lower().replace(" ", "_")
+        selected().relations[name] = target
+        message(f"Linked '{name}' -> '{tgt_name}'")
     state.relation_field.buffer = TextBuffer()
-    message('Relation updated')
+    inspector_sync()
+
+def start_edit_link(name, tgt_name=None):
+    ent = selected()
+    if tgt_name is None:
+        tgt = ent.relations.get(name)
+        tgt_name = str(tgt.components.get('name', str(tgt.id)[:8])) if tgt else ''
+    state.relation_field.buffer = TextBuffer(f"{name}={tgt_name}")
+    state.relation_field.buffer.anchor = 0
+    state.relation_field.buffer.cursor = len(state.relation_field.buffer.text)
+    state.relation_field.components["editing_relation"] = name
+    state.ui.focus(state.relation_field)
+    message(f"Editing link '{name}'. Press Enter or click + to save.")
+
+def quick_link_to(target):
+    source = selected()
+    if source is target:
+        message("Cannot link entity to itself")
+        return
+    tgt_name = str(target.components.get('name', str(target.id)[:8]))
+    base_name = tgt_name.lower().replace(" ", "_")
+    name = base_name
+    count = 1
+    while name in source.relations and source.relations[name] is not target:
+        count += 1
+        name = f"{base_name}_{count}"
+    source.relations[name] = target
+    message(f"Linked '{name}' -> '{tgt_name}'")
     inspector_sync()
 
 
@@ -759,6 +866,9 @@ def unlink_relation(name):
     ent = selected()
     if name in ent.relations:
         del ent.relations[name]
+        if state.relation_field.components.get("editing_relation") == name:
+            state.relation_field.components.pop("editing_relation", None)
+            state.relation_field.buffer = TextBuffer()
         message(f"Unlinked relation '{name}'")
         inspector_sync()
 
@@ -792,6 +902,27 @@ def quick_add_color():
     ent.components.setdefault("color", (200, 200, 200))
     message("Added Color")
     inspector_sync()
+
+
+def quick_add_speed():
+    ent = selected()
+    ent.components.setdefault("speed", 100.0)
+    message("Added Speed")
+    inspector_sync()
+
+
+def open_add_component_menu():
+    ent = selected()
+    actions = [
+        dict(label="+ Transform / Pos (x, y)", run=lambda e: (select(ent), quick_add_pos())),
+        dict(label="+ Size (w, h)", run=lambda e: (select(ent), quick_add_size())),
+        dict(label="+ Velocity (vx, vy)", run=lambda e: (select(ent), quick_add_vel())),
+        dict(label="+ Color (r, g, b)", run=lambda e: (select(ent), quick_add_color())),
+        dict(label="+ Speed", run=lambda e: (select(ent), quick_add_speed())),
+        None,
+        dict(label="Custom Component...", run=lambda e: context_add_component(ent)),
+    ]
+    open_menu(state.ui, ent, state.add_comp_menu_button.x, state.add_comp_menu_button.y + state.add_comp_menu_button.h + 2, actions=actions)
 
 
 def hierarchy_scroll_drag(thumb, event):
@@ -1186,9 +1317,22 @@ def update(dt):
         put(state.code_info, text=f"Ln {row+1}, Col {column+1} | Attach target: {selected().components.get('name', selected().id)} | Ctrl+S save | F5 {run_status}", ink=MUTED)
 
 
+def context_rename(target):
+    select(target)
+    inspector_sync()
+    state.ui.focus(state.name_field)
+    buf = state.name_field.buffer
+    buf.anchor = 0
+    buf.cursor = len(buf.text)
+    ent_name = str(target.components.get('name', str(target.id)[:8]))
+    message(f"Renaming '{ent_name}' (type new name and press Enter)")
+
+
 def context_target(control, event):
     if 'component_key' in control.components and 'target' in control.relations:
         return dict(entity=control.relations['target'], component=control.component_key)
+    if 'relation_key' in control.components and 'target' in control.relations:
+        return dict(entity=control.relations['target'], relation=control.relation_key)
     if control is state.viewport:
         wx, wy = screen_to_world(state.camera, control, event[1], event[2])
         hits = set(space.query(wx, wy))
@@ -1196,27 +1340,72 @@ def context_target(control, event):
     for candidate in (control,) + control.ancestors:
         if 'target' in candidate.relations:
             return candidate.relations['target']
+    if control is state.inspector or state.inspector in control.ancestors:
+        return selected()
     return control
 
 
 def context_actions(target):
     if isinstance(target, dict) and 'component' in target:
-        return [dict(label='Inspect component', run=lambda t: open_panel(
-            target=t['entity'], component=t['component']))]
+        ent = target['entity']
+        comp = target['component']
+        return [
+            dict(label='Inspect component', run=lambda t: open_panel(target=ent, component=comp)),
+            dict(label=f"Delete '{comp}'", run=lambda t: delete_component(comp)),
+            None,
+            dict(label="Add component...", run=lambda t: context_add_component(ent)),
+        ]
+    if isinstance(target, dict) and 'relation' in target:
+        ent = target['entity']
+        rel = target['relation']
+        tgt = ent.relations.get(rel)
+        tgt_label = str(tgt.components.get('name', str(tgt.id)[:8])) if tgt else 'None'
+        actions = []
+        if tgt:
+            actions.append(dict(label=f"Select target ({tgt_label})", run=lambda t: select(tgt)))
+        actions.append(dict(label=f"Edit link '{rel}'...", run=lambda t: start_edit_link(rel)))
+        actions.append(dict(label=f"Unlink '{rel}'", run=lambda t: unlink_relation(rel)))
+        return actions
+
     if not hasattr(target, 'components') or not target.alive:
         return []
-    actions = [dict(label='Select', run=select),
-               dict(label='Inspect entity', run=lambda e: open_panel(target=e)),
-               dict(label='Add component...', run=context_add_component)]
+
+    actions = [
+        dict(label='Select', run=select),
+        dict(label='Rename', run=context_rename),
+        dict(label='Inspect entity', run=lambda e: open_panel(target=e)),
+        None,
+        dict(label='+ Add Pos (x, y)', run=lambda e: (select(e), quick_add_pos())),
+        dict(label='+ Add Size (w, h)', run=lambda e: (select(e), quick_add_size())),
+        dict(label='+ Add Velocity (vx, vy)', run=lambda e: (select(e), quick_add_vel())),
+        dict(label='+ Add Color', run=lambda e: (select(e), quick_add_color())),
+        dict(label='+ Add Speed', run=lambda e: (select(e), quick_add_speed())),
+        dict(label='+ Custom Component...', run=context_add_component),
+    ]
+
+    sel = selected()
+    if target is not sel and sel is not None and sel.alive:
+        tgt_name = str(target.components.get('name', str(target.id)[:8]))
+        actions.append(None)
+        actions.append(dict(label=f"Link from selected as '{tgt_name.lower()}'", run=lambda e: quick_link_to(e)))
+
     if target is state.game or state.game in target.ancestors:
-        actions += [None, dict(label='Add child entity', run=context_add_child)]
+        actions += [
+            None,
+            dict(label='Add child entity', run=context_add_child),
+            dict(label='Duplicate entity', run=lambda e: (select(e), inspector_duplicate_entity())),
+        ]
+        if target is not state.game:
+            actions.append(dict(label='Delete entity', run=lambda e: (select(e), inspector_delete_entity())))
         if 'x' in target.components and 'y' in target.components:
             actions.append(dict(label='Focus camera', run=context_focus_camera))
+
     return actions
 
 
 def context_add_component(target):
     select(target)
+    inspector_sync()
     state.ui.focus(state.add_name)
 
 

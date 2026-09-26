@@ -1076,6 +1076,129 @@ class EditorTests(unittest.TestCase):
         self.assertNotIn("ally", bare.relations)
         self.assertEqual(len([r for r, u in ed.relation_rows if r.visible]), 0)
 
+    def test_right_click_rename_in_hierarchy_and_inspector(self):
+        ed = self.editor
+        target = self.runtime.create(parent=ed.game, name="RenameTarget")
+        self.runtime.step(0)
+
+        # 1. Right click row in hierarchy
+        row = next(r for r in ed.hierarchy_rows if r.visible and r.relations.get("target") is target)
+        self.send(("click", row.x + 20, row.y + 10, 4, 0))
+        menu = ed.app.relations.get("context_menu")
+        self.assertIsNotNone(menu)
+        rename_btn = next(c for c in menu.children if c.components.get("text") == "Rename")
+        self.click(rename_btn)
+
+        # Verify target is selected and name_field is focused with all text selected
+        self.assertIs(ed.app.relations["selection"], target)
+        self.assertIs(ed.ui.focused, ed.name_field)
+        self.assertEqual(ed.name_field.buffer.selected_text, "RenameTarget")
+
+        # Type new name and commit with Enter
+        self.type(ed.name_field, "RenamedHero", commit=True)
+        self.assertEqual(target.components.get("name"), "RenamedHero")
+
+        # 2. Right click inside Inspector background / identity label
+        self.send(("click", ed.identity_label.x + 10, ed.identity_label.y + 5, 4, 0))
+        menu2 = ed.app.relations.get("context_menu")
+        self.assertIsNotNone(menu2)
+        self.assertIs(menu2.context_target, target)
+        rename_btn2 = next(c for c in menu2.children if c.components.get("text") == "Rename")
+        self.click(rename_btn2)
+        self.assertIs(ed.ui.focused, ed.name_field)
+        self.assertEqual(ed.name_field.buffer.selected_text, "RenamedHero")
+
+    def test_right_click_add_component_presets_and_custom(self):
+        ed = self.editor
+        ent = self.runtime.create(parent=ed.game, name="CompEntity")
+        self.select(ent)
+        self.runtime.step(0)
+
+        # 1. Context menu on entity provides component presets
+        self.send(("click", ed.identity_label.x + 10, ed.identity_label.y + 5, 4, 0))
+        menu = ed.app.relations.get("context_menu")
+        self.assertIsNotNone(menu)
+
+        speed_item = next(c for c in menu.children if c.components.get("text") == "+ Add Speed")
+        self.click(speed_item)
+        self.assertEqual(ent.components.get("speed"), 100.0)
+
+        # 2. Context menu '+ Custom Component...' focuses add_name
+        self.send(("click", ed.identity_label.x + 10, ed.identity_label.y + 5, 4, 0))
+        menu = ed.app.relations.get("context_menu")
+        custom_item = next(c for c in menu.children if c.components.get("text") == "+ Custom Component...")
+        self.click(custom_item)
+        self.assertIs(ed.ui.focused, ed.add_name)
+
+        # 3. Dedicated '+ Component' button opens preset menu
+        self.assertTrue(ed.add_comp_menu_button.visible)
+        self.click(ed.add_comp_menu_button)
+        menu = ed.app.relations.get("context_menu")
+        self.assertIsNotNone(menu)
+        color_item = next(c for c in menu.children if "+ Color" in c.components.get("text", ""))
+        self.click(color_item)
+        self.assertEqual(ent.components.get("color"), (200, 200, 200))
+
+    def test_relation_add_and_edit_workflow(self):
+        ed = self.editor
+        ship = self.runtime.create(parent=ed.game, name="HeroShip")
+        dock = self.runtime.create(parent=ed.game, name="DockingBay")
+        self.select(ship)
+        self.runtime.step(0)
+
+        # 1. Add link using '+' button with case-insensitive bare target name
+        self.type(ed.relation_field, "dockingbay")
+        self.click(ed.link_add_button)
+        self.assertIs(ship.relations.get("dockingbay"), dock)
+
+        # 2. Existing relation row has [Edit] button
+        self.assertEqual(len([r for r, u in ed.relation_rows if r.visible]), 1)
+        rel_btn, unlink_btn = ed.relation_rows[0]
+        edit_btn = ed.relation_edit_buttons[0]
+        self.assertTrue(edit_btn.visible)
+        self.click(edit_btn)
+
+        # Check relation_field is populated and focused for editing
+        self.assertEqual(ed.relation_field.buffer.text, "dockingbay=DockingBay")
+        self.assertIs(ed.ui.focused, ed.relation_field)
+
+        # Update relation name to 'home_port' and click '+' button
+        self.type(ed.relation_field, "home_port=DockingBay")
+        self.click(ed.link_add_button)
+        self.assertIs(ship.relations.get("home_port"), dock)
+        self.assertNotIn("dockingbay", ship.relations)
+
+        # 3. Right-clicking relation row shows context menu
+        self.send(("click", rel_btn.x + 10, rel_btn.y + 5, 4, 0))
+        menu = ed.app.relations.get("context_menu")
+        self.assertIsNotNone(menu)
+        unlink_item = next(c for c in menu.children if "Unlink 'home_port'" in c.components.get("text", ""))
+        self.click(unlink_item)
+        self.assertNotIn("home_port", ship.relations)
+
+    def test_inspector_header_layout_and_button_dimensions(self):
+        ed = self.editor
+        self.select(ed.game)
+        self.runtime.step(0)
+
+        ip = ed.inspector
+        # Check Row 3 entity action buttons have sufficient width (>= 60px) and no overlap
+        b_child, b_dup, b_del = ed.add_child_button, ed.duplicate_button, ed.delete_button
+        self.assertGreaterEqual(b_child.w, 60)
+        self.assertGreaterEqual(b_dup.w, 60)
+        self.assertGreaterEqual(b_del.w, 60)
+
+        self.assertLessEqual(b_child.x + b_child.w, b_dup.x)
+        self.assertLessEqual(b_dup.x + b_dup.w, b_del.x)
+        self.assertLessEqual(b_del.x + b_del.w, ip.x + ip.w)
+
+        # Check section header COMPONENTS
+        self.assertTrue(ed.components_title.visible)
+        self.assertEqual(ed.components_title.components.get("text"), "COMPONENTS")
+        self.assertTrue(ed.add_comp_menu_button.visible)
+        self.assertLess(ed.components_title.y, ed.add_name.y)
+
+
 
 
 
