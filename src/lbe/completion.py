@@ -212,19 +212,51 @@ def hover_info(source, line, column, path, context=()):
             return None
         d = definitions[0]
         desc = getattr(d, "description", "") or f"{d.type} {d.name}"
-        signatures = getattr(d, "signatures", [])
-        if signatures:
-            sig_strs = [s.to_string() for s in signatures if hasattr(s, "to_string")]
-            if sig_strs:
-                desc = f"{d.type} {sig_strs[0]}"
-        elif d.type == "function" and d.docstring() and d.docstring().startswith(f"{d.name}("):
-            desc = f"def {d.docstring().splitlines()[0]}"
-        doc = d.docstring(raw=True) or d.docstring() or ""
+
+        # Extract signatures from Jedi (via get_signatures or signatures attribute)
+        sig_strs = []
+        if hasattr(d, "get_signatures") and callable(d.get_signatures):
+            try:
+                sig_strs = [s.to_string() for s in d.get_signatures() if hasattr(s, "to_string")]
+            except Exception:
+                sig_strs = []
+        elif hasattr(d, "signatures"):
+            s_attr = getattr(d, "signatures")
+            sig_list = s_attr() if callable(s_attr) else s_attr
+            sig_strs = [s.to_string() for s in (sig_list or []) if hasattr(s, "to_string")]
+
+        raw_doc = d.docstring(raw=True) or d.docstring() or ""
+
+        # Extract docstring signatures and clean description body
+        doc_lines = [l.strip() for l in raw_doc.splitlines()]
+        doc_signatures = []
+        doc_body = []
+        past_sig = False
+        for l in doc_lines:
+            if not l:
+                if doc_signatures:
+                    past_sig = True
+                continue
+            if not past_sig and (l.startswith(f"{d.name}(") or " -> " in l):
+                doc_signatures.append(l)
+                continue
+            past_sig = True
+            doc_body.append(l)
+
+        all_sigs = doc_signatures or sig_strs
+        if all_sigs:
+            desc = f"{d.type} {all_sigs[0]}"
+
+        cleaned_doc = "\n".join(doc_body).strip()
+        if not cleaned_doc and raw_doc:
+            cleaned_doc = raw_doc.strip()
+
         return {
             "name": d.name,
             "type": d.type,
             "description": desc,
-            "docstring": doc.strip(),
+            "signatures": all_sigs,
+            "docstring": cleaned_doc,
             "line": line,
             "column": column,
         }

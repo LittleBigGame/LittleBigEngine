@@ -1459,6 +1459,68 @@ class EditorTests(unittest.TestCase):
         self.runtime.step(0)
         self.assertFalse(code.components.get("hover_state", {}).get("active", False))
 
+    def test_hover_range_overloads_and_docstrings(self):
+        """Issue #55: Multi-signature overloads and multi-line docstring rendering for range."""
+        if importlib.util.find_spec("jedi") is None:
+            self.skipTest("Jedi is an optional editor dependency")
+        from lbe.completion import hover_info
+        info = hover_info("x = range(10)", 0, 6, "main.py")
+        self.assertIsNotNone(info)
+        self.assertEqual(info["name"], "range")
+        self.assertGreaterEqual(len(info.get("signatures", [])), 2)
+        self.assertTrue(any("stop" in s for s in info["signatures"]))
+        self.assertTrue(any("step" in s for s in info["signatures"]))
+        self.assertIn("sequence of integers", info.get("docstring", ""))
+        self.assertFalse(info["docstring"].startswith("range("))
+
+        # Test editor UI hover rendering
+        code = self.editor.code
+        pitch = code.components.get("pitch", 8.0)
+        line_height = code.components.get("line_height", 20)
+        self.click(code)
+        self.send(("key", "A", True, False), ("key", "BACKSPACE", False, False))
+        self.send(("text", "x = range(10)\n"))
+        self.runtime.step(0)
+
+        # Position mouse over 'range' (row 0, col 6)
+        mx = code.x + 48 + 6 * pitch
+        my = code.y + 6 + line_height / 2
+        self.send(("motion", mx, my))
+
+        # Dwell for hover activation
+        self.runtime.step(0.4)
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            self.runtime.step(0.05)
+            h_state = code.components.get("hover_state", {})
+            if h_state.get("active"):
+                break
+            time.sleep(0.01)
+
+        self.assertTrue(h_state.get("active"), "Hover tooltip should activate for range")
+        tip = next((c for c in code.children if c.components.get("part") == "hover_panel"), None)
+        self.assertIsNotNone(tip)
+        self.assertTrue(tip.visible)
+
+        # Check that hover_line:0 displays the alternate signature and hover_line:1 displays docstring
+        line0 = next((c for c in code.children if c.components.get("part") == "hover_line:0"), None)
+        self.assertIsNotNone(line0)
+        self.assertTrue(line0.visible)
+        self.assertIn("range", line0.text)
+        self.assertIn("step", line0.text)
+
+        line1 = next((c for c in code.children if c.components.get("part") == "hover_line:1"), None)
+        self.assertIsNotNone(line1)
+        self.assertTrue(line1.visible)
+        self.assertTrue(len(line1.text) > 0)
+
+        # Calling stop() cleans up hover child parts
+        code.systems["code_editor"].stop()
+        self.assertFalse(tip.visible)
+        self.assertFalse(line0.visible)
+        self.assertFalse(line1.visible)
+
+
     def test_multiline_call_newline_and_safe_ctrl_backspace(self):
         code = self.editor.code
         self.click(code)

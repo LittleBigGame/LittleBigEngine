@@ -448,6 +448,9 @@ def sync_autocomplete_popup(target, ui, ac_state):
         put(scrollbar_thumb, visible=False)
 
 
+MAX_HOVER_DOC_LINES = 6
+
+
 def sync_hover_tooltip(target, ui, hover_state):
     children = {c.components.get("part"): c for c in target.children}
 
@@ -464,6 +467,10 @@ def sync_hover_tooltip(target, ui, hover_state):
         put(tip_panel, visible=False)
         put(tip_title, visible=False)
         put(tip_doc, visible=False)
+        for i in range(MAX_HOVER_DOC_LINES):
+            lbl = children.get(f"hover_line:{i}")
+            if lbl:
+                put(lbl, visible=False)
         return
 
     info = hover_state["info"]
@@ -471,13 +478,41 @@ def sync_hover_tooltip(target, ui, hover_state):
     pitch = target.components.get("pitch", 8)
 
     title_text = info.get("description", info.get("name", ""))
+    signatures = info.get("signatures", [])
     doc_text = info.get("docstring", "")
-    if len(doc_text) > 300:
-        doc_text = doc_text[:300] + "..."
 
-    has_doc = bool(doc_text)
-    tip_w = min(max(200, max(len(title_text) * pitch + 24, 200)), max(100, target.w - 32))
-    tip_h = 24 + (24 if has_doc else 0)
+    display_lines = []
+    # If multiple signatures or signature is distinct from title
+    if signatures:
+        for sig in signatures[:2]:
+            sig_line = sig.strip()
+            if sig_line and sig_line != title_text and f"{info.get('type', '')} {sig_line}" != title_text:
+                display_lines.append((sig_line, (165, 214, 255)))
+
+    if doc_text:
+        import textwrap
+        for paragraph in doc_text.split("\n\n"):
+            clean_para = " ".join(paragraph.split())
+            if not clean_para:
+                continue
+            wrapped = textwrap.wrap(clean_para, width=54)
+            for w_line in wrapped:
+                if len(display_lines) >= MAX_HOVER_DOC_LINES:
+                    break
+                display_lines.append((w_line, INK))
+            if len(display_lines) >= MAX_HOVER_DOC_LINES:
+                break
+
+    # Calculate layout dimensions
+    max_line_len = len(title_text)
+    for l_text, _ in display_lines:
+        max_line_len = max(max_line_len, len(l_text))
+
+    line_h = 18
+    pad_y = 6
+    pad_x = 8
+    tip_w = min(max(220, max_line_len * pitch + pad_x * 2 + 8), max(120, target.w - 32))
+    tip_h = pad_y * 2 + (1 + len(display_lines)) * line_h
 
     tip_x = max(target.x + 8, min(mx + 10, target.x + target.w - tip_w - 8))
     tip_y = my + 18
@@ -485,12 +520,20 @@ def sync_hover_tooltip(target, ui, hover_state):
         tip_y = max(target.y + 4, my - tip_h - 6)
 
     put(tip_panel, visible=True, x=tip_x, y=tip_y, w=tip_w, h=tip_h)
-    put(tip_title, visible=True, x=tip_x + 8, y=tip_y + 4, w=tip_w - 16, h=16, text=title_text)
-    if has_doc:
-        first_line = doc_text.split("\n")[0][:65]
-        put(tip_doc, visible=True, x=tip_x + 8, y=tip_y + 22, w=tip_w - 16, h=16, text=first_line)
-    else:
-        put(tip_doc, visible=False)
+    put(tip_title, visible=True, x=tip_x + pad_x, y=tip_y + pad_y, w=tip_w - pad_x * 2, h=line_h, text=title_text)
+
+    # Position each display line
+    curr_y = tip_y + pad_y + line_h
+    for i in range(MAX_HOVER_DOC_LINES):
+        line_lbl = part(f"hover_line:{i}", "label", layer=target.layer + 7)
+        if i < len(display_lines):
+            l_text, l_color = display_lines[i]
+            put(line_lbl, visible=True, x=tip_x + pad_x, y=curr_y, w=tip_w - pad_x * 2, h=line_h, text=l_text, ink=l_color)
+            curr_y += line_h
+        else:
+            put(line_lbl, visible=False)
+
+    put(tip_doc, visible=False)
 
 
 def update(dt):
@@ -628,9 +671,7 @@ def stop():
     popup_parts = ("autocomplete_popup", "ac_scroll_track", "ac_scroll_thumb",
                    "hover_panel", "hover_title", "hover_doc")
     for child in entity.children:
-        if child.components.get("part") in popup_parts:
+        p = child.components.get("part", "")
+        if p in popup_parts or p.startswith("hover_line:") or p.startswith("ac_item:"):
             child.visible = False
-    for i in range(VISIBLE_ITEMS):
-        for child in entity.children:
-            if child.components.get("part") == f"ac_item:{i}":
-                child.visible = False
+
