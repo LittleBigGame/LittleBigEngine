@@ -1631,3 +1631,44 @@ class EditorTests(unittest.TestCase):
         self.runtime.step(0)
         self.assertIsNone(code.components.get("matching_brackets"))
 
+    def test_editor_tab_and_shift_tab_multiline_indent_dedent(self):
+        """Issue #49: Tab and Shift+Tab in code editor indents/dedents selected lines."""
+        code = self.editor.code
+        self.click(code)
+        self.send(("key", "A", True, False), ("key", "BACKSPACE", False, False))
+        text = "def test():\n    a = 1\n    b = 2"
+        self.send(("text", text))
+
+        # Select lines 1-2
+        code.buffer.anchor = code.buffer.text.index("    a")
+        code.buffer.cursor = len(code.buffer.text)
+        code.components.touch("buffer")
+        self.runtime.step(0)
+
+        # Tab indents both lines to 8 spaces
+        self.send(("key", "TAB", False, False))
+        self.assertEqual(code.buffer.text, "def test():\n        a = 1\n        b = 2")
+
+        # Shift+Tab dedents both lines back to 4 spaces
+        self.send(("key", "TAB", False, True))
+        self.assertEqual(code.buffer.text, "def test():\n    a = 1\n    b = 2")
+
+    def test_editor_ctrl_slash_comment_toggle(self):
+        """Issue #49: Ctrl+/ toggles line comment with atomic undo."""
+        code = self.editor.code
+        self.click(code)
+        self.send(("key", "A", True, False), ("key", "BACKSPACE", False, False))
+        self.send(("text", "x = 10"))
+
+        # Ctrl+/ comments line
+        self.send(("key", "SLASH", True, False))
+        self.assertEqual(code.buffer.text, "# x = 10")
+
+        # Ctrl+/ again uncomments line
+        self.send(("key", "SLASH", True, False))
+        self.assertEqual(code.buffer.text, "x = 10")
+
+        # Undo restores commented state in one step
+        self.send(("key", "Z", True, False))
+        self.assertEqual(code.buffer.text, "# x = 10")
+

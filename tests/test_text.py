@@ -22,6 +22,7 @@ class TextTests(unittest.TestCase):
         buffer.insert("pass")
         self.assertEqual(buffer.text, "def update(dt):\n    pass")
         buffer.move("HOME")
+        buffer.move("HOME")
         buffer.move("RIGHT", select=True)
         self.assertEqual(buffer.selected_text, " ")
         buffer.delete()
@@ -209,5 +210,125 @@ class TextTests(unittest.TestCase):
         buf_lines.move("PAGEUP")
         self.assertEqual(buf_lines.position[0], 20)
 
+    def test_smart_home_toggle(self):
+        """Issue #49: Home toggles between first non-whitespace character and column 0."""
+        buf = TextBuffer("    hello world")
+        buf.cursor = buf.anchor = len(buf.text)  # at end of line (col 15)
 
+        # 1st Home -> moves to col 4 (first non-whitespace)
+        buf.move("HOME")
+        self.assertEqual(buf.position, (0, 4))
+
+        # 2nd Home -> moves to col 0
+        buf.move("HOME")
+        self.assertEqual(buf.position, (0, 0))
+
+        # 3rd Home -> toggles back to col 4
+        buf.move("HOME")
+        self.assertEqual(buf.position, (0, 4))
+
+        # Shift+Home extends selection
+        buf.cursor = buf.anchor = len(buf.text)
+        buf.move("HOME", select=True)
+        self.assertEqual(buf.selected_text, "hello world")
+        buf.move("HOME", select=True)
+        self.assertEqual(buf.selected_text, "    hello world")
+
+    def test_preferred_column_preservation(self):
+        """Issue #49: Vertical movement through short lines preserves target column."""
+        text = (
+            "abcdefghijklmnopqrst\n"  # 20 chars
+            "12345\n"                 # 5 chars
+            "ABCDEFGHIJKLMNOPQRSTUVWXY" # 25 chars
+        )
+        buf = TextBuffer(text)
+        buf.cursor = buf.anchor = 15  # col 15 on line 0
+        self.assertEqual(buf.position, (0, 15))
+
+        # Move DOWN to short line 1 -> clamped to col 5
+        buf.move("DOWN")
+        self.assertEqual(buf.position, (1, 5))
+
+        # Move DOWN to long line 2 -> preferred column 15 restored!
+        buf.move("DOWN")
+        self.assertEqual(buf.position, (2, 15))
+
+        # Move UP to short line 1 -> clamped to col 5
+        buf.move("UP")
+        self.assertEqual(buf.position, (1, 5))
+
+        # Move UP to line 0 -> preferred column 15 restored!
+        buf.move("UP")
+        self.assertEqual(buf.position, (0, 15))
+
+        # Horizontal movement resets preferred column
+        buf.move("LEFT")
+        self.assertEqual(buf.position, (0, 14))
+        buf.move("DOWN")
+        self.assertEqual(buf.position, (1, 5))
+        buf.move("DOWN")
+        self.assertEqual(buf.position, (2, 14))
+
+    def test_tab_and_shift_tab_multiline_indent_dedent(self):
+        """Issue #49: Tab indents, Shift+Tab dedents selected lines, with atomic undo."""
+        text = "def foo():\n    x = 1\n    y = 2"
+        buf = TextBuffer(text)
+
+        # Select lines 1 and 2
+        buf.anchor = text.index("    x")
+        buf.cursor = len(text)
+
+        # Tab: indent selected lines
+        buf.indent(dedent=False)
+        self.assertEqual(buf.text, "def foo():\n        x = 1\n        y = 2")
+
+        # Shift+Tab: dedent selected lines
+        buf.indent(dedent=True)
+        self.assertEqual(buf.text, "def foo():\n    x = 1\n    y = 2")
+
+        # Atomic undo reverses operation in one step
+        buf.undo()
+        self.assertEqual(buf.text, "def foo():\n        x = 1\n        y = 2")
+        buf.undo()
+        self.assertEqual(buf.text, "def foo():\n    x = 1\n    y = 2")
+
+        # Single cursor (no selection): Tab inserts 4 spaces
+        buf.text = "def foo():\n    x = 1"
+        buf.cursor = buf.anchor = len(buf.text)
+        buf.indent(dedent=False)
+        self.assertEqual(buf.text, "def foo():\n    x = 1    ")
+
+        # Single cursor dedent: removes up to 4 leading spaces from current line
+        buf.text = "def foo():\n        x = 1"
+        buf.cursor = buf.anchor = len(buf.text)
+        buf.indent(dedent=True)
+        self.assertEqual(buf.text, "def foo():\n    x = 1")
+
+    def test_toggle_comment_single_and_multiline(self):
+        """Issue #49: Ctrl+/ comment toggling on single and multiple lines with atomic undo."""
+        text = "def foo():\n    x = 1\n    y = 2"
+        buf = TextBuffer(text)
+
+        # 1. Single line comment toggle
+        buf.cursor = buf.anchor = text.index("x = 1")
+        buf.toggle_comment()
+        self.assertEqual(buf.text, "def foo():\n    # x = 1\n    y = 2")
+        buf.toggle_comment()
+        self.assertEqual(buf.text, "def foo():\n    x = 1\n    y = 2")
+
+        # 2. Multi-line comment toggle
+        buf.anchor = text.index("    x")
+        buf.cursor = len(text)
+        buf.toggle_comment()
+        self.assertEqual(buf.text, "def foo():\n    # x = 1\n    # y = 2")
+
+        # Toggle again uncomments
+        buf.toggle_comment()
+        self.assertEqual(buf.text, "def foo():\n    x = 1\n    y = 2")
+
+        # Atomic undo
+        buf.undo()
+        self.assertEqual(buf.text, "def foo():\n    # x = 1\n    # y = 2")
+        buf.undo()
+        self.assertEqual(buf.text, "def foo():\n    x = 1\n    y = 2")
 
