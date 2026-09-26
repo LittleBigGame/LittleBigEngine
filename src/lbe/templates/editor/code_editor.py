@@ -35,15 +35,88 @@ def text_index_to_pos(text, index):
     return prefix.count("\n"), len(prefix.rsplit("\n", 1)[-1])
 
 
+def mask_code(text):
+    """Return text of identical length where characters inside strings and comments are replaced with spaces.
+
+    Newlines are preserved so row and column mapping is unchanged.
+    """
+    out = []
+    i = 0
+    n = len(text)
+    while i < n:
+        c = text[i]
+        if c == "#":
+            while i < n and text[i] != "\n":
+                out.append(" ")
+                i += 1
+            if i < n and text[i] == "\n":
+                out.append("\n")
+                i += 1
+            continue
+
+        if text[i:i + 3] in ('"""', "'''"):
+            q = text[i:i + 3]
+            out.extend([" ", " ", " "])
+            i += 3
+            while i < n:
+                if text[i:i + 3] == q:
+                    out.extend([" ", " ", " "])
+                    i += 3
+                    break
+                elif text[i] == "\\":
+                    out.append(" ")
+                    i += 1
+                    if i < n:
+                        out.append("\n" if text[i] == "\n" else " ")
+                        i += 1
+                elif text[i] == "\n":
+                    out.append("\n")
+                    i += 1
+                else:
+                    out.append(" ")
+                    i += 1
+            continue
+
+        if c in ('"', "'"):
+            q = c
+            out.append(" ")
+            i += 1
+            while i < n:
+                if text[i] == q:
+                    out.append(" ")
+                    i += 1
+                    break
+                elif text[i] == "\\":
+                    out.append(" ")
+                    i += 1
+                    if i < n:
+                        out.append("\n" if text[i] == "\n" else " ")
+                        i += 1
+                elif text[i] == "\n":
+                    out.append("\n")
+                    i += 1
+                    break
+                else:
+                    out.append(" ")
+                    i += 1
+            continue
+
+        out.append(c)
+        i += 1
+
+    return "".join(out)
+
+
 def find_matching_brackets(text, cursor):
-    """Find (open_pos, close_pos) for a bracket adjacent to the cursor."""
+    """Find (open_pos, close_pos) for a bracket adjacent to the cursor, ignoring strings/comments."""
     if not text or cursor < 0 or cursor > len(text):
         return None
+    masked = mask_code(text)
     candidates = []
     if cursor > 0:
-        candidates.append((cursor - 1, text[cursor - 1]))
+        candidates.append((cursor - 1, masked[cursor - 1]))
     if cursor < len(text):
-        candidates.append((cursor, text[cursor]))
+        candidates.append((cursor, masked[cursor]))
 
     for pos, ch in candidates:
         if ch in ('(', '[', '{'):
@@ -51,8 +124,8 @@ def find_matching_brackets(text, cursor):
             close_ch = PAIRS[open_ch]
             depth = 1
             idx = pos + 1
-            while idx < len(text):
-                c = text[idx]
+            while idx < len(masked):
+                c = masked[idx]
                 if c == open_ch:
                     depth += 1
                 elif c == close_ch:
@@ -66,7 +139,7 @@ def find_matching_brackets(text, cursor):
             depth = 1
             idx = pos - 1
             while idx >= 0:
-                c = text[idx]
+                c = masked[idx]
                 if c == close_ch:
                     depth += 1
                 elif c == open_ch:
@@ -93,10 +166,11 @@ def find_open_bracket_indent(text, cursor, close_char):
     if close_char not in CLOSING:
         return None
     open_char = CLOSING[close_char]
+    masked = mask_code(text)
     depth = 1
     idx = cursor - 1
     while idx >= 0:
-        c = text[idx]
+        c = masked[idx]
         if c == close_char:
             depth += 1
         elif c == open_char:
@@ -130,30 +204,45 @@ def handle_editor_text(control, event):
         return True
 
     # 2. Type-over or dedent closing delimiter
+    #    Skip quotes on indented empty lines so they fall through to auto-close.
+    is_quote = char in ("'", '"')
     if start == end and char in CLOSING:
         line_start = buffer.text.rfind("\n", 0, buffer.cursor) + 1
         line_prefix = buffer.text[line_start:buffer.cursor]
-        if line_prefix.strip() == "":
+
+        # Type-over: next char matches this closing delimiter
+        if buffer.cursor < len(buffer.text) and buffer.text[buffer.cursor] == char:
+            # Dedent indented closer first if applicable
+            if not is_quote and line_prefix.strip() == "":
+                target_indent = find_open_bracket_indent(buffer.text, buffer.cursor, char)
+                if target_indent is not None and len(line_prefix) > len(target_indent):
+                    buffer.anchor = line_start
+                    buffer.cursor = line_start + len(line_prefix)
+                    buffer.insert(target_indent)
+            buffer.move("RIGHT")
+            control.components.touch("buffer")
+            return True
+
+        # Dedent + insert for bracket closers on empty lines (not quotes)
+        if not is_quote and line_prefix.strip() == "":
             target_indent = find_open_bracket_indent(buffer.text, buffer.cursor, char)
             if target_indent is not None and len(line_prefix) > len(target_indent):
                 buffer.anchor = line_start
                 buffer.cursor = line_start + len(line_prefix)
                 buffer.insert(target_indent)
-
-        if buffer.cursor < len(buffer.text) and buffer.text[buffer.cursor] == char:
-            buffer.move("RIGHT")
-            control.components.touch("buffer")
-            return True
-        elif line_prefix.strip() == "":
             buffer.insert(char)
             control.components.touch("buffer")
             return True
 
     # 3. Auto-close opening delimiter
     if start == end and char in PAIRS:
-        # Don't auto-close quotes inside words
-        if char in ("'", '"') and buffer.cursor > 0 and buffer.text[buffer.cursor - 1].isalnum():
-            return False
+        # Don't auto-close quotes inside words, but allow Python string prefixes
+        if char in ("'", '"') and buffer.cursor > 0:
+            prefix_match = re.search(r"[A-Za-z0-9_]+$", buffer.text[:buffer.cursor])
+            if prefix_match:
+                word = prefix_match.group()
+                if word.lower() not in ("f", "r", "b", "u", "fr", "rf", "br", "rb"):
+                    return False
         close_char = PAIRS[char]
         buffer.insert(char + close_char)
         buffer.cursor = buffer.anchor = start + 1

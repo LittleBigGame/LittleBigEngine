@@ -1564,4 +1564,70 @@ class EditorTests(unittest.TestCase):
         if popup is not None:
             code.systems["code_editor"].stop()
             self.assertFalse(popup.visible)
+    def test_quote_auto_pairing_on_indented_empty_line(self):
+        """Issue #48: Typing quote on an indented line must auto-close with cursor between."""
+        code = self.editor.code
+        self.click(code)
+        self.send(("key", "A", True, False), ("key", "BACKSPACE", False, False))
+        self.send(("text", "    "))  # 4 spaces indent
+        self.assertEqual(code.buffer.text, "    ")
+        self.assertEqual(code.buffer.cursor, 4)
+
+        # Type double quote
+        self.send(("text", '"'))
+        self.assertEqual(code.buffer.text, '    ""')
+        self.assertEqual(code.buffer.cursor, 5)
+
+        # Type-over closing double quote
+        self.send(("text", '"'))
+        self.assertEqual(code.buffer.text, '    ""')
+        self.assertEqual(code.buffer.cursor, 6)
+
+    def test_string_prefix_quote_auto_pairing(self):
+        """Issue #48: String prefix letters (f, r, b, u, fr, etc.) must allow quote auto-close."""
+        code = self.editor.code
+        self.click(code)
+
+        for prefix in ("f", "r", "b", "u", "fr", "rf"):
+            self.send(("key", "A", True, False), ("key", "BACKSPACE", False, False))
+            self.send(("text", prefix))
+            self.send(("text", '"'))
+            self.assertEqual(code.buffer.text, f'{prefix}""', f"Failed for prefix {prefix}")
+            self.assertEqual(code.buffer.cursor, len(prefix) + 1)
+
+        # Non-prefix word must NOT auto-close
+        self.send(("key", "A", True, False), ("key", "BACKSPACE", False, False))
+        self.send(("text", "word"))
+        self.send(("text", '"'))
+        self.assertEqual(code.buffer.text, 'word"')
+        self.assertEqual(code.buffer.cursor, 5)
+
+    def test_bracket_matching_ignores_comments_and_strings(self):
+        """Issue #48: Brackets inside comments and string literals must not fool bracket matcher."""
+        code = self.editor.code
+        self.click(code)
+        self.send(("key", "A", True, False), ("key", "BACKSPACE", False, False))
+        source = (
+            "# A comment with (unmatched paren\n"
+            "s = 'also (unmatched'\n"
+            "def foo(x):\n"
+            "    return x"
+        )
+        self.send(("text", source))
+
+        # Cursor right after ( in foo(x)
+        idx_open = source.index("def foo(") + len("def foo(")
+        code.buffer.cursor = code.buffer.anchor = idx_open
+        self.runtime.step(0)
+        matching = code.components.get("matching_brackets")
+        self.assertIsNotNone(matching)
+        # Should match foo(x)'s closing paren on line 2
+        self.assertEqual(matching[0][0], 2)
+        self.assertEqual(matching[1][0], 2)
+
+        # Cursor adjacent to bracket inside comment must NOT match
+        idx_comment_paren = source.index("(unmatched")
+        code.buffer.cursor = code.buffer.anchor = idx_comment_paren
+        self.runtime.step(0)
+        self.assertIsNone(code.components.get("matching_brackets"))
 
