@@ -944,19 +944,17 @@ class EditorTests(unittest.TestCase):
             # Add component row must start strictly below the last visible component row
             self.assertLessEqual(max_comp_y, ed.add_name.y)
 
-        # Verify bottom section controls do not overlap each other
-        self.assertLessEqual(ed.add_name.y + ed.add_name.h, ed.tags_field.y)
+        # Verify bottom section controls do not overlap each other in redesigned section order
+        self.assertLessEqual(ed.add_name.y + ed.add_name.h, ed.system_label.y)
+        visible_sys = [b for b in ed.system_rows if b.visible]
+        if visible_sys:
+            for btn in visible_sys:
+                self.assertGreaterEqual(btn.y, ed.system_label.y)
+                self.assertLessEqual(btn.y + btn.h, ed.tags_field.y)
+        self.assertLessEqual(ed.system_label.y, ed.tags_field.y)
         self.assertLessEqual(ed.tags_field.y + ed.tags_field.h, ed.parent_field.y)
         self.assertLessEqual(ed.parent_field.y + ed.parent_field.h, ed.relation_field.y)
         self.assertLessEqual(ed.relation_field.y + ed.relation_field.h, ed.metadata.y)
-
-        # If systems exist, they start below metadata
-        visible_sys = [b for b in ed.system_rows if b.visible]
-        if visible_sys:
-            self.assertLessEqual(ed.metadata.y + ed.metadata.h, ed.system_label.y)
-            for btn in visible_sys:
-                self.assertGreaterEqual(btn.y, ed.system_label.y)
-                self.assertLessEqual(btn.y + btn.h, ip.y + ip.h + 2)
 
     def test_scrollbars_rendering_and_interaction(self):
         ed = self.editor
@@ -1071,24 +1069,30 @@ class EditorTests(unittest.TestCase):
         self.click(ed.quick_color_btn)
         self.assertIn("color", bare.components)
 
-        # 2. Component deletion via delete button [x]
-        color_idx = next(i for i, (lbl, fld) in enumerate(ed.component_rows) if fld.visible and fld.component_key == "color")
-        del_btn = ed.component_delete_buttons[color_idx]
-        self.assertTrue(del_btn.visible)
-        self.click(del_btn)
+        # 2. Component deletion via right-click context menu
+        lbl, fld = next((lbl, fld) for (lbl, fld) in ed.component_rows if fld.visible and fld.component_key == "color")
+        self.send(("click", fld.x + 10, fld.y + 10, 4, 0))
+        menu = ed.app.relations.get("context_menu")
+        self.assertIsNotNone(menu)
+        del_item = next(c for c in menu.children if "Delete" in c.components.get("text", ""))
+        self.click(del_item)
         self.assertNotIn("color", bare.components)
 
-        # 3. Interactive relations list and unlinking
+        # 3. Interactive relations list and unlinking via context menu
         other = self.runtime.create(parent=ed.game, name="TargetAlly")
         self.type(ed.relation_field, "ally=TargetAlly", commit=True)
         self.assertIs(bare.relations.get("ally"), other)
 
-        # Check relation row exists and click unlink [x]
+        # Check relation row exists and unlink via right click context menu
         self.assertEqual(len([r for r, u in ed.relation_rows if r.visible]), 1)
-        rel_btn, unlink_btn = ed.relation_rows[0]
+        rel_btn, _ = ed.relation_rows[0]
         self.assertIn("ally -> TargetAlly", rel_btn.components.get("text", ""))
 
-        self.click(unlink_btn)
+        self.send(("click", rel_btn.x + 10, rel_btn.y + 10, 4, 0))
+        menu = ed.app.relations.get("context_menu")
+        self.assertIsNotNone(menu)
+        unlink_item = next(c for c in menu.children if "Unlink" in c.components.get("text", ""))
+        self.click(unlink_item)
         self.assertNotIn("ally", bare.relations)
         self.assertEqual(len([r for r, u in ed.relation_rows if r.visible]), 0)
 
@@ -1210,7 +1214,7 @@ class EditorTests(unittest.TestCase):
 
         # Check section header COMPONENTS
         self.assertTrue(ed.components_title.visible)
-        self.assertEqual(ed.components_title.components.get("text"), "COMPONENTS")
+        self.assertIn("COMPONENTS", ed.components_title.components.get("text"))
         self.assertTrue(ed.add_comp_menu_button.visible)
         self.assertLess(ed.components_title.y, ed.add_name.y)
 
@@ -1802,4 +1806,125 @@ class EditorTests(unittest.TestCase):
         self.assertLess(code.buffer.scroll, scrolled)
 
         self.send(("release", code.x + 60, code.y + 20, 1, 0))
+
+    def test_inspector_systems_management_attach_and_detach(self):
+        """Issue #57: Inspector systems section is always visible with attach/detach controls."""
+        ed = self.editor
+        ent = self.runtime.create(parent=ed.game, name="ActorEntity")
+        self.select(ent)
+        self.runtime.step(0)
+
+        # 1. Systems section is always visible, showing 'No systems attached' placeholder
+        self.assertTrue(ed.system_label.visible)
+        self.assertTrue(ed.add_system_button.visible)
+        self.assertTrue(ed.no_systems_label.visible)
+
+        # 2. Click '+ Attach' button to open system menu
+        self.click(ed.add_system_button)
+        menu = ed.app.relations.get("context_menu")
+        self.assertIsNotNone(menu)
+        render_item = next((c for c in menu.children if "render" in c.components.get("text", "")), None)
+        self.assertIsNotNone(render_item)
+
+        # Click to attach render system to ActorEntity
+        self.click(render_item)
+        self.assertIn("render", ent.systems)
+        self.assertFalse(ed.no_systems_label.visible)
+
+        # 3. System appears in inspector row with Edit button
+        sys_btn = next((b for b in ed.system_rows if b.visible and "render" in b.components.get("text", "")), None)
+        self.assertIsNotNone(sys_btn)
+        edit_btn = ed.system_edit_buttons[0]
+        self.assertTrue(edit_btn.visible)
+
+        # Click Edit to open in code editor
+        self.click(edit_btn)
+        self.assertEqual(ed.path_field.buffer.text, "render.py")
+
+        # 4. Right click system row to detach
+        self.send(("click", sys_btn.x + 10, sys_btn.y + 10, 4, 0))
+        detach_menu = ed.app.relations.get("context_menu")
+        self.assertIsNotNone(detach_menu)
+        detach_item = next((c for c in detach_menu.children if "Detach" in c.components.get("text", "")), None)
+        self.assertIsNotNone(detach_item)
+        self.click(detach_item)
+
+        # Verify system is cleanly detached
+        self.assertNotIn("render", ent.systems)
+        self.assertTrue(ed.no_systems_label.visible)
+
+    def test_clean_float_formatting_in_inspector(self):
+        """Issue #57: Float precision is cleanly formatted in component fields."""
+        ed = self.editor
+        ent = self.runtime.create(parent=ed.game, name="FloatEntity",
+                                  x=0.0, y=-103.77000000000001,
+                                  coords=(0.0, -103.77000000000001))
+        self.select(ent)
+        self.runtime.step(0)
+
+        # Check y field text is formatted cleanly
+        y_fld = next(fld for lbl, fld in ed.component_rows if fld.visible and fld.component_key == "y")
+        self.assertEqual(y_fld.buffer.text, "-103.77")
+
+        # Check coords tuple is formatted cleanly
+        coords_fld = next(fld for lbl, fld in ed.component_rows if fld.visible and fld.component_key == "coords")
+        self.assertEqual(coords_fld.buffer.text, "(0.0, -103.77)")
+
+    def test_quick_component_bar_and_renaming(self):
+        """Issue #57: Quick-bar single line horizontal picker and right-click component renaming."""
+        ed = self.editor
+        ent = self.runtime.create(parent=ed.game, name="Hero")
+        self.select(ent)
+        self.runtime.step(0)
+
+        # Quick preset chips are all on the same compact horizontal row (height 22)
+        self.assertEqual(ed.quick_pos_btn.y, ed.quick_size_btn.y)
+        self.assertEqual(ed.quick_pos_btn.y, ed.quick_vel_btn.y)
+        self.assertEqual(ed.quick_pos_btn.h, 22)
+
+        # Add pos component via quick chip
+        self.click(ed.quick_pos_btn)
+        self.assertIn("x", ent.components)
+        self.assertIn("y", ent.components)
+
+        # Right-click 'y' component field to rename
+        lbl, y_fld = next((lbl, fld) for (lbl, fld) in ed.component_rows if fld.visible and fld.component_key == "y")
+        self.send(("click", y_fld.x + 10, y_fld.y + 10, 4, 0))
+        menu = ed.app.relations.get("context_menu")
+        self.assertIsNotNone(menu)
+        rename_item = next(c for c in menu.children if "Rename" in c.components.get("text", ""))
+        self.click(rename_item)
+
+        # add_name field is now focused with 'y'
+        self.assertIs(ed.ui.focused, ed.add_name)
+        self.assertEqual(ed.add_name.buffer.text, "y")
+
+        # Commit rename to 'pos_y'
+        self.type(ed.add_name, "pos_y", commit=True)
+        self.assertNotIn("y", ent.components)
+        self.assertIn("pos_y", ent.components)
+
+    def test_inspector_collapsible_sections(self):
+        """Issue #57: Inspector sections can be collapsed and expanded."""
+        ed = self.editor
+        ent = self.runtime.create(parent=ed.game, name="CollapsibleEntity", x=1.0, y=2.0)
+        self.select(ent)
+        self.runtime.step(0)
+
+        # Components are visible initially
+        visible_comps = [fld for lbl, fld in ed.component_rows if fld.visible]
+        self.assertGreater(len(visible_comps), 0)
+
+        # Click COMPONENTS header to collapse
+        self.click(ed.components_title)
+        visible_comps_after = [fld for lbl, fld in ed.component_rows if fld.visible]
+        self.assertEqual(len(visible_comps_after), 0)
+        self.assertFalse(ed.add_name.visible)
+
+        # Click COMPONENTS header again to re-expand
+        self.click(ed.components_title)
+        visible_comps_reexpanded = [fld for lbl, fld in ed.component_rows if fld.visible]
+        self.assertGreater(len(visible_comps_reexpanded), 0)
+        self.assertTrue(ed.add_name.visible)
+
 

@@ -294,7 +294,14 @@ class UI:
         return self.create(parent, name, "field", **values)
 
     def button(self, parent, name, text, action, **values):
-        values.setdefault("color", FIELD)
+        normal = values.get("color", FIELD)
+        values.setdefault("color", normal)
+        values.setdefault("normal_color", normal)
+        if "hover_color" not in values:
+            if isinstance(normal, tuple) and len(normal) >= 3:
+                values["hover_color"] = tuple(min(255, c + 22) for c in normal[:3])
+            else:
+                values["hover_color"] = (52, 70, 92)
         return self.create(parent, name, "button", text=text, action=action, **values)
 
     def splitter(self, parent, name, *, axis="x", thickness=6, on_drag=None, **values):
@@ -376,10 +383,11 @@ class UI:
             mx, my = event[1], event[2]
             self.mouse_pos = (mx, my)
             for control in self.controls():
-                if ("splitter" in control.tags or "scrollbar_thumb" in control.tags) and self.visible(control):
+                if ("splitter" in control.tags or "scrollbar_thumb" in control.tags or "button" in control.tags or "chip" in control.tags or "hoverable" in control.tags) and self.visible(control):
                     active = self.root.relations.get("active_drag")
                     hovered = (active is control) or (active is None and contains(control, mx, my))
-                    target_color = control.components.get("hover_color", ACCENT) if hovered else control.components.get("normal_color", control.components.get("color", PANEL))
+                    normal = control.components.get("normal_color", control.components.get("color", FIELD))
+                    target_color = control.components.get("hover_color", ACCENT) if hovered else normal
                     if control.color != target_color:
                         control.color = target_color
             return
@@ -387,8 +395,8 @@ class UI:
             self.root.relations.pop("text_drag", None)
             active_drag = self.root.relations.pop("active_drag", None)
             if active_drag is not None:
-                if "splitter" in active_drag.tags or "scrollbar_thumb" in active_drag.tags:
-                    normal = active_drag.components.get("normal_color", active_drag.components.get("color", PANEL))
+                if "splitter" in active_drag.tags or "scrollbar_thumb" in active_drag.tags or "button" in active_drag.tags or "chip" in active_drag.tags:
+                    normal = active_drag.components.get("normal_color", active_drag.components.get("color", FIELD))
                     if active_drag.color != normal:
                         active_drag.color = normal
                 cb = active_drag.components.get("on_release")
