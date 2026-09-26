@@ -141,6 +141,10 @@ class UITests(unittest.TestCase):
             runtime.close()
 
     def test_desktop_graphics_dynamic_layer_groups(self):
+        try:
+            import pyglet
+        except ImportError:
+            self.skipTest("pyglet is an optional desktop dependency")
         graphics = Graphics(self.window)
         # Test layers that exceed the old fixed 0..7 range and negative layers
         for layer in (-2, 0, 2, 7, 8, 9, 15, 42):

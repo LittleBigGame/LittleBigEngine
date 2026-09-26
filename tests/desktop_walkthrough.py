@@ -48,6 +48,8 @@ def main():
                 lambda: [click(editor.save_button)],
                 lambda: [click(next(row for row in editor.hierarchy_rows if row.visible and row.relations.get("target") is editor.game))],
                 lambda: [click(editor.attach_button)],
+                lambda: [click(editor.code), ("text", ".")],
+                lambda: [("key", "ESCAPE", False, False)],
             ]
             frame = 0
 
