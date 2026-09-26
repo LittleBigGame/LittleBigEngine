@@ -42,3 +42,18 @@ class SpaceTests(unittest.TestCase):
         camera.zoom = 0
         with self.assertRaises(ValueError):
             screen_to_world(camera, viewport, 0, 0)
+
+    def test_invalid_inputs_and_cell_sizes(self):
+        runtime = Runtime()
+        for bad_size in (0, -1, float("nan"), float("inf")):
+            with self.assertRaises(ValueError):
+                SpatialIndex(runtime, cell_size=bad_size)
+
+        index = SpatialIndex(runtime, 16.0)
+        for bad_coord in (float("nan"), float("inf"), "invalid", None):
+            with self.assertRaises(ValueError):
+                index.query(bad_coord, 0, 10, 10)
+            with self.assertRaises(ValueError):
+                index.query(0, bad_coord, 10, 10)
+        index.close()
+

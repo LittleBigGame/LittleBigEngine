@@ -76,12 +76,31 @@ class UITests(unittest.TestCase):
     def test_layout_box_and_content_rect(self):
         self.assertEqual(parse_box(10), (10, 10, 10, 10))
         self.assertEqual(parse_box((5, 12)), (5, 12, 5, 12))
+        self.assertEqual(parse_box((5,)), (5, 5, 5, 5))
+        self.assertEqual(parse_box((5, 10, 15)), (5, 10, 15, 10))
+        self.assertEqual(parse_box(()), (0, 0, 0, 0))
         self.assertEqual(parse_box((1, 2, 3, 4)), (1, 2, 3, 4))
         self.assertEqual(parse_box(None, default=8), (8, 8, 8, 8))
+        self.assertEqual(parse_box("invalid", default=4), (4, 4, 4, 4))
 
         runtime = Runtime()
         e = runtime.create(x=100, y=50, w=200, h=100, padding=(5, 10, 15, 20))
         self.assertEqual(content_rect(e), (120, 55, 170, 80))
+
+        # Horizontal flex stack
+        p_row = runtime.create(x=0, y=0, w=300, h=50, padding=10, gap=5)
+        c_fix = runtime.create(parent=p_row, w=50)
+        c_flex = runtime.create(parent=p_row, flex=1)
+        stack(p_row, (c_fix, c_flex), axis="x")
+        self.assertEqual(c_fix.x, 10)
+        self.assertEqual(c_fix.w, 50)
+        self.assertEqual(c_flex.x, 65)
+        self.assertEqual(c_flex.w, 225)
+
+        # Invalid axis raises ValueError
+        with self.assertRaises(ValueError):
+            stack(p_row, axis="z")
+
 
     def test_stack_with_margins_padding_and_flex(self):
         runtime = Runtime()

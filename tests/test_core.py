@@ -155,3 +155,66 @@ class CoreTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.runtime.create(identity=custom_id)
 
+    def test_invalid_component_tag_and_relation_names(self):
+        entity = self.runtime.create()
+        target = self.runtime.create()
+
+        # Component names
+        for bad in ("", 123, None):
+            with self.assertRaises(ValueError):
+                entity.components[bad] = 1
+        with self.assertRaises(ValueError):
+            self.runtime.create(**{"": 1})
+
+        # Tag names
+        for bad in ("", 123, None):
+            with self.assertRaises(ValueError):
+                entity.tags.add(bad)
+        with self.assertRaises(ValueError):
+            self.runtime.create(tags=[""])
+
+        # Relation names
+        for bad in ("", 123, None):
+            with self.assertRaises(ValueError):
+                entity.relations[bad] = target
+
+        # Collection lengths
+        entity.components["a"] = 1
+        entity.tags.add("t1")
+        entity.relations["r1"] = target
+        self.assertEqual(len(entity.components), 1)
+        self.assertEqual(len(entity.tags), 1)
+        self.assertEqual(len(entity.relations), 1)
+
+    def test_core_invariants_and_error_handling(self):
+        parent = self.runtime.create()
+        child = self.runtime.create(parent=parent)
+        other = self.runtime.create()
+
+        # No-op reparenting
+        child.parent = parent
+        self.assertIs(child.parent, parent)
+
+        # Move child requires direct child
+        with self.assertRaises(ValueError):
+            parent.move_child(other, 0)
+
+        # Reserved and missing attribute deletion
+        with self.assertRaises(AttributeError):
+            del child._id
+        with self.assertRaises(AttributeError):
+            del child.nonexistent_attribute
+
+        # Paused tag skips update phase
+        from lbe import SystemDefinition
+        updated = []
+        self.runtime.services["updated"] = updated
+        inst = child.systems.attach("worker", SystemDefinition("def update(dt): updated.append(dt)"))
+        inst.start()
+        self.runtime.step(0.1)
+        self.assertEqual(len(updated), 1)
+        parent.tags.add("paused")
+        self.runtime.step(0.1)
+        self.assertEqual(len(updated), 1)  # Skipped because ancestor has paused tag
+
+

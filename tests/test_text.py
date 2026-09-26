@@ -178,4 +178,36 @@ class TextTests(unittest.TestCase):
         b3.delete_word(backward=False)
         self.assertEqual(b3.text, "(123)")         # Deletes 'foo'
 
+    def test_delete_word_selection_and_page_navigation(self):
+        # delete_word with selection replaces selection
+        buf = TextBuffer("hello world")
+        buf.anchor, buf.cursor = 0, 5
+        buf.delete_word(backward=True)
+        self.assertEqual(buf.text, " world")
+
+        # Boundary no-ops
+        buf_empty = TextBuffer()
+        buf_empty.delete_word(backward=True)
+        self.assertEqual(buf_empty.text, "")
+        buf_empty.delete_word(backward=False)
+        self.assertEqual(buf_empty.text, "")
+
+        # Forward delete at newline
+        buf_nl = TextBuffer("line1\nline2")
+        buf_nl.cursor = buf_nl.anchor = 5
+        buf_nl.delete_word(backward=False)
+        self.assertEqual(buf_nl.text, "line1line2")
+
+        # PageUp / PageDown navigation
+        lines_text = "\n".join(f"line {i}" for i in range(50))
+        buf_lines = TextBuffer(lines_text)
+        self.assertEqual(buf_lines.position[0], 0)
+        buf_lines.move("PAGEDOWN")
+        self.assertEqual(buf_lines.position[0], 20)
+        buf_lines.move("PAGEDOWN")
+        self.assertEqual(buf_lines.position[0], 40)
+        buf_lines.move("PAGEUP")
+        self.assertEqual(buf_lines.position[0], 20)
+
+
 
