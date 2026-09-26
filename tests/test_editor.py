@@ -1459,3 +1459,28 @@ class EditorTests(unittest.TestCase):
         self.runtime.step(0)
         self.assertFalse(code.components.get("hover_state", {}).get("active", False))
 
+    def test_multiline_call_newline_and_safe_ctrl_backspace(self):
+        code = self.editor.code
+        self.click(code)
+        self.send(("key", "A", True, False), ("key", "BACKSPACE", False, False))
+        snippet = (
+            "def draw():\n"
+            "    with graphics.view(entity.relations[\"camera\"], entity.relations[\"viewport\"]):\n"
+            "        for child in query(\"x\", \"y\", \"w\", \"h\", \"color\"):\n"
+            "            graphics.rect(child.x, child.y, child.w, child.h,\n"
+            "                          color=child.color, key=child.id, layer=1)"
+        )
+        self.send(("text", snippet))
+        # Cursor is at the end of layer=1)
+        self.send(("key", "ENTER", False, False))
+        lines = code.buffer.text.split("\n")
+        # Line 5 should have 12 spaces (aligning with graphics.rect), NOT 26 spaces
+        self.assertEqual(lines[-1], "            ")
+
+        # Press Ctrl+Backspace to clear indentation spaces
+        self.send(("key", "BACKSPACE", True, False))
+        lines_after_bs = code.buffer.text.split("\n")
+        # The line spaces should be cleared, but layer=1) on the previous line MUST remain intact!
+        self.assertEqual(lines_after_bs[-1], "")
+        self.assertTrue(lines_after_bs[-2].endswith("layer=1)"))
+

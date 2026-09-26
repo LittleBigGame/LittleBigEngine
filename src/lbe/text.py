@@ -3,6 +3,94 @@
 import re
 
 
+def compute_newline_indent(text, cursor):
+    line_start = text.rfind("\n", 0, cursor) + 1
+    current_line = text[line_start:cursor]
+    base_indent = current_line[:len(current_line) - len(current_line.lstrip(" "))]
+    code_part = re.sub(r"#.*$", "", current_line).rstrip()
+
+    BRACKETS = {")": "(", "]": "[", "}": "{"}
+    stack = []  # list of (char, line_start, first_arg_col)
+    closed_from_prev = []  # list of (char, line_start, first_arg_col)
+    cur_line_start = 0
+    i = 0
+    in_str = None
+    while i < cursor:
+        c = text[i]
+        if c == "\n":
+            cur_line_start = i + 1
+            i += 1
+            continue
+        if in_str:
+            if c == "\\":
+                i += 2
+                continue
+            if in_str in ('"""', "'''"):
+                if text[i:i + 3] == in_str:
+                    in_str = None
+                    i += 3
+                    continue
+            elif c == in_str:
+                in_str = None
+                i += 1
+                continue
+            i += 1
+            continue
+        if text[i:i + 3] in ('"""', "'''"):
+            in_str = text[i:i + 3]
+            i += 3
+            continue
+        if c in ('"', "'"):
+            in_str = c
+            i += 1
+            continue
+        if c == "#":
+            next_nl = text.find("\n", i, cursor)
+            if next_nl == -1:
+                break
+            i = next_nl
+            continue
+        if c in "([{":
+            j = i + 1
+            while j < cursor and text[j] not in "\n#)]}":
+                if not text[j].isspace():
+                    break
+                j += 1
+            first_arg_col = (j - cur_line_start) if (j < cursor and text[j] not in "\n#)]}") else None
+            stack.append((c, cur_line_start, first_arg_col))
+        elif c in ")]}":
+            if stack and stack[-1][0] == BRACKETS[c]:
+                opened = stack.pop()
+                if cur_line_start == line_start and opened[1] < line_start:
+                    closed_from_prev.append(opened)
+        i += 1
+
+    # 1. Closed multiline bracket on this line
+    if closed_from_prev:
+        outer = closed_from_prev[0]
+        open_line_end = text.find("\n", outer[1])
+        if open_line_end == -1 or open_line_end > len(text):
+            open_line_end = len(text)
+        open_line = text[outer[1]:open_line_end]
+        open_base = open_line[:len(open_line) - len(open_line.lstrip(" "))]
+        if code_part.endswith(":"):
+            return open_base + "    "
+        return open_base
+
+    # 2. Ends with colon
+    if code_part.endswith(":"):
+        return base_indent + "    "
+
+    # 3. Inside unclosed bracket
+    if stack:
+        top = stack[-1]
+        if top[2] is not None:
+            return " " * top[2]
+        return base_indent + "    "
+
+    return base_indent
+
+
 class TextBuffer:
     def __init__(self, text=""):
         self.text = text
@@ -20,7 +108,6 @@ class TextBuffer:
     @text.setter
     def text(self, value):
         self._text = value.replace("\r\n", "\n").replace("\r", "\n") if value else ""
-
 
     @property
     def selection(self):
@@ -69,31 +156,37 @@ class TextBuffer:
         orig = self.cursor
         if backward:
             target = orig
-            while target > 0 and self.text[target - 1].isspace():
+            if target == 0:
+                return
+            if self.text[target - 1] == "\n":
                 target -= 1
-            if target > 0:
-                ch = self.text[target - 1]
-                if ch.isalnum() or ch == '_':
-                    while target > 0 and (self.text[target - 1].isalnum() or self.text[target - 1] == '_'):
-                        target -= 1
-                else:
-                    p_char = ch
-                    while target > 0 and self.text[target - 1] == p_char:
-                        target -= 1
+            elif self.text[target - 1] in " \t":
+                while target > 0 and self.text[target - 1] in " \t":
+                    target -= 1
+            elif self.text[target - 1].isalnum() or self.text[target - 1] == "_":
+                while target > 0 and (self.text[target - 1].isalnum() or self.text[target - 1] == "_"):
+                    target -= 1
+            else:
+                p_char = self.text[target - 1]
+                while target > 0 and self.text[target - 1] == p_char:
+                    target -= 1
             self.anchor = max(0, target)
         else:
             target = orig
-            while target < len(self.text) and self.text[target].isspace():
+            if target >= len(self.text):
+                return
+            if self.text[target] == "\n":
                 target += 1
-            if target < len(self.text):
-                ch = self.text[target]
-                if ch.isalnum() or ch == '_':
-                    while target < len(self.text) and (self.text[target].isalnum() or self.text[target] == '_'):
-                        target += 1
-                else:
-                    p_char = ch
-                    while target < len(self.text) and self.text[target] == p_char:
-                        target += 1
+            elif self.text[target] in " \t":
+                while target < len(self.text) and self.text[target] in " \t":
+                    target += 1
+            elif self.text[target].isalnum() or self.text[target] == "_":
+                while target < len(self.text) and (self.text[target].isalnum() or self.text[target] == "_"):
+                    target += 1
+            else:
+                p_char = self.text[target]
+                while target < len(self.text) and self.text[target] == p_char:
+                    target += 1
             self.anchor = min(len(self.text), target)
         if self.cursor != self.anchor:
             self.insert("")
@@ -143,18 +236,10 @@ class TextBuffer:
             self.anchor = self.cursor
 
     def newline(self):
-        start = self.text.rfind("\n", 0, self.cursor) + 1
-        line = self.text[start:self.cursor]
+        line_start = self.text.rfind("\n", 0, self.cursor) + 1
+        line = self.text[line_start:self.cursor]
         base_indent = line[:len(line) - len(line.lstrip(" "))]
-        indent = base_indent
-        code_part = re.sub(r"#.*$", "", line).rstrip()
-        if code_part.endswith(":"):
-            indent += "    "
-        else:
-            line_opens = sum(1 for c in code_part if c in "([{")
-            line_closes = sum(1 for c in code_part if c in ")]}")
-            if line_opens > line_closes:
-                indent += "    "
+        indent = compute_newline_indent(self.text, self.cursor)
         # Check if cursor is between an open and close bracket pair, e.g. ( | )
         if 0 < self.cursor < len(self.text):
             pair = (self.text[self.cursor - 1], self.text[self.cursor])
