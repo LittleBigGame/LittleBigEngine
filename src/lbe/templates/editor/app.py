@@ -30,6 +30,59 @@ def parse_value(text):
         raise ValueError("Use a Python literal; put text in quotes") from None
 
 
+def on_drag_col_splitter(control, event):
+    w = state.window.width
+    min_w = 200
+    max_w = max(min_w, w - 300)
+    cur_w = state.app.components.get("left_column_w", 370)
+    if len(event) > 5 and event[5] != 0:
+        new_w = max(min_w, min(max_w, cur_w + event[5]))
+    elif len(event) > 1:
+        new_w = max(min_w, min(max_w, event[1]))
+    else:
+        return
+    put(state.app, left_column_w=new_w)
+    layout()
+
+
+def on_drag_hierarchy_splitter(control, event):
+    top_y = state.header.y + state.header.h
+    status_m = parse_box(state.status.components.get("margin", (0, 16, 5, 16)))
+    status_h = state.status.components.get("h", 20)
+    status_y = state.window.height - status_m[2] - status_h
+    available_h = status_y - top_y
+    min_h = 100
+    max_h = max(min_h, available_h - 150)
+    cur_h = state.hierarchy.components.get("panel_h", 240)
+    if len(event) > 6 and event[6] != 0:
+        new_h = max(min_h, min(max_h, cur_h + event[6]))
+    elif len(event) > 2:
+        hm = parse_box(state.hierarchy.components.get("margin", (8, 8, 4, 8)))
+        new_h = max(min_h, min(max_h, event[2] - top_y - hm[0]))
+    else:
+        return
+    put(state.hierarchy, panel_h=new_h)
+    layout()
+
+
+def on_drag_code_splitter(control, event):
+    top_y = state.header.y + state.header.h
+    status_m = parse_box(state.status.components.get("margin", (0, 16, 5, 16)))
+    status_h = state.status.components.get("h", 20)
+    status_y = state.window.height - status_m[2] - status_h
+    min_y = top_y + 80
+    max_y = max(min_y, status_y - 120)
+    cur_split = state.code_panel.components.get("split_y", max(330, int(state.window.height * 0.45)))
+    if len(event) > 6 and event[6] != 0:
+        new_split = max(min_y, min(max_y, cur_split + event[6]))
+    elif len(event) > 2:
+        new_split = max(min_y, min(max_y, event[2]))
+    else:
+        return
+    put(state.code_panel, split_y=new_split)
+    layout()
+
+
 def initialize():
     global state
     state = SimpleNamespace(runtime=entity.runtime, project=project, window=window,
@@ -147,6 +200,9 @@ def initialize():
     state.parent_label = state.ui.create(state.inspector, 'ParentLabel', 'label', text='Parent', ink=MUTED)
     state.relations_label = state.ui.create(state.inspector, 'RelationsLabel', 'label', text='Link', ink=MUTED)
     state.code_info = state.ui.create(state.code_panel, 'SourceInfo', 'label', text='', ink=MUTED)
+    state.col_splitter = state.ui.splitter(state.app, 'ColumnSplitter', axis='x', on_drag=on_drag_col_splitter)
+    state.hierarchy_splitter = state.ui.splitter(state.app, 'HierarchySplitter', axis='y', on_drag=on_drag_hierarchy_splitter)
+    state.code_splitter = state.ui.splitter(state.app, 'CodeSplitter', axis='y', on_drag=on_drag_code_splitter)
     if (project / 'code_editor.py').exists():
         if 'code_editor' not in state.code_panel.systems:
             state.code_panel.systems.attach('code_editor', assets.system(project / 'code_editor.py'))
@@ -236,10 +292,26 @@ def layout():
         ih = max(100, status_y - iy - im[2] - 5)
         put(state.inspector, x=im[3], y=iy, w=iw, h=ih)
 
+    # Column splitter between left and right columns
+    put(state.col_splitter, x=left_col_w + 1, y=top_y, w=6, h=max(0, status_y - top_y))
+
+    # Hierarchy splitter between hierarchy and inspector
+    if state.hierarchy.components.get("dock") != "float" and state.inspector.components.get("dock") != "float":
+        put(state.hierarchy_splitter, visible=True, x=hm[3], y=state.hierarchy.y + state.hierarchy.h + 1,
+            w=max(0, left_col_w - hm[3] - hm[1]), h=6)
+    else:
+        put(state.hierarchy_splitter, visible=False)
+
     # Right column (Viewport and Code editor panels)
     right_x = left_col_w + 8
     right_w = max(100, w - left_col_w - 24)
     split_y = state.code_panel.components.get("split_y", max(330, int(h * 0.45)))
+
+    # Code splitter between viewport and code panel
+    if state.viewport.components.get("dock") != "float" and state.code_panel.components.get("dock") != "float":
+        put(state.code_splitter, visible=True, x=right_x, y=split_y - 8, w=right_w, h=6)
+    else:
+        put(state.code_splitter, visible=False)
 
     # Viewport panel (right top)
     if state.viewport.components.get("dock") == "float":
@@ -265,27 +337,6 @@ def layout():
         put(button, x=cp.x + cp.w + offset, y=tb_y, w=width, h=28)
     put(state.code, x=cp.x + c_pad[3], y=cp.y + 68, w=max(0, cp.w - c_pad[3] - c_pad[1]), h=max(0, cp.h - 100))
     put(state.code_info, x=cp.x + c_pad[3], y=cp.y + cp.h - 25, w=max(0, cp.w - c_pad[3] - c_pad[1]), h=20)
-
-    # Internal inspector layout:
-    ip = state.inspector
-    i_pad = parse_box(ip.components.get("padding", (8, 12, 8, 12)))
-    put(state.selection_label, x=ip.x + i_pad[3], y=ip.y + 32, w=max(0, ip.w - i_pad[3] - i_pad[1]), h=20,
-        text=selected().components.get('name', str(selected().id)))
-    put(state.identity_label, x=ip.x + i_pad[3], y=ip.y + 54, w=max(0, ip.w - i_pad[3] - i_pad[1]), h=20,
-        text=str(selected().id))
-    bottom = ip.y + ip.h
-    put(state.add_name, x=ip.x + 12, y=bottom - 206, w=120, h=26)
-    put(state.add_value, x=ip.x + 138, y=bottom - 206, w=max(30, ip.w - 186), h=26)
-    put(state.add_button, x=ip.x + ip.w - 42, y=bottom - 206, w=30, h=26)
-    put(state.tags_field, x=ip.x + 76, y=bottom - 172, w=max(30, ip.w - 88), h=26)
-    put(state.parent_field, x=ip.x + 76, y=bottom - 140, w=max(30, ip.w - 88), h=26)
-    put(state.relation_field, x=ip.x + 76, y=bottom - 108, w=max(30, ip.w - 88), h=26)
-    for label, field in ((state.tags_label, state.tags_field), (state.parent_label, state.parent_field),
-                         (state.relations_label, state.relation_field)):
-        put(label, x=ip.x + 12, y=field.y + 4, w=64, h=22)
-    put(state.metadata, x=ip.x + 12, y=bottom - 78, w=max(0, ip.w - 24), h=18,
-        text=f'{len(selected().children)} children | {len(selected().relations)} relations')
-    put(state.system_label, x=ip.x + 12, y=bottom - 55, w=90, h=18)
 
 def hierarchy_sync():
     visible = []
@@ -323,13 +374,36 @@ def hierarchy_sync():
 def inspector_sync():
     entity = selected()
     items = tuple(entity.components.items())
-    capacity = max(1, int((state.inspector.h - 292) // 28))
+    systems = tuple(entity.systems.items())
+    children = tuple(entity.children)
+    relations = tuple(entity.relations.items())
+    ip = state.inspector
+    i_pad = parse_box(ip.components.get("padding", (8, 12, 8, 12)))
+
+    # Header labels
+    put(state.selection_label, x=ip.x + i_pad[3], y=ip.y + 32, w=max(0, ip.w - i_pad[3] - i_pad[1]), h=20,
+        text=entity.components.get('name', str(entity.id)))
+    put(state.identity_label, x=ip.x + i_pad[3], y=ip.y + 54, w=max(0, ip.w - i_pad[3] - i_pad[1]), h=20,
+        text=str(entity.id))
+
+    # Dynamic calculation of bottom section height
+    num_sys_rows = min(2, (len(systems) + 2) // 3) if systems else 0
+    sys_h = (20 + num_sys_rows * 26) if systems else 0
+    num_child_rows = min(3, (len(children) + 2) // 3) if children else 0
+    child_h = (num_child_rows * 24 + 4) if children else 0
+    bottom_h = 30 * 4 + 22 + sys_h + child_h + 8
+
+    # Component rows capacity & scroll
+    avail_comp_h = ip.h - 78 - bottom_h
+    capacity = max(1, int(avail_comp_h // 28))
     put(state.inspector, scroll=max(0, min(state.inspector.scroll, max(0, len(items) - capacity))))
+
     while len(state.component_rows) < capacity:
         n = len(state.component_rows)
         label = state.ui.create(state.inspector, f'ComponentLabel{n}', 'label', text='', ink=MUTED)
         field = state.ui.field(state.inspector, f'ComponentField{n}', '')
         state.component_rows.append((label, field))
+
     for index, (label, field) in enumerate(state.component_rows):
         source = index + state.inspector.scroll
         shown = index < capacity and source < len(items)
@@ -339,9 +413,9 @@ def inspector_sync():
             continue
         key, value = items[source]
         editable = type(value) in (int, float, bool, str, tuple, list, dict, type(None))
-        y = state.inspector.y + 82 + index * 28
-        put(label, x=state.inspector.x + 12, y=y + 4, w=112, h=24, text=key)
-        put(field, x=state.inspector.x + 126, y=y, w=state.inspector.w - 138, h=25, readonly=not editable)
+        y = ip.y + 80 + index * 28
+        put(label, x=ip.x + 12, y=y + 4, w=112, h=24, text=key)
+        put(field, x=ip.x + 126, y=y, w=max(30, ip.w - 138), h=25, readonly=not editable)
         if field.components.get('component_key') != key or field.relations.get('target') is not entity:
             if state.ui.focused is field:
                 del state.app.relations['focus']
@@ -350,40 +424,94 @@ def inspector_sync():
             field.on_commit = lambda f=field: commit_component(f)
             field.on_click = component_click
         state.ui.set_text(field, safe_repr(value))
+
+    # Flow bottom section downwards from bottom_start_y
+    bottom_start_y = max(ip.y + 80 + capacity * 28 + 6, ip.y + ip.h - bottom_h)
+    cur_y = bottom_start_y
+
+    # 1. Add component row
+    put(state.add_name, x=ip.x + 12, y=cur_y, w=120, h=26)
+    put(state.add_value, x=ip.x + 138, y=cur_y, w=max(30, ip.w - 186), h=26)
+    put(state.add_button, x=ip.x + ip.w - 42, y=cur_y, w=30, h=26)
+    cur_y += 30
+
+    # 2. Tags row
+    put(state.tags_label, x=ip.x + 12, y=cur_y + 4, w=60, h=22)
+    put(state.tags_field, x=ip.x + 76, y=cur_y, w=max(30, ip.w - 88), h=26)
     state.ui.set_text(state.tags_field, ', '.join(entity.tags))
+    cur_y += 30
+
+    # 3. Parent row
+    put(state.parent_label, x=ip.x + 12, y=cur_y + 4, w=60, h=22)
+    put(state.parent_field, x=ip.x + 76, y=cur_y, w=max(30, ip.w - 88), h=26)
     state.ui.set_text(state.parent_field, str(entity.parent.components.get('name', entity.parent.id)) if entity.parent else '')
-    systems = tuple(entity.systems.items())
-    while len(state.system_rows) < len(systems):
-        index = len(state.system_rows)
-        button = state.ui.button(state.inspector, f'System{index}', '', lambda: None)
-        state.system_rows.append(button)
-    for index, button in enumerate(state.system_rows):
-        put(button, visible=index < len(systems))
-        if index < len(systems):
-            name, instance = systems[index]
-            put(button, x=state.inspector.x + 12 + (index % 3) * 108,
-                y=state.inspector.y + state.inspector.h - 32 - (index // 3) * 26,
-                w=102, h=24, text=name + (' !' if instance.errors else ''))
-            if button.components.get('system_key') != (entity.id, name):
-                button.system_key = (entity.id, name)
-                button.action = lambda e=entity, n=name: open_system(e, n)
-    children = tuple(entity.children)
-    while len(state.child_rows) < len(children):
-        index = len(state.child_rows)
-        button = state.ui.button(state.inspector, f'Child{index}', '', lambda: None)
-        state.child_rows.append(button)
-    for index, button in enumerate(state.child_rows):
-        shown = index < len(children)
-        put(button, visible=shown)
-        if shown:
-            child = children[index]
-            c_name = str(child.components.get('name', str(child.id)[:8]))
-            put(button, x=state.inspector.x + 12 + (index % 3) * 108,
-                y=state.inspector.y + state.inspector.h - 64 - (index // 3) * 24,
-                w=102, h=22, text=c_name)
-            if button.components.get('child_id') != child.id:
-                button.child_id = child.id
-                button.action = lambda c=child: select(c)
+    cur_y += 30
+
+    # 4. Relations row
+    put(state.relations_label, x=ip.x + 12, y=cur_y + 4, w=60, h=22)
+    put(state.relation_field, x=ip.x + 76, y=cur_y, w=max(30, ip.w - 88), h=26)
+    cur_y += 30
+
+    # 5. Metadata label
+    put(state.metadata, x=ip.x + 12, y=cur_y, w=max(0, ip.w - 24), h=18,
+        text=f'{len(children)} children | {len(relations)} relations')
+    cur_y += 22
+
+    # 6. Systems section
+    if systems:
+        put(state.system_label, visible=True, x=ip.x + 12, y=cur_y, w=90, h=18)
+        cur_y += 20
+        max_sys = min(len(systems), 6)
+        while len(state.system_rows) < max_sys:
+            idx = len(state.system_rows)
+            btn = state.ui.button(state.inspector, f'System{idx}', '', lambda: None)
+            state.system_rows.append(btn)
+        btn_w = max(60, (ip.w - 24 - 12) // 3)
+        for index, button in enumerate(state.system_rows):
+            shown = index < max_sys
+            put(button, visible=shown)
+            if shown:
+                name, instance = systems[index]
+                col = index % 3
+                row_idx = index // 3
+                put(button, x=ip.x + 12 + col * (btn_w + 6),
+                    y=cur_y + row_idx * 26,
+                    w=btn_w, h=24, text=name + (' !' if instance.errors else ''))
+                if button.components.get('system_key') != (entity.id, name):
+                    button.system_key = (entity.id, name)
+                    button.action = lambda e=entity, n=name: open_system(e, n)
+        cur_y += num_sys_rows * 26 + 4
+    else:
+        put(state.system_label, visible=False)
+        for button in state.system_rows:
+            put(button, visible=False)
+
+    # 7. Children quick navigation
+    if children:
+        max_children = min(len(children), 9)
+        while len(state.child_rows) < max_children:
+            idx = len(state.child_rows)
+            btn = state.ui.button(state.inspector, f'Child{idx}', '', lambda: None)
+            state.child_rows.append(btn)
+        btn_w = max(60, (ip.w - 24 - 12) // 3)
+        for index, button in enumerate(state.child_rows):
+            shown = index < max_children
+            put(button, visible=shown)
+            if shown:
+                child = children[index]
+                c_name = str(child.components.get('name', str(child.id)[:8]))
+                col = index % 3
+                row_idx = index // 3
+                put(button, x=ip.x + 12 + col * (btn_w + 6),
+                    y=cur_y + row_idx * 24,
+                    w=btn_w, h=22, text=c_name)
+                if button.components.get('child_id') != child.id:
+                    button.child_id = child.id
+                    button.action = lambda c=child: select(c)
+    else:
+        for button in state.child_rows:
+            put(button, visible=False)
+
     for owner in state.runtime.entities:
         for name, instance in owner.systems.items():
             if instance.errors:
@@ -487,9 +615,12 @@ def confirm_discard(action):
     return True
 
 def get_project_entities():
+    splitters = (getattr(state, "col_splitter", None), getattr(state, "hierarchy_splitter", None), getattr(state, "code_splitter", None))
     editor_roots = (state.background, state.camera, state.viewport,
                     state.header, state.hierarchy, state.inspector,
-                    state.code_panel, state.status, state.zoom_label, *state.extra_panels)
+                    state.code_panel, state.status, state.zoom_label,
+                    *(s for s in splitters if s is not None),
+                    *state.extra_panels)
     def is_editor_entity(e):
         return e is state.app or any(e is r or r in e.ancestors for r in editor_roots)
     return [e for e in state.runtime.entities if not is_editor_entity(e)]
