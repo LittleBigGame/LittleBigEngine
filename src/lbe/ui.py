@@ -323,7 +323,14 @@ class UI:
                     callback(message)
         for control in tuple(self.controls()):
             if "multiline" in control.tags and self.visible(control):
-                self._sync_text(control)
+                try:
+                    self._sync_text(control)
+                except Exception as error:
+                    message = f"{type(error).__name__}: {error}"
+                    self.root.components["ui_error"] = message
+                    callback = self.root.components.get("on_ui_error")
+                    if callback:
+                        callback(message)
 
     def dispatch(self, event):
         kind = event[0]

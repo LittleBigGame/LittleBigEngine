@@ -775,4 +775,43 @@ class EditorTests(unittest.TestCase):
         self.assertTrue(self.editor.game.components.get("paused"))
         self.assertEqual(self.editor.run_button.text, "Run (F5)")
 
+    def test_typing_period_in_code_editor_retains_all_panels_and_ui_systems(self):
+        code = self.editor.code
+        self.click(code)
+        self.send(("key", "A", True, False), ("key", "BACKSPACE", False, False))
+        self.send(("text", "entity."))
+        self.runtime.step(0)
+
+        # Autocomplete popup is active and rendered
+        ac_state = code.components.get("autocomplete_state")
+        self.assertIsNotNone(ac_state)
+        self.assertTrue(ac_state.get("active"))
+        popup = next((c for c in code.children if c.components.get("part") == "autocomplete_popup"), None)
+        self.assertIsNotNone(popup)
+        self.assertTrue(popup.visible)
+
+        # All editor panels and UI systems remain running and visible
+        self.assertTrue(self.editor.app.systems["ui"].running)
+        self.assertEqual(tuple(self.editor.app.systems["ui"].errors), ())
+        self.assertNotIn("ui_error", self.editor.app.components)
+
+        self.assertTrue(self.editor.hierarchy.visible)
+        self.assertTrue(self.editor.inspector.visible)
+        self.assertTrue(self.editor.code_panel.visible)
+        self.assertTrue(self.editor.viewport.visible)
+        self.assertTrue(self.editor.status.visible)
+        self.assertTrue(self.editor.header.visible)
+
+        # Press ESCAPE to dismiss autocomplete popup
+        self.send(("key", "ESCAPE", False, False))
+        self.runtime.step(0)
+        self.assertFalse(ac_state.get("active"))
+        self.assertFalse(popup.visible)
+
+        # UI system remains active and panels remain visible
+        self.assertTrue(self.editor.app.systems["ui"].running)
+        self.assertTrue(self.editor.hierarchy.visible)
+        self.assertTrue(self.editor.inspector.visible)
+
+
 
