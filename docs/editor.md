@@ -47,8 +47,8 @@ selected entity, using the filename without `.py` as the instance name.
 
 The source editor supports multiline typing, cursor movement, mouse selection,
 double-click word selection, triple-click line selection, Shift selection, Home/End,
-page and word navigation (Ctrl+Left/Right), word deletion (Ctrl+Backspace),
-delimiter-aware smart auto-indentation and closing bracket dedent, scrolling,
+page and word navigation (Ctrl+Left/Right), word deletion (Ctrl+Backspace/Delete with line whitespace isolation),
+delimiter-aware smart multiline call and tuple auto-indentation and closing bracket dedent, scrolling,
 Ctrl+A/C/X/V, Ctrl+Z and Ctrl+Shift+Z. Ctrl+S saves. Repeating New or Open after an
 unsaved-change warning discards the current edits; save first to retain them.
 F5 (or the Run / Pause button in the header) toggles the game between running and paused,
