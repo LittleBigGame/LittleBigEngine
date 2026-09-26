@@ -82,3 +82,29 @@ class MenuTests(unittest.TestCase):
             ui.dispatch(('click', viewport.x+viewport.w-5, viewport.y+viewport.h-5, 4, 0))
             self.assertIs(root.relations['context_menu'].context_target, state.game)
             self.assertTrue(all(not s.errors for e in runtime.entities for s in e.systems.values()))
+
+    def test_menu_motion_scroll_and_empty_actions(self):
+        # Empty actions return None
+        self.assertIsNone(open_menu(self.ui, object(), 10, 10, []))
+
+        # Motion highlights item
+        menu = open_menu(self.ui, object(), 10, 10, [
+            dict(label="First", run=lambda t: None),
+            dict(label="Second", run=lambda t: None),
+        ])
+        item1 = menu.children[1]
+        self.ui.dispatch(("motion", item1.x + 5, item1.y + 5))
+        self.assertEqual(menu.active, 1)
+
+        # Scroll moves offset
+        self.ui.dispatch(("scroll", menu.x + 5, menu.y + 5, 0, -1))
+
+        # Disabled item click does not run
+        ran = []
+        menu2 = open_menu(self.ui, object(), 10, 10, [
+            dict(label="Disabled", enabled=False, run=ran.append)
+        ])
+        dis_item = menu2.children[0]
+        self.ui.dispatch(("click", dis_item.x + 5, dis_item.y + 5, 1, 0))
+        self.assertEqual(ran, [])
+

@@ -205,6 +205,26 @@ class ProjectPersistenceTests(unittest.TestCase):
             migrate_project_data(future_data)
         self.assertIn("newer than supported version", str(ctx.exception))
 
+    def test_serialization_error_and_skip_modes(self):
+        class Dummy:
+            pass
+
+        # on_unsupported='skip' returns None
+        self.assertIsNone(serialize_value(Dummy(), on_unsupported="skip"))
+
+        # on_unsupported unknown mode raises ValueError
+        with self.assertRaises(ValueError):
+            serialize_value(Dummy(), on_unsupported="invalid_mode")
+
+        # Unknown type tag in deserialize_value raises ValueError
+        with self.assertRaises(ValueError):
+            deserialize_value({"__type__": "nonexistent_tag"})
+
+        # Unsupported data structure in deserialize_value raises TypeError
+        with self.assertRaises(TypeError):
+            deserialize_value(Dummy())
+
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -86,13 +86,13 @@ def highlight_python_lines(text, theme=SYNTAX_THEME):
             elif kind == "ident":
                 if prev_token_type in ("def", "class"):
                     spans.append((val, theme["definition"]))
+                elif val in LITERALS:
+                    spans.append((val, theme["literal"]))
                 elif val in KEYWORDS:
                     spans.append((val, theme["keyword"]))
                     if val in ("def", "class"):
                         prev_token_type = val
                         continue
-                elif val in LITERALS:
-                    spans.append((val, theme["literal"]))
                 elif val in BUILTINS:
                     spans.append((val, theme["builtin"]))
                 else:

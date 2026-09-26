@@ -46,3 +46,16 @@ class SyntaxTests(unittest.TestCase):
         self.assertEqual(sliced, [('f', (1, 1, 1)), (' ', (2, 2, 2)), ('upda', (3, 3, 3))])
         # Slicing past the end
         self.assertEqual(slice_spans(spans, 20, 5), [])
+
+    def test_decorators_and_literals(self):
+        source = '@window.event\ndef on_draw():\n    flag = True\n    empty = None'
+        lines = highlight_python_lines(source)
+        self.assertEqual(len(lines), 4)
+
+        # Decorator
+        self.assertIn(('@window', SYNTAX_THEME['decorator']), lines[0])
+
+        # Literals
+        self.assertIn(('True', SYNTAX_THEME['literal']), lines[2])
+        self.assertIn(('None', SYNTAX_THEME['literal']), lines[3])
+
