@@ -1672,3 +1672,72 @@ class EditorTests(unittest.TestCase):
         self.send(("key", "Z", True, False))
         self.assertEqual(code.buffer.text, "# x = 10")
 
+    def test_code_editor_scrollbar_track_and_thumb_interaction(self):
+        """Issue #50: Code editor scrollbar thumb dragging and track click-to-jump."""
+        code = self.editor.code
+        self.click(code)
+        self.send(("key", "A", True, False), ("key", "BACKSPACE", False, False))
+
+        # Insert 100 lines so scrollbar appears
+        long_code = "\n".join(f"line_{i} = {i}" for i in range(100))
+        self.send(("text", long_code))
+        code.buffer.cursor = code.buffer.anchor = 0
+        code.buffer.scroll = 0
+        code.components.touch("buffer")
+        self.runtime.step(0)
+
+        # Find scroll_track and scrollbar (thumb)
+        track = next((c for c in code.children if c.components.get("part") == "scroll_track"), None)
+        thumb = next((c for c in code.children if c.components.get("part") == "scrollbar"), None)
+        self.assertIsNotNone(track)
+        self.assertIsNotNone(thumb)
+        self.assertTrue(track.visible)
+        self.assertTrue(thumb.visible)
+        self.assertEqual(code.buffer.scroll, 0)
+
+        # 1. Drag thumb downwards
+        self.send(("click", thumb.x + 2, thumb.y + 4, 1, 0))
+        self.send(("drag", thumb.x + 2, thumb.y + 100, 1, 0, 0, 96))
+        self.send(("release", thumb.x + 2, thumb.y + 100, 1, 0))
+        self.runtime.step(0)
+        self.assertGreater(code.buffer.scroll, 0)
+
+        # 2. Click track above thumb to page up
+        scrolled = code.buffer.scroll
+        self.send(("click", track.x + 2, track.y + 2, 1, 0))
+        self.send(("release", track.x + 2, track.y + 2, 1, 0))
+        self.runtime.step(0)
+        self.assertLess(code.buffer.scroll, scrolled)
+
+    def test_code_editor_selection_drag_autoscroll(self):
+        """Issue #50: Selection drag beyond editor bounds autoscrolls the viewport."""
+        code = self.editor.code
+        self.click(code)
+        self.send(("key", "A", True, False), ("key", "BACKSPACE", False, False))
+
+        # Insert 100 lines
+        long_code = "\n".join(f"line_{i} = {i}" for i in range(100))
+        self.send(("text", long_code))
+        code.buffer.cursor = code.buffer.anchor = 0
+        code.buffer.scroll = 0
+        code.components.touch("buffer")
+        self.runtime.step(0)
+
+        # Click near top of code editor to start selection drag
+        self.send(("click", code.x + 60, code.y + 20, 1, 0))
+        self.assertEqual(code.buffer.scroll, 0)
+
+        # Drag beyond the bottom of the code editor
+        self.send(("drag", code.x + 60, code.y + code.h + 50, 1, 0, 0, 100))
+        self.runtime.step(0)
+        # Scroll should have increased due to autoscroll
+        self.assertGreater(code.buffer.scroll, 0)
+
+        # Drag back above top of code editor
+        scrolled = code.buffer.scroll
+        self.send(("drag", code.x + 60, code.y - 100, 1, 0, 0, -150))
+        self.runtime.step(0)
+        self.assertLess(code.buffer.scroll, scrolled)
+
+        self.send(("release", code.x + 60, code.y + 20, 1, 0))
+
