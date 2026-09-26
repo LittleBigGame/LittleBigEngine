@@ -710,6 +710,8 @@ def keyboard(event):
 
 
 def bind_actions():
+    state.app.context_target = context_target
+    state.app.context_actions = context_actions
     state.app.on_key = keyboard
     state.app.on_ui_error = message
     state.hierarchy.on_scroll = scroll_list
@@ -756,3 +758,46 @@ def update(dt):
         put(state.code_info, text=f"SyntaxError Ln {diag['line']}, Col {diag['column']}: {diag['message']}", ink=(248, 81, 73, 255))
     else:
         put(state.code_info, text=f"Ln {row+1}, Col {column+1} | Attach target: {selected().components.get('name', selected().id)} | Ctrl+S save | F5 {run_status}", ink=MUTED)
+
+
+def context_target(control, event):
+    if 'component_key' in control.components and 'target' in control.relations:
+        return dict(entity=control.relations['target'], component=control.component_key)
+    if control is state.viewport:
+        wx, wy = screen_to_world(state.camera, control, event[1], event[2])
+        hits = set(space.query(wx, wy))
+        return next((child for child in reversed(state.game.children) if child in hits), state.game)
+    for candidate in (control,) + control.ancestors:
+        if 'target' in candidate.relations:
+            return candidate.relations['target']
+    return control
+
+
+def context_actions(target):
+    if isinstance(target, dict) and 'component' in target:
+        return [dict(label='Inspect component', run=lambda t: open_panel(
+            target=t['entity'], component=t['component']))]
+    if not hasattr(target, 'components') or not target.alive:
+        return []
+    actions = [dict(label='Select', run=select),
+               dict(label='Inspect entity', run=lambda e: open_panel(target=e)),
+               dict(label='Add component...', run=context_add_component)]
+    if target is state.game or state.game in target.ancestors:
+        actions += [None, dict(label='Add child entity', run=context_add_child)]
+        if 'x' in target.components and 'y' in target.components:
+            actions.append(dict(label='Focus camera', run=context_focus_camera))
+    return actions
+
+
+def context_add_component(target):
+    select(target)
+    state.ui.focus(state.add_name)
+
+
+def context_add_child(target):
+    child = create(parent=target, name='Entity')
+    select(child)
+
+
+def context_focus_camera(target):
+    state.camera.x, state.camera.y = target.x, target.y

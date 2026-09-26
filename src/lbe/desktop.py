@@ -177,6 +177,7 @@ def launch(build, *, headless=False, frames=None, screenshot=None):
     @window.event
     def on_mouse_motion(x, y, dx, dy):
         input_state.x, input_state.y = x, window.height - y
+        input_state.pending.append(("motion", x, window.height - y))
 
     @window.event
     def on_mouse_scroll(x, y, scroll_x, scroll_y):
