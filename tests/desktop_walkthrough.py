@@ -50,6 +50,8 @@ def main():
                 lambda: [click(editor.attach_button)],
                 lambda: [click(editor.code), ("text", ".")],
                 lambda: [("key", "ESCAPE", False, False)],
+                lambda: [("click", editor.viewport.x + 10, editor.viewport.y + 10, 4, 0)],
+                lambda: [("key", "ESCAPE", False, False)],
             ]
             frame = 0
 

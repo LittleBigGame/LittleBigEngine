@@ -71,3 +71,8 @@ The project loader knows how to load script files; it does not construct scenes 
 editor panels. Templates initialize new projects without overwriting existing
 project files. Applications can omit the UI entirely or replace it with their own
 systems while retaining the entity/runtime APIs.
+
+Context menus use `lbe.menus` above Core. Popup panels and action rows are normal
+UI entities, with the active popup referenced by the UI root's `context_menu`
+relation. Applications resolve pointer targets and supply action providers;
+editor-specific actions remain in the editor template script.
