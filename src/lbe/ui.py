@@ -756,7 +756,8 @@ class UI:
                                    ACCENT, key=(control.id, "caret"), layer=layer+2)
                 text = buffer.text.replace("\n", " ")[buffer.horizontal:buffer.horizontal+width]
                 text = text or control.components.get("hint", "")[:width]
-                graphics.text(text, control.x+6, control.y+5, color=INK, key=(control.id, "text"), layer=layer+2)
+                ink = INK if self.focused is control else control.components.get("ink", INK)
+                graphics.text(text, control.x+6, control.y+5, color=ink, key=(control.id, "text"), layer=layer+2)
             elif "text" in control.components:
                 pitch = control.components.get("pitch", self.pitch)
                 inset = 8 if "panel" in control.tags or "button" in control.tags else 0
