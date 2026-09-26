@@ -171,6 +171,10 @@ def launch(build, *, headless=False, frames=None, screenshot=None):
         input_state.pending.append(("click", x, window.height - y, button, modifiers))
 
     @window.event
+    def on_mouse_release(x, y, button, modifiers):
+        input_state.pending.append(("release", x, window.height - y, button, modifiers))
+
+    @window.event
     def on_mouse_drag(x, y, dx, dy, buttons, modifiers):
         input_state.pending.append(("drag", x, window.height - y, buttons, modifiers, dx, -dy))
 

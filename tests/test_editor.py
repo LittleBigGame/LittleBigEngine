@@ -815,5 +815,124 @@ class EditorTests(unittest.TestCase):
         self.assertTrue(self.editor.hierarchy.visible)
         self.assertTrue(self.editor.inspector.visible)
 
+    def test_interactive_panel_resizing_with_splitters(self):
+        ed = self.editor
+        self.assertIsNotNone(ed.col_splitter)
+        self.assertIsNotNone(ed.hierarchy_splitter)
+        self.assertIsNotNone(ed.code_splitter)
+        self.assertTrue(ed.col_splitter.visible)
+        self.assertTrue(ed.hierarchy_splitter.visible)
+        self.assertTrue(ed.code_splitter.visible)
+
+        # 1. Hover color feedback
+        normal_color = ed.col_splitter.components.get("normal_color", (38, 50, 66))
+        hover_color = ed.col_splitter.components.get("hover_color", (69, 182, 199))
+        self.send(("motion", ed.col_splitter.x + 2, ed.col_splitter.y + 100))
+        self.assertEqual(ed.col_splitter.color, hover_color)
+        self.send(("motion", 10, 10))
+        self.assertEqual(ed.col_splitter.color, normal_color)
+
+        # 2. Drag column splitter horizontally
+        orig_col_w = ed.app.components.get("left_column_w", 370)
+        orig_hier_w = ed.hierarchy.w
+        orig_vp_x = ed.viewport.x
+
+        self.send(("drag", ed.col_splitter.x + 2, ed.col_splitter.y + 100, 1, 0, 50, 0))
+        self.send(("release", ed.col_splitter.x + 2, ed.col_splitter.y + 100, 1, 0))
+        self.assertEqual(ed.app.components.get("left_column_w"), orig_col_w + 50)
+        self.assertEqual(ed.hierarchy.w, orig_hier_w + 50)
+        self.assertEqual(ed.inspector.w, orig_hier_w + 50)
+        self.assertEqual(ed.viewport.x, orig_vp_x + 50)
+        self.assertEqual(ed.code_panel.x, orig_vp_x + 50)
+
+        # 3. Drag hierarchy splitter vertically
+        orig_hier_h = ed.hierarchy.components.get("panel_h", 240)
+        orig_insp_y = ed.inspector.y
+        orig_insp_h = ed.inspector.h
+
+        self.send(("drag", ed.hierarchy_splitter.x + 20, ed.hierarchy_splitter.y + 2, 1, 0, 0, 40))
+        self.send(("release", ed.hierarchy_splitter.x + 20, ed.hierarchy_splitter.y + 2, 1, 0))
+        self.assertEqual(ed.hierarchy.components.get("panel_h"), orig_hier_h + 40)
+        self.assertEqual(ed.hierarchy.h, orig_hier_h + 40)
+        self.assertEqual(ed.inspector.y, orig_insp_y + 40)
+        self.assertEqual(ed.inspector.h, orig_insp_h - 40)
+
+        # 4. Drag code panel splitter vertically
+        orig_split_y = ed.code_panel.components.get("split_y", ed.code_panel.y)
+        orig_vp_h = ed.viewport.h
+        orig_cp_h = ed.code_panel.h
+
+        self.send(("drag", ed.code_splitter.x + 50, ed.code_splitter.y + 2, 1, 0, 0, -30))
+        self.send(("release", ed.code_splitter.x + 50, ed.code_splitter.y + 2, 1, 0))
+        self.assertEqual(ed.code_panel.components.get("split_y"), orig_split_y - 30)
+        self.assertEqual(ed.viewport.h, orig_vp_h - 30)
+        self.assertEqual(ed.code_panel.h, orig_cp_h + 30)
+
+        # 5. Release clears active drag
+        self.assertNotIn("active_drag", ed.app.relations)
+
+        # 6. Save project and verify layout persistence across reopen
+        self.click(ed.save_project_button)
+        self.runtime.close()
+
+        from lbe.project import load_project, template_path
+        runtime2 = load_project(self.window, self.graphics, self.input, self.directory.name, template=template_path("editor"))
+        self.addCleanup(runtime2.close)
+        ed2 = runtime2.entities[0].components["application_state"]
+        runtime2.step(0)
+
+        self.assertEqual(ed2.app.left_column_w, orig_col_w + 50)
+        self.assertEqual(ed2.hierarchy.panel_h, orig_hier_h + 40)
+        self.assertEqual(ed2.code_panel.split_y, orig_split_y - 30)
+
+    def test_inspector_clean_flow_and_bounded_child_navigation(self):
+        ed = self.editor
+
+        # Select TextArea entity which has ~95 children (parts for lines, errors, etc.)
+        self.select(ed.code)
+        self.runtime.step(0)
+
+        self.assertIs(ed.app.relations["selection"], ed.code)
+        children_count = len(ed.code.children)
+        self.assertGreater(children_count, 20)
+
+        # Verify child buttons count is strictly bounded (max 9 visible buttons)
+        visible_children = [b for b in ed.child_rows if b.visible]
+        self.assertLessEqual(len(visible_children), 9)
+        self.assertGreater(len(visible_children), 0)
+
+        # Verify all visible child buttons are positioned inside the inspector bounds
+        ip = ed.inspector
+        for btn in visible_children:
+            self.assertGreaterEqual(btn.x, ip.x)
+            self.assertLessEqual(btn.x + btn.w, ip.x + ip.w + 1)
+            self.assertGreaterEqual(btn.y, ip.y)
+            self.assertLessEqual(btn.y + btn.h, ip.y + ip.h + 2)
+
+        # Verify metadata correctly reflects total children without layout overflow
+        self.assertIn(f"{children_count} children", ed.metadata.components.get("text", ""))
+
+        # Verify component rows do NOT overlap the bottom section
+        visible_comp_rows = [(lbl, fld) for lbl, fld in ed.component_rows if fld.visible]
+        if visible_comp_rows:
+            max_comp_y = max(fld.y + fld.h for _, fld in visible_comp_rows)
+            # Add component row must start strictly below the last visible component row
+            self.assertLessEqual(max_comp_y, ed.add_name.y)
+
+        # Verify bottom section controls do not overlap each other
+        self.assertLessEqual(ed.add_name.y + ed.add_name.h, ed.tags_field.y)
+        self.assertLessEqual(ed.tags_field.y + ed.tags_field.h, ed.parent_field.y)
+        self.assertLessEqual(ed.parent_field.y + ed.parent_field.h, ed.relation_field.y)
+        self.assertLessEqual(ed.relation_field.y + ed.relation_field.h, ed.metadata.y)
+
+        # If systems exist, they start below metadata
+        visible_sys = [b for b in ed.system_rows if b.visible]
+        if visible_sys:
+            self.assertLessEqual(ed.metadata.y + ed.metadata.h, ed.system_label.y)
+            for btn in visible_sys:
+                self.assertGreaterEqual(btn.y, ed.system_label.y)
+                self.assertLessEqual(btn.y + btn.h, ip.y + ip.h + 2)
+
+
 
 

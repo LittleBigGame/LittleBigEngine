@@ -296,6 +296,19 @@ class UI:
         values.setdefault("color", FIELD)
         return self.create(parent, name, "button", text=text, action=action, **values)
 
+    def splitter(self, parent, name, *, axis="x", thickness=6, on_drag=None, **values):
+        normal = values.pop("color", (38, 50, 66))
+        hover = values.pop("hover_color", ACCENT)
+        values.setdefault("axis", axis)
+        values.setdefault("thickness", thickness)
+        values.setdefault("color", normal)
+        values.setdefault("normal_color", normal)
+        values.setdefault("hover_color", hover)
+        values.setdefault("layer", 3)
+        if on_drag:
+            values["on_drag"] = on_drag
+        return self.create(parent, name, "splitter", **values)
+
     def multiline(self, parent, name, text="", **values):
         values.setdefault("buffer", TextBuffer(text))
         values.setdefault("color", BG)
@@ -338,11 +351,59 @@ class UI:
             return
         kind = event[0]
         if kind == "motion":
+            mx, my = event[1], event[2]
+            for control in self.controls():
+                if "splitter" in control.tags and self.visible(control):
+                    active = self.root.relations.get("active_drag")
+                    hovered = (active is control) or (active is None and contains(control, mx, my))
+                    target_color = control.components.get("hover_color", ACCENT) if hovered else control.components.get("normal_color", control.components.get("color", PANEL))
+                    if control.color != target_color:
+                        control.color = target_color
             return
-        if kind in ("click", "scroll", "drag"):
+        if kind == "release":
+            active_drag = self.root.relations.pop("active_drag", None)
+            if active_drag is not None:
+                if "splitter" in active_drag.tags:
+                    normal = active_drag.components.get("normal_color", active_drag.components.get("color", PANEL))
+                    if active_drag.color != normal:
+                        active_drag.color = normal
+                cb = active_drag.components.get("on_release")
+                if cb:
+                    cb(active_drag, event)
+            return
+        if kind == "drag":
+            active_drag = self.root.relations.get("active_drag")
+            if active_drag is not None and self.visible(active_drag):
+                cb = active_drag.components.get("on_drag")
+                if cb:
+                    if cb(active_drag, event) is not False:
+                        return
             controls = [e for e in self.controls() if self.visible(e) and contains(e, event[1], event[2])]
             controls.sort(key=lambda e: (e.components.get("layer", 2), e.depth), reverse=True)
             for control in controls:
+                cb = control.components.get("on_drag")
+                if cb:
+                    if "splitter" in control.tags:
+                        self.root.relations["active_drag"] = control
+                    if cb(control, event) is not False:
+                        return
+            if self.focused is not None and "multiline" in self.focused.tags:
+                control = self.focused
+                control.buffer.cursor = self.text_index(control, event[1], event[2])
+                pitch = control.components.get("pitch", self.pitch)
+                line = control.components.get("line_height", self.line_height)
+                control.buffer.reveal(max(1, int((control.h-12)//line)), max(1, int((control.w-64)//pitch)))
+                control.components.touch("buffer")
+                return
+            return
+        if kind in ("click", "scroll"):
+            self.root.relations.pop("active_drag", None)
+            controls = [e for e in self.controls() if self.visible(e) and contains(e, event[1], event[2])]
+            controls.sort(key=lambda e: (e.components.get("layer", 2), e.depth), reverse=True)
+            for control in controls:
+                if "splitter" in control.tags:
+                    self.root.relations["active_drag"] = control
+                    control.color = control.components.get("hover_color", ACCENT)
                 callback = control.components.get("on_"+kind)
                 if callback:
                     if callback(control, event) is not False:
@@ -352,8 +413,6 @@ class UI:
                         control.buffer.scroll = max(0, control.buffer.scroll-int(event[4])*3)
                         control.components.touch("buffer")
                         return
-                    continue
-                if kind == "drag":
                     continue
                 if "button" in control.tags:
                     control.action()
@@ -371,14 +430,6 @@ class UI:
                     return
                 if control.components.get("modal", False):
                     return
-            if kind == "drag" and self.focused is not None and "multiline" in self.focused.tags:
-                control = self.focused
-                control.buffer.cursor = self.text_index(control, event[1], event[2])
-                pitch = control.components.get("pitch", self.pitch)
-                line = control.components.get("line_height", self.line_height)
-                control.buffer.reveal(max(1, int((control.h-12)//line)), max(1, int((control.w-64)//pitch)))
-                control.components.touch("buffer")
-                return
             return
         callback = self.root.components.get("on_key")
         if kind == "key" and callback and callback(event):
