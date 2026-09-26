@@ -12,7 +12,8 @@ authors = [{name = "LittleBigGame", email = "littlebiggame@proton.me"}]
 dependencies = []
 
 [project.optional-dependencies]
-desktop = ["pyglet>=2.1.16,<2.2"]
+desktop = ["pyglet>=2.1.16,<2.2", "jedi>=0.20,<0.21"]
+editor = ["jedi>=0.20,<0.21"]
 
 [project.scripts]
 lbe = "lbe.__main__:main"

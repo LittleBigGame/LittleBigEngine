@@ -76,3 +76,8 @@ Context menus use `lbe.menus` above Core. Popup panels and action rows are norma
 UI entities, with the active popup referenced by the UI root's `context_menu`
 relation. Applications resolve pointer targets and supply action providers;
 editor-specific actions remain in the editor template script.
+
+Optional Python completion uses Jedi static analysis in a serialized background
+worker outside Core. Editor entities own request state and discard stale results;
+UI and text selection remain reusable control behavior. The desktop extra includes
+Jedi, while the core package retains no runtime dependencies.

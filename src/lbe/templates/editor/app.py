@@ -1,7 +1,9 @@
 """An editor application composed with the public LBE and UI APIs."""
 
 import ast
+import keyword
 from pathlib import Path
+import re
 from types import SimpleNamespace
 import tempfile
 from uuid import UUID
@@ -1040,6 +1042,36 @@ def get_project_entities():
     return [e for e in state.runtime.entities if not is_editor_entity(e)]
 
 
+def extract_completion_context():
+    owner = state.code.relations.get('owner', selected())
+    owner_comps = {}
+    if owner and owner.alive:
+        for k, v in owner.components.items():
+            if isinstance(k, str) and k.isidentifier() and not keyword.iskeyword(k):
+                owner_comps[k] = type(v).__name__
+
+    entities_info = {}
+    all_comps = {}
+    for ent in get_project_entities():
+        if not ent.alive:
+            continue
+        ent_comps = {}
+        for k, v in ent.components.items():
+            if isinstance(k, str) and k.isidentifier() and not keyword.iskeyword(k):
+                tname = type(v).__name__
+                ent_comps[k] = tname
+                all_comps[k] = tname
+        name = ent.components.get("name")
+        if name and isinstance(name, str) and name.isidentifier() and not keyword.iskeyword(name):
+            entities_info[name] = {"components": ent_comps}
+
+    return {
+        "owner": {"components": owner_comps},
+        "entities": entities_info,
+        "all_components": all_comps,
+    }
+
+
 def get_editor_layout():
     sel = state.app.relations.get('selection')
     return {
@@ -1304,6 +1336,10 @@ def start():
 
 
 def update(dt):
+    owner = state.code.relations.get('owner', selected())
+    state.code.completion_components = tuple(owner.components) if owner.alive else ()
+    state.code.completion_context = extract_completion_context()
+    state.code.source_path = state.project / state.path_field.buffer.text
     layout()
     hierarchy_sync()
     inspector_sync()
@@ -1313,6 +1349,8 @@ def update(dt):
     run_status = "paused" if state.game.components.get("paused") else "running"
     if diag:
         put(state.code_info, text=f"SyntaxError Ln {diag['line']}, Col {diag['column']}: {diag['message']}", ink=(248, 81, 73, 255))
+    elif state.code.components.get('completion_error'):
+        put(state.code_info, text=f"Completion unavailable: {state.code.completion_error}", ink=(248, 81, 73, 255))
     else:
         put(state.code_info, text=f"Ln {row+1}, Col {column+1} | Attach target: {selected().components.get('name', selected().id)} | Ctrl+S save | F5 {run_status}", ink=MUTED)
 

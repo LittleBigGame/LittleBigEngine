@@ -80,7 +80,7 @@ The behavior comes from this script. There is no physics-specific code in the ke
 
 - System source files, entity component edits, hierarchy changes, system attachments
   and panel layout persist across relaunches in versioned project serialization format (`project.json`).
-- The source editor is intentionally small: no syntax coloring, completion, search
+- The source editor supports Python syntax coloring and completion, but not search
   or full Unicode grapheme layout yet.
 - Native nested Python containers use the core's explicit edit/touch mechanism.
 - Scripts execute trusted Python. Deliberately breaking the editor's own runtime
@@ -101,3 +101,29 @@ context-menu API described in `docs/ui.md`. Existing projects retain their own
 scripts: the updated editor menu bindings are included in newly initialized
 editor projects; upgrading an existing custom editor requires porting those
 bindings into its `app.py`.
+
+## Python-aware completion and selection
+
+The desktop extra includes Jedi for static completion based on the current source,
+project imports, inferred Python types and the attached owner's component names.
+It analyzes source without running the edited script. Core-only installations stay
+independent of Jedi; install `.[editor]` for analysis without the desktop backend.
+
+- Type a member access (`value.`) or at least three identifier characters, then
+  pause briefly for suggestions. Pasting and moving the caret do not open popups.
+- Ctrl+Space explicitly requests completion. Comments and strings are excluded.
+- Up/Down selects a suggestion; Tab or a mouse click accepts it. Enter always
+  inserts a newline. Escape, selection, navigation or focus changes dismiss it.
+- Analysis runs in a background worker. Results for old text or cursor positions
+  are discarded. Only six suggestions are shown; arbitrary dynamic Python values
+  may not be inferable. This is completion, not a full type checker.
+- Left-drag selection remains captured by its text area until mouse release,
+  including outside its bounds. Shift-click extends the existing selection.
+  Newline and empty-line selections have a visible highlight. Scrolling no longer
+  jumps back to the caret unless the caret or text changes.
+
+Existing project scripts are never overwritten automatically. To adopt these
+changes in an existing project, compare its `code_editor.py` and `app.py` against
+`src/lbe/templates/editor/` and port the coding system plus the `source_path` and
+`completion_components` assignments in `app.py`'s update function. A new editor
+project receives the updated scripts automatically.

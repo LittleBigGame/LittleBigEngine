@@ -2,6 +2,8 @@ from pathlib import Path
 import tempfile
 from types import SimpleNamespace
 import unittest
+import time
+import importlib.util
 
 from lbe.desktop import Input
 from lbe.project import load_project, template_path
@@ -674,6 +676,20 @@ class EditorTests(unittest.TestCase):
         self.assertTrue(b0.visible)
         self.assertTrue(b1.visible)
 
+    def await_completion(self, explicit=True):
+        if importlib.util.find_spec("jedi") is None:
+            self.skipTest("Jedi is an optional editor dependency")
+        if explicit:
+            self.send(("key", "SPACE", True, False))
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            self.runtime.step(0)
+            state = self.editor.code.components.get("autocomplete_state", {})
+            if state.get("active"):
+                return
+            time.sleep(0.01)
+        self.fail(str(self.editor.code.components.get("completion_error", "Completion did not arrive")))
+
     def test_autocomplete_and_code_completion(self):
         code = self.editor.code
         self.click(code)
@@ -681,13 +697,12 @@ class EditorTests(unittest.TestCase):
 
         # Type 'entity.c' to trigger autocomplete
         self.send(("text", "entity.c"))
-        self.runtime.step(0)
+        self.await_completion()
 
         ac_state = code.components.get("autocomplete_state")
         self.assertIsNotNone(ac_state)
         self.assertTrue(ac_state.get("active"))
         match_names = [m[0] for m in ac_state.get("matches", [])]
-        self.assertIn("color", match_names)
         self.assertIn("components", match_names)
 
         # Popup panel entity is visible
@@ -709,7 +724,7 @@ class EditorTests(unittest.TestCase):
         # Mouse click on autocomplete item
         self.send(("key", "A", True, False), ("key", "BACKSPACE", False, False))
         self.send(("text", "entity.t"))
-        self.runtime.step(0)
+        self.await_completion()
         self.assertTrue(ac_state.get("active"))
         item0 = next(c for c in code.children if c.components.get("part") == "ac_item:0")
         self.assertTrue(item0.visible)
@@ -781,8 +796,9 @@ class EditorTests(unittest.TestCase):
         code = self.editor.code
         self.click(code)
         self.send(("key", "A", True, False), ("key", "BACKSPACE", False, False))
-        self.send(("text", "entity."))
-        self.runtime.step(0)
+        self.send(("text", "entity"))
+        self.send(("text", "."))
+        self.await_completion(explicit=False)
 
         # Autocomplete popup is active and rendered
         ac_state = code.components.get("autocomplete_state")
@@ -1201,4 +1217,122 @@ class EditorTests(unittest.TestCase):
 
 
 
+
+
+    def test_selection_capture_shift_click_and_newline_highlights(self):
+        code = self.editor.code
+        self.type(code, 'abc\n\nxyz')
+        pitch = code.pitch
+        y = code.y+12
+        self.send(('click', code.x+48+pitch, y, 1, 0))
+        self.send(('release', code.x+48+pitch, y, 1, 0))
+        self.send(('click', code.x+48+3*pitch, y, 1, 1))
+        self.assertEqual(code.buffer.selection, (1, 3))
+        camera_before = (self.editor.camera.x, self.editor.camera.y)
+        viewport = self.editor.viewport
+        self.send(('drag', viewport.x+100, viewport.y+100, 1, 0, 50, 50))
+        self.assertEqual((self.editor.camera.x, self.editor.camera.y), camera_before)
+        self.send(('release', viewport.x+100, viewport.y+100, 1, 0))
+        self.assertNotIn('text_drag', self.editor.app.relations)
+        code.buffer.anchor, code.buffer.cursor = 3, 5
+        self.runtime.step(0)
+        parts = {c.components.get('part'): c for c in code.children}
+        self.assertTrue(parts['selection:0'].visible)
+        self.assertTrue(parts['selection:1'].visible)
+        self.assertEqual(parts['selection:1'].w, pitch)
+
+    def test_completion_does_not_reopen_on_navigation_or_swallow_enter(self):
+        code = self.editor.code
+        self.type(code, 'entity.components')
+        self.assertFalse(code.autocomplete_state['active'])
+        self.send(('key', 'HOME', False, False))
+        self.send(('key', 'RIGHT', False, False))
+        self.runtime.step(0)
+        self.assertFalse(code.autocomplete_state['active'])
+        self.type(code, 'entity.c')
+        self.await_completion()
+        self.send(('key', 'ENTER', False, False))
+        self.assertEqual(code.buffer.text, 'entity.c\n')
+        self.assertFalse(code.autocomplete_state['active'])
+        self.type(code, 'entity.c')
+        self.await_completion()
+        self.send(('key', 'RIGHT', False, True))
+        self.assertFalse(code.autocomplete_state['active'])
+        self.runtime.step(0)
+        self.assertFalse(code.autocomplete_state['active'])
+
+    def test_late_completion_cannot_replace_new_text(self):
+        from concurrent.futures import Future
+        code = self.editor.code
+        self.type(code, 'entity.c')
+        future = Future()
+        future.set_running_or_notify_cancel()
+        code.autocomplete_state.update(snapshot=(code.buffer.text, code.buffer.cursor, code.buffer.anchor), future=future)
+        self.send(('key', 'A', True, False), ('text', 'different'))
+        future.set_result(('c', [('components', 'property')]))
+        self.runtime.step(0)
+        self.assertEqual(code.buffer.text, 'different')
+        self.assertFalse(code.autocomplete_state['active'])
+
+    def test_manual_scroll_is_not_reset_to_caret_each_frame(self):
+        code = self.editor.code
+        self.type(code, '\n'.join(str(i) for i in range(100)))
+        before = code.buffer.scroll
+        self.send(('scroll', code.x+80, code.y+40, 0, 3))
+        self.assertLess(code.buffer.scroll, before)
+        scrolled = code.buffer.scroll
+        self.runtime.step(0)
+        self.assertEqual(code.buffer.scroll, scrolled)
+
+    def test_completion_hints_live_game_entities(self):
+        if importlib.util.find_spec("jedi") is None:
+            self.skipTest("Jedi is an optional editor dependency")
+        ship = self.editor.game.children[0]
+        ship.components["name"] = "HeroShip"
+        ship.components["vx"] = 5.0
+        self.runtime.step(0)
+
+        code = self.editor.code
+        self.click(code)
+        self.send(("key", "A", True, False), ("key", "BACKSPACE", False, False))
+        self.send(("text", "HeroShip.v"))
+        self.await_completion()
+
+        ac_state = code.components.get("autocomplete_state", {})
+        self.assertTrue(ac_state.get("active"))
+        match_names = [m[0] for m in ac_state.get("matches", [])]
+        self.assertIn("vx", match_names)
+
+    def test_autocomplete_only_triggers_on_typing(self):
+        code = self.editor.code
+        code.buffer.text = "HeroShip = 1\nHeroShip.vx = 2\n"
+        code.buffer.cursor = code.buffer.anchor = 0
+        self.runtime.step(0)
+
+        # 1. Clicking to focus or navigate does not trigger autocomplete
+        self.click(code)
+        self.runtime.step(0)
+        self.assertFalse(code.components.get("autocomplete_state", {}).get("active", False))
+
+        # 2. Moving cursor via Arrow keys does not trigger autocomplete
+        self.send(("key", "DOWN", False, False))
+        self.send(("key", "RIGHT", False, False))
+        self.runtime.step(0)
+        self.assertFalse(code.components.get("autocomplete_state", {}).get("active", False))
+
+        # 3. Mouse scrolling does not trigger autocomplete
+        self.send(("scroll", code.x + 80, code.y + 40, 0, 1))
+        self.runtime.step(0)
+        self.assertFalse(code.components.get("autocomplete_state", {}).get("active", False))
+
+        # 4. Text selection does not trigger autocomplete
+        code.buffer.anchor = 0
+        code.buffer.cursor = 8
+        self.runtime.step(0)
+        self.assertFalse(code.components.get("autocomplete_state", {}).get("active", False))
+
+        # 5. Idling across frames does not trigger autocomplete
+        for _ in range(5):
+            self.runtime.step(0.1)
+            self.assertFalse(code.components.get("autocomplete_state", {}).get("active", False))
 
