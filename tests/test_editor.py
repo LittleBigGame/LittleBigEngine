@@ -1484,3 +1484,84 @@ class EditorTests(unittest.TestCase):
         self.assertEqual(lines_after_bs[-1], "")
         self.assertTrue(lines_after_bs[-2].endswith("layer=1)"))
 
+    def test_escape_preserves_editor_focus_when_autocomplete_inactive(self):
+        """Issue #47: Escape when autocomplete is not active must not drop editor focus."""
+        code = self.editor.code
+        self.click(code)
+        self.assertIs(self.editor.ui.focused, code)
+
+        # Autocomplete is not active
+        ac_state = code.components.get("autocomplete_state", {})
+        self.assertFalse(ac_state.get("active", False))
+
+        # Press Escape - should NOT drop focus
+        self.send(("key", "ESCAPE", False, False))
+        self.assertIs(self.editor.ui.focused, code)
+
+    def test_callbacks_attached_once_not_per_frame(self):
+        """Issue #47: on_text/on_key/on_scroll should be set once in start(), not every frame."""
+        code = self.editor.code
+        self.assertIsNotNone(code.components.get("on_text"))
+        self.assertIsNotNone(code.components.get("on_key"))
+        self.assertIsNotNone(code.components.get("on_scroll"))
+
+        on_text = code.components["on_text"]
+        on_key = code.components["on_key"]
+
+        for _ in range(5):
+            self.runtime.step(0)
+        self.assertIs(code.components["on_text"], on_text)
+        self.assertIs(code.components["on_key"], on_key)
+
+    def test_bracket_match_cached_when_unchanged(self):
+        """Issue #47: matching_brackets should not be recomputed when text+cursor unchanged."""
+        code = self.editor.code
+        self.click(code)
+        self.send(("key", "A", True, False), ("text", "(hello)"))
+        self.runtime.step(0)
+
+        match1 = code.components.get("matching_brackets")
+
+        for _ in range(3):
+            self.runtime.step(0)
+
+        match2 = code.components.get("matching_brackets")
+        self.assertIs(match1, match2)
+
+    def test_hover_does_not_spam_requests_on_non_symbol(self):
+        """Issue #47: hover should set resolved_empty sentinel on non-symbol."""
+        code = self.editor.code
+        self.click(code)
+        self.send(("key", "A", True, False), ("text", "   "))
+
+        hover_state = code.components.setdefault("hover_state",
+            {"active": False, "dwell_start": 0.0, "last_mouse": (-100, -100)})
+
+        # Position inside the code editor over whitespace
+        mx, my = code.x + 55, code.y + 10
+        from time import monotonic
+        hover_state["last_mouse"] = (mx, my)
+        hover_state["dwell_start"] = monotonic() - 1.0
+        hover_state.pop("resolved_empty", None)
+        # Also set ui.mouse_pos so the hover entry condition passes
+        self.editor.ui.mouse_pos = (mx, my)
+
+        self.runtime.step(0)
+        self.assertTrue(hover_state.get("resolved_empty", False))
+
+        # Further steps should NOT spawn a future
+        self.assertNotIn("future", hover_state)
+        self.runtime.step(0)
+        self.assertNotIn("future", hover_state)
+
+    def test_popup_entities_hidden_on_code_editor_stop(self):
+        """Issue #47: popup entities should be hidden when code_editor system stops."""
+        code = self.editor.code
+        self.click(code)
+        self.send(("text", "entity."))
+        self.runtime.step(0)
+        popup = next((c for c in code.children if c.components.get("part") == "autocomplete_popup"), None)
+        if popup is not None:
+            code.systems["code_editor"].stop()
+            self.assertFalse(popup.visible)
+
