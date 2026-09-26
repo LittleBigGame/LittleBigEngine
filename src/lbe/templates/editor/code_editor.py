@@ -1,45 +1,16 @@
 """Code editor panel and coding-specific specialization system."""
 
 import ast
-import keyword
 import re
 
-from lbe.syntax import highlight_python_lines, KEYWORDS, BUILTINS, LITERALS
+from lbe.syntax import highlight_python_lines
+from lbe.completion import request_completion, code_context
+from time import monotonic
 from lbe.ui import put, ERROR, MUTED, ACCENT, PANEL, FIELD, INK
 
 PAIRS = {'(': ')', '[': ']', '{': '}', '"': '"', "'": "'"}
 CLOSING = {')': '(', ']': '[', '}': '{', '"': '"', "'": "'"}
 EMPTY_PAIRS = {('(', ')'), ('[', ']'), ('{', '}'), ('"', '"'), ("'", "'")}
-
-COMPLETIONS_ENTITY = [
-    ("x", "comp"), ("y", "comp"), ("w", "comp"), ("h", "comp"),
-    ("vx", "comp"), ("vy", "comp"), ("color", "comp"), ("layer", "comp"),
-    ("visible", "comp"), ("name", "comp"), ("pitch", "comp"), ("line_height", "comp"),
-    ("components", "prop"), ("tags", "prop"), ("relations", "prop"), ("systems", "prop"),
-    ("children", "prop"), ("parent", "prop"), ("id", "prop"), ("alive", "prop"),
-    ("depth", "prop"), ("touch", "method"), ("ancestors", "prop"), ("descendants", "prop"),
-    ("root", "prop"), ("runtime", "prop"),
-]
-
-COMPLETIONS_COMPONENTS = [
-    ("get", "method"), ("touch", "method"), ("setdefault", "method"),
-    ("keys", "method"), ("values", "method"), ("items", "method"), ("pop", "method"),
-]
-
-COMPLETIONS_SYSTEMS = [
-    ("attach", "method"), ("reload", "method"), ("detach", "method"),
-    ("keys", "method"), ("values", "method"), ("items", "method"),
-]
-
-COMPLETIONS_CONVENTIONS = [
-    ("update", "func"), ("draw", "func"), ("start", "func"), ("stop", "func"),
-    ("entity", "var"), ("dt", "var"), ("runtime", "var"), ("self", "var"),
-    ("print", "builtin"), ("len", "builtin"), ("range", "builtin"),
-    ("int", "builtin"), ("float", "builtin"), ("str", "builtin"), ("bool", "builtin"),
-    ("list", "builtin"), ("dict", "builtin"), ("set", "builtin"), ("tuple", "builtin"),
-    ("isinstance", "builtin"), ("True", "literal"), ("False", "literal"), ("None", "literal"),
-] + [(kw, "kw") for kw in keyword.kwlist]
-
 
 def check_diagnostics(source):
     """Detect syntax and compile errors via ast.parse."""
@@ -106,31 +77,9 @@ def find_matching_brackets(text, cursor):
     return None
 
 
-def get_completion_candidates(line_prefix, doc_text):
-    """Determine context-sensitive completion candidates and matching prefix."""
-    m = re.search(r'(?:entity|self|target|parent|child|other)\.([a-zA-Z_]*)$', line_prefix)
-    if m:
-        return m.group(1), COMPLETIONS_ENTITY
-    m = re.search(r'(?:components|relations|tags)\.([a-zA-Z_]*)$', line_prefix)
-    if m:
-        return m.group(1), COMPLETIONS_COMPONENTS
-    m = re.search(r'systems\.([a-zA-Z_]*)$', line_prefix)
-    if m:
-        return m.group(1), COMPLETIONS_SYSTEMS
-    m = re.search(r'\.([a-zA-Z_]*)$', line_prefix)
-    if m:
-        return m.group(1), COMPLETIONS_ENTITY + COMPLETIONS_COMPONENTS
-    m = re.search(r'\b([a-zA-Z_]\w*)$', line_prefix)
-    if m:
-        word_prefix = m.group(1)
-        doc_words = set(re.findall(r'\b[a-zA-Z_]\w*\b', doc_text)) - {word_prefix}
-        extra = [(w, "word") for w in sorted(doc_words) if not any(w == c[0] for c in COMPLETIONS_CONVENTIONS)]
-        return word_prefix, COMPLETIONS_CONVENTIONS + extra
-    return "", []
-
-
 def handle_editor_text(control, event):
     char = event[1]
+    control.components["completion_request"] = "auto" if len(char) == 1 and (char.isidentifier() or char == ".") else None
     buffer = control.buffer
     start, end = buffer.selection
 
@@ -170,34 +119,24 @@ def handle_editor_key(control, event):
     buffer = control.buffer
     start, end = buffer.selection
 
-    ac_state = control.components.get("autocomplete_state")
-    if ac_state and ac_state.get("active") and ac_state.get("matches"):
+    ac_state = control.components.setdefault("autocomplete_state", {"active": False})
+    if ctrl and key == "SPACE":
+        control.completion_request = "explicit"
+        return True
+    if ac_state.get("active") and ac_state.get("matches") and not ctrl and not shift:
         matches = ac_state["matches"]
         selected = ac_state.get("selected", 0)
-        if key == "UP":
-            ac_state["selected"] = (selected - 1) % len(matches)
-            control.components.touch("autocomplete_state")
+        if key in ("UP", "DOWN"):
+            ac_state["selected"] = (selected + (-1 if key == "UP" else 1)) % len(matches)
             return True
-        elif key == "DOWN":
-            ac_state["selected"] = (selected + 1) % len(matches)
-            control.components.touch("autocomplete_state")
+        if key == "TAB":
+            accept_completion(control, ac_state, selected)
             return True
-        elif key in ("TAB", "ENTER", "RETURN"):
-            prefix = ac_state.get("prefix", "")
-            chosen = matches[selected][0]
-            prefix_len = len(prefix)
-            buffer.anchor = buffer.cursor - prefix_len
-            buffer.insert(chosen)
-            buffer.anchor = buffer.cursor
-            ac_state["active"] = False
-            control.components.touch("autocomplete_state")
-            control.components.touch("buffer")
+        if key == "ESCAPE":
+            dismiss_completion(control, ac_state)
             return True
-        elif key == "ESCAPE":
-            ac_state["active"] = False
-            ac_state["dismissed_at"] = (buffer.cursor, buffer.text)
-            control.components.touch("autocomplete_state")
-            return True
+    # Navigation, selection, deletion and Enter retain their normal text behavior.
+    dismiss_completion(control, ac_state)
 
     # Backspace deleting empty pair
     if key == "BACKSPACE" and not ctrl and start == end:
@@ -210,13 +149,32 @@ def handle_editor_key(control, event):
                 control.components.touch("buffer")
                 return True
 
-    # Dismiss autocomplete on navigation keys
-    if key in ("LEFT", "RIGHT", "HOME", "END", "PAGEUP", "PAGEDOWN"):
-        if ac_state and ac_state.get("active"):
-            ac_state["active"] = False
-            control.components.touch("autocomplete_state")
-
     return False
+
+
+def dismiss_completion(control, state):
+    state["active"] = False
+    state.pop("scheduled", None)
+    future = state.pop("future", None)
+    if future:
+        future.cancel()
+    control.components["completion_request"] = None
+
+
+def accept_completion(control, state, index):
+    buffer = control.buffer
+    if state.get("snapshot") != (buffer.text, buffer.cursor, buffer.anchor):
+        dismiss_completion(control, state)
+        return
+    chosen = state["matches"][index][0]
+    start = buffer.cursor - len(state["prefix"])
+    end = buffer.cursor
+    while end < len(buffer.text) and (buffer.text[end].isalnum() or buffer.text[end] == "_"):
+        end += 1
+    buffer.anchor, buffer.cursor = start, end
+    buffer.insert(chosen)
+    control.components.touch("buffer")
+    dismiss_completion(control, state)
 
 
 def sync_autocomplete_popup(target, ui, ac_state):
@@ -243,7 +201,7 @@ def sync_autocomplete_popup(target, ui, ac_state):
     caret_x = target.x + 48 + (col - target.buffer.horizontal) * pitch
     caret_y = target.y + 6 + (row - target.buffer.scroll) * line_height
 
-    pop_w = 180
+    pop_w = min(max(160, max(len(name) for name, _ in matches)*pitch+16), max(40, target.w-64))
     item_h = 20
     pop_h = len(matches) * item_h + 8
     pop_x = max(target.x + 48, min(caret_x, target.x + target.w - pop_w - 10))
@@ -260,24 +218,17 @@ def sync_autocomplete_popup(target, ui, ac_state):
             bg_col = (44, 76, 105) if is_sel else FIELD
             def make_action(idx):
                 def action():
-                    chosen = matches[idx][0]
-                    prefix_len = len(ac_state.get("prefix", ""))
-                    target.buffer.anchor = target.buffer.cursor - prefix_len
-                    target.buffer.insert(chosen)
-                    target.buffer.anchor = target.buffer.cursor
-                    ac_state["active"] = False
-                    target.components.touch("autocomplete_state")
-                    target.components.touch("buffer")
+                    accept_completion(target, ac_state, idx)
                 return action
             put(item, visible=True, x=pop_x + 4, y=pop_y + 4 + i * item_h, w=pop_w - 8, h=item_h - 2,
-                text=f"{name}  [{kind}]", color=bg_col, action=make_action(i))
+                text=name, color=bg_col, action=make_action(i))
         else:
             put(item, visible=False)
 
 
 def update(dt):
     """Specialized behaviors for code editing (synchronization, shortcuts, status)."""
-    target = entity if "buffer" in entity.components else next((c for c in entity.descendants if "buffer" in c.components), None)
+    target = entity if "buffer" in entity.components else None
     if target is None:
         return
 
@@ -307,30 +258,45 @@ def update(dt):
     ui = target.root.components.get("ui")
     ac_state = target.components.setdefault("autocomplete_state", {"active": False, "matches": [], "selected": 0, "prefix": ""})
 
-    is_focused = ui and ui.focused is target
-    if not is_focused:
-        ac_state["active"] = False
+    snapshot = (text, buffer.cursor, buffer.anchor)
+    request = target.components.pop("completion_request", None)
+    if not ui or ui.focused is not target or buffer.cursor != buffer.anchor:
+        dismiss_completion(target, ac_state)
     else:
-        line_prefix = text[:buffer.cursor].rsplit("\n", 1)[-1]
-        word_prefix, candidates = get_completion_candidates(line_prefix, text)
-        is_member_access = bool(re.search(r'\.[a-zA-Z_]*$', line_prefix))
-        if ac_state.get("dismissed_at") == (buffer.cursor, text):
-            ac_state["active"] = False
-        elif word_prefix or (is_member_access and candidates):
-            matches = [c for c in candidates if c[0].lower().startswith(word_prefix.lower()) and c[0] != word_prefix]
-            matches.sort(key=lambda c: (not c[0].startswith(word_prefix), len(c[0]), c[0]))
-            matches = matches[:6]
-            if matches and (ac_state.get("active") or is_member_access or len(word_prefix) >= 2):
-                ac_state["active"] = True
-                ac_state["matches"] = matches
-                ac_state["prefix"] = word_prefix
-                if ac_state["selected"] >= len(matches):
-                    ac_state["selected"] = 0
-            else:
-                ac_state["active"] = False
-        else:
-            ac_state["active"] = False
+        if ac_state.get("snapshot") != snapshot:
+            dismiss_completion(target, ac_state)
+        if request:
+            prefix = re.search(r"[A-Za-z_]\w*$", text[:buffer.cursor])
+            member = bool(re.search(r"\.[A-Za-z_]*$", text[:buffer.cursor]))
+            if code_context(text, buffer.cursor) and (request == "explicit" or member or (prefix and len(prefix.group()) >= 2)):
+                ac_state["snapshot"] = snapshot
+                ac_state["scheduled"] = monotonic() + (0.2 if request == "auto" else 0)
+        if "scheduled" in ac_state and monotonic() >= ac_state["scheduled"]:
+            ac_state.pop("scheduled")
+            context = target.components.get("completion_context")
+            if context is None:
+                context = target.components.get("completion_components", ())
+            ac_state["future"] = request_completion(text, buffer.cursor,
+                target.components.get("source_path", project / "untitled.py"),
+                context)
+        future = ac_state.get("future")
+        if future is not None and future.done():
+            ac_state.pop("future")
+            try:
+                prefix, matches = future.result()
+                target.components.pop("completion_error", None)
+            except Exception as error:
+                target.components["completion_error"] = str(error)
+                prefix, matches = "", []
+            if ac_state.get("snapshot") == snapshot:
+                ac_state.update(active=bool(matches), matches=matches, prefix=prefix, selected=0)
 
     # Sync Autocomplete Popup UI
     if ui:
         sync_autocomplete_popup(target, ui, ac_state)
+
+
+def stop():
+    state = entity.components.get('autocomplete_state')
+    if state is not None:
+        dismiss_completion(entity, state)

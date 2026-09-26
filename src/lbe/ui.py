@@ -361,6 +361,7 @@ class UI:
                         control.color = target_color
             return
         if kind == "release":
+            self.root.relations.pop("text_drag", None)
             active_drag = self.root.relations.pop("active_drag", None)
             if active_drag is not None:
                 if "splitter" in active_drag.tags or "scrollbar_thumb" in active_drag.tags:
@@ -372,6 +373,13 @@ class UI:
                     cb(active_drag, event)
             return
         if kind == "drag":
+            text_drag = self.root.relations.get("text_drag")
+            if text_drag is not None and self.visible(text_drag) and event[3] & 1:
+                text_drag.buffer.cursor = self.text_index(text_drag, event[1], event[2])
+                text_drag.buffer.reveal(max(1, int((text_drag.h-12)//text_drag.components.get("line_height", self.line_height))),
+                                        max(1, int((text_drag.w-64)//text_drag.components.get("pitch", self.pitch))))
+                text_drag.components.touch("buffer")
+                return
             active_drag = self.root.relations.get("active_drag")
             if active_drag is not None and self.visible(active_drag):
                 cb = active_drag.components.get("on_drag")
@@ -387,16 +395,10 @@ class UI:
                 if cb:
                     if cb(control, event) is not False:
                         return
-            if self.focused is not None and "multiline" in self.focused.tags:
-                control = self.focused
-                control.buffer.cursor = self.text_index(control, event[1], event[2])
-                pitch = control.components.get("pitch", self.pitch)
-                line = control.components.get("line_height", self.line_height)
-                control.buffer.reveal(max(1, int((control.h-12)//line)), max(1, int((control.w-64)//pitch)))
-                control.components.touch("buffer")
-                return
             return
         if kind in ("click", "scroll"):
+            if kind == "click":
+                self.root.relations.pop("text_drag", None)
             self.root.relations.pop("active_drag", None)
             controls = [e for e in self.controls() if self.visible(e) and contains(e, event[1], event[2])]
             controls.sort(key=lambda e: (e.components.get("layer", 2), e.depth), reverse=True)
@@ -423,7 +425,12 @@ class UI:
                     return
                 if "multiline" in control.tags:
                     self.focus(control)
-                    control.buffer.cursor = control.buffer.anchor = self.text_index(control, event[1], event[2])
+                    control.buffer.cursor = self.text_index(control, event[1], event[2])
+                    if not event[4] & 1:
+                        control.buffer.anchor = control.buffer.cursor
+                    if event[3] == 1:
+                        self.root.relations["text_drag"] = control
+                    control.components.touch("buffer")
                     pitch = control.components.get("pitch", self.pitch)
                     line = control.components.get("line_height", self.line_height)
                     control.buffer.reveal(max(1, int((control.h-12)//line)), max(1, int((control.w-64)//pitch)))
@@ -512,8 +519,10 @@ class UI:
         buffer.scroll = max(0, min(buffer.scroll, max(0, len(lines)-rows)))
         max_col = max((len(l) for l in lines), default=0)
         buffer.horizontal = max(0, min(buffer.horizontal, max(0, max_col-columns)))
-        if self.focused is control:
+        cursor_state = (buffer.text, buffer.cursor)
+        if self.focused is control and control.components.get("_view_cursor") != cursor_state:
             buffer.reveal(rows, columns)
+        control.components["_view_cursor"] = cursor_state
         children = {child.components.get("part"): child for child in control.children}
 
         def part(name, kind, **values):
@@ -554,7 +563,8 @@ class UI:
             else:
                 put(err_rect, visible=False)
             start = max(selection_start-offset-buffer.horizontal, 0)
-            end = min(selection_end-offset-buffer.horizontal, len(lines[row])-buffer.horizontal, columns)
+            selected_width = len(lines[row]) + (1 if row < len(lines)-1 else 0)
+            end = min(selection_end-offset-buffer.horizontal, selected_width-buffer.horizontal, columns)
             has_selection = (end > start and
                              selection_start < offset + len(lines[row]) + 1 and
                              selection_end > offset)
