@@ -335,6 +335,27 @@ class UI:
                 callback = self.root.components.get("on_ui_error")
                 if callback:
                     callback(message)
+        # Continuous selection drag autoscroll when mouse is held outside multiline control
+        text_drag = self.root.relations.get("text_drag")
+        if text_drag is not None and self.visible(text_drag) and hasattr(self, "mouse_pos"):
+            mx, my = self.mouse_pos
+            pitch = text_drag.components.get("pitch", self.pitch)
+            line = text_drag.components.get("line_height", self.line_height)
+            rows = max(1, int((text_drag.h - 12) // line))
+            cols = max(1, int((text_drag.w - 64) // pitch))
+            lines_count = len(text_drag.buffer.text.split("\n"))
+            changed = False
+            if my < text_drag.y + 6 and text_drag.buffer.scroll > 0:
+                text_drag.buffer.scroll = max(0, text_drag.buffer.scroll - 1)
+                text_drag.buffer.cursor = self.text_index(text_drag, mx, my)
+                changed = True
+            elif my > text_drag.y + text_drag.h - 6 and text_drag.buffer.scroll < max(0, lines_count - rows):
+                text_drag.buffer.scroll = min(max(0, lines_count - rows), text_drag.buffer.scroll + 1)
+                text_drag.buffer.cursor = self.text_index(text_drag, mx, my)
+                changed = True
+            if changed:
+                text_drag.buffer.reveal(rows, cols)
+                text_drag.components.touch("buffer")
         for control in tuple(self.controls()):
             if "multiline" in control.tags and self.visible(control):
                 try:
@@ -377,9 +398,23 @@ class UI:
         if kind == "drag":
             text_drag = self.root.relations.get("text_drag")
             if text_drag is not None and self.visible(text_drag) and event[3] & 1:
-                text_drag.buffer.cursor = self.text_index(text_drag, event[1], event[2])
-                text_drag.buffer.reveal(max(1, int((text_drag.h-12)//text_drag.components.get("line_height", self.line_height))),
-                                        max(1, int((text_drag.w-64)//text_drag.components.get("pitch", self.pitch))))
+                mx, my = event[1], event[2]
+                pitch = text_drag.components.get("pitch", self.pitch)
+                line = text_drag.components.get("line_height", self.line_height)
+                rows = max(1, int((text_drag.h - 12) // line))
+                cols = max(1, int((text_drag.w - 64) // pitch))
+
+                # Autoscroll when dragging outside visible bounds
+                if my < text_drag.y + 6:
+                    dy_lines = max(1, int((text_drag.y + 6 - my) // line))
+                    text_drag.buffer.scroll = max(0, text_drag.buffer.scroll - dy_lines)
+                elif my > text_drag.y + text_drag.h - 6:
+                    lines_count = len(text_drag.buffer.text.split("\n"))
+                    dy_lines = max(1, int((my - (text_drag.y + text_drag.h - 6)) // line))
+                    text_drag.buffer.scroll = max(0, min(text_drag.buffer.scroll + dy_lines, max(0, lines_count - rows)))
+
+                text_drag.buffer.cursor = self.text_index(text_drag, mx, my)
+                text_drag.buffer.reveal(rows, cols)
                 text_drag.components.touch("buffer")
                 return
             active_drag = self.root.relations.get("active_drag")
@@ -582,10 +617,13 @@ class UI:
             return children[name]
 
         caret = part("cursor", "rect", color=ACCENT, layer=control.layer+2)
-        scrollbar = part("scrollbar", "rect", color=ACCENT, layer=control.layer+2)
+        scroll_track = part("scroll_track", "scrollbar_track", color=(28, 36, 48), layer=control.layer+2)
+        scrollbar = part("scrollbar", "scrollbar_thumb", color=(55, 75, 95), hover_color=(75, 115, 155), layer=control.layer+3)
+        scrollbar.tags.add("scrollbar_thumb")
+        scroll_track.tags.add("scrollbar_track")
         selection_start, selection_end = buffer.selection
         offset = sum(len(line)+1 for line in lines[:buffer.scroll])
-        used = {"cursor", "scrollbar"}
+        used = {"cursor", "scrollbar", "scroll_track"}
         line_spans = control.components.get("line_spans")
         diag = control.components.get("diagnostic")
         err_row = (diag.get("line", 0) - 1) if diag else -1
@@ -644,8 +682,47 @@ class UI:
                          buffer.horizontal <= column <= buffer.horizontal+columns)
         put(caret, visible=caret_visible,
             x=control.x+48+(column-buffer.horizontal)*pitch, y=control.y+6+(row-buffer.scroll)*line_height, w=2, h=line_height)
-        put(scrollbar, x=control.x+control.w-5, y=control.y+control.h*buffer.scroll/max(len(lines), rows),
-            w=3, h=max(12, control.h*min(1, rows/len(lines))))
+        has_scrollbar = len(lines) > rows
+        max_scroll = max(0, len(lines) - rows)
+        if has_scrollbar:
+            sb_w = 8
+            track_x = control.x + control.w - sb_w - 2
+            track_y = control.y + 4
+            track_h = max(20, control.h - 8)
+            thumb_h = max(16, int(track_h * (rows / len(lines))))
+            travel = max(0, track_h - thumb_h)
+            thumb_y = track_y + int(travel * (buffer.scroll / max_scroll)) if max_scroll > 0 else track_y
+
+            def on_thumb_drag(t, ev):
+                if max_scroll <= 0 or travel <= 0:
+                    return
+                rel_y = max(0, min(travel, ev[2] - track_y - thumb_h / 2))
+                ratio = rel_y / travel
+                control.buffer.scroll = int(round(ratio * max_scroll))
+                control.components.touch("buffer")
+
+            def on_track_click(tr, ev):
+                click_y = ev[2]
+                curr_thumb_y = thumb_y
+                for c in tr.parent.children:
+                    if c.components.get("part") == "scrollbar":
+                        curr_thumb_y = c.y
+                        break
+                if click_y < curr_thumb_y:
+                    control.buffer.scroll = max(0, control.buffer.scroll - rows)
+                elif click_y > curr_thumb_y + thumb_h:
+                    control.buffer.scroll = min(max_scroll, control.buffer.scroll + rows)
+                else:
+                    return
+                control.components.touch("buffer")
+
+            scrollbar.components["on_drag"] = on_thumb_drag
+            scroll_track.components["on_click"] = on_track_click
+            put(scroll_track, visible=True, x=track_x, y=track_y, w=sb_w, h=track_h)
+            put(scrollbar, visible=True, x=track_x, y=thumb_y, w=sb_w, h=thumb_h)
+        else:
+            put(scroll_track, visible=False)
+            put(scrollbar, visible=False)
 
     def draw(self):
         graphics = self.graphics
