@@ -832,11 +832,18 @@ class EditorTests(unittest.TestCase):
         self.send(("motion", 10, 10))
         self.assertEqual(ed.col_splitter.color, normal_color)
 
-        # 2. Drag column splitter horizontally
+        # 2. Moving mouse while dragging from outside (e.g. viewport) does NOT initiate splitter resize
         orig_col_w = ed.app.components.get("left_column_w", 370)
         orig_hier_w = ed.hierarchy.w
         orig_vp_x = ed.viewport.x
 
+        self.send(("click", ed.viewport.x + 20, ed.viewport.y + 20, 1))
+        self.send(("drag", ed.col_splitter.x + 2, ed.col_splitter.y + 100, 1, 0, 50, 0))
+        self.send(("release", ed.col_splitter.x + 2, ed.col_splitter.y + 100, 1, 0))
+        self.assertEqual(ed.app.components.get("left_column_w"), orig_col_w)
+
+        # 3. Direct click and drag on column splitter horizontally
+        self.send(("click", ed.col_splitter.x + 2, ed.col_splitter.y + 100, 1))
         self.send(("drag", ed.col_splitter.x + 2, ed.col_splitter.y + 100, 1, 0, 50, 0))
         self.send(("release", ed.col_splitter.x + 2, ed.col_splitter.y + 100, 1, 0))
         self.assertEqual(ed.app.components.get("left_column_w"), orig_col_w + 50)
@@ -845,11 +852,12 @@ class EditorTests(unittest.TestCase):
         self.assertEqual(ed.viewport.x, orig_vp_x + 50)
         self.assertEqual(ed.code_panel.x, orig_vp_x + 50)
 
-        # 3. Drag hierarchy splitter vertically
+        # 4. Drag hierarchy splitter vertically
         orig_hier_h = ed.hierarchy.components.get("panel_h", 240)
         orig_insp_y = ed.inspector.y
         orig_insp_h = ed.inspector.h
 
+        self.send(("click", ed.hierarchy_splitter.x + 20, ed.hierarchy_splitter.y + 2, 1))
         self.send(("drag", ed.hierarchy_splitter.x + 20, ed.hierarchy_splitter.y + 2, 1, 0, 0, 40))
         self.send(("release", ed.hierarchy_splitter.x + 20, ed.hierarchy_splitter.y + 2, 1, 0))
         self.assertEqual(ed.hierarchy.components.get("panel_h"), orig_hier_h + 40)
@@ -857,18 +865,19 @@ class EditorTests(unittest.TestCase):
         self.assertEqual(ed.inspector.y, orig_insp_y + 40)
         self.assertEqual(ed.inspector.h, orig_insp_h - 40)
 
-        # 4. Drag code panel splitter vertically
+        # 5. Drag code panel splitter vertically
         orig_split_y = ed.code_panel.components.get("split_y", ed.code_panel.y)
         orig_vp_h = ed.viewport.h
         orig_cp_h = ed.code_panel.h
 
+        self.send(("click", ed.code_splitter.x + 50, ed.code_splitter.y + 2, 1))
         self.send(("drag", ed.code_splitter.x + 50, ed.code_splitter.y + 2, 1, 0, 0, -30))
         self.send(("release", ed.code_splitter.x + 50, ed.code_splitter.y + 2, 1, 0))
         self.assertEqual(ed.code_panel.components.get("split_y"), orig_split_y - 30)
         self.assertEqual(ed.viewport.h, orig_vp_h - 30)
         self.assertEqual(ed.code_panel.h, orig_cp_h + 30)
 
-        # 5. Release clears active drag
+        # 6. Release clears active drag
         self.assertNotIn("active_drag", ed.app.relations)
 
         # 6. Save project and verify layout persistence across reopen
@@ -932,6 +941,140 @@ class EditorTests(unittest.TestCase):
             for btn in visible_sys:
                 self.assertGreaterEqual(btn.y, ed.system_label.y)
                 self.assertLessEqual(btn.y + btn.h, ip.y + ip.h + 2)
+
+    def test_scrollbars_rendering_and_interaction(self):
+        ed = self.editor
+
+        # 1. Hierarchy scrollbar appears when entities exceed capacity
+        for i in range(25):
+            self.runtime.create(parent=ed.game, name=f"ScrollTarget_{i}")
+        self.runtime.step(0)
+
+        self.assertTrue(ed.hierarchy_scroll_track.visible)
+        self.assertTrue(ed.hierarchy_scroll_thumb.visible)
+        self.assertEqual(ed.hierarchy.scroll, 0)
+
+        # Drag hierarchy thumb downwards
+        thumb = ed.hierarchy_scroll_thumb
+        self.send(("click", thumb.x + 2, thumb.y + 4, 1))
+        self.send(("drag", thumb.x + 2, thumb.y + 60, 1, 0, 0, 40))
+        self.send(("release", thumb.x + 2, thumb.y + 60, 1, 0))
+        self.assertGreater(ed.hierarchy.scroll, 0)
+
+        # Click track above thumb to page up
+        old_scroll = ed.hierarchy.scroll
+        track = ed.hierarchy_scroll_track
+        self.send(("click", track.x + 2, track.y + 2, 1))
+        self.assertLessEqual(ed.hierarchy.scroll, old_scroll)
+
+        # 2. Inspector scrollbar appears when component count exceeds capacity
+        target = self.runtime.create(parent=ed.game, name="ManyComponentsEntity")
+        for i in range(30):
+            target.components[f"prop_{i:02d}"] = float(i)
+        self.select(target)
+        self.runtime.step(0)
+
+        self.assertTrue(ed.inspector_scroll_track.visible)
+        self.assertTrue(ed.inspector_scroll_thumb.visible)
+        self.assertEqual(ed.inspector.scroll, 0)
+
+        # Drag inspector thumb downwards
+        i_thumb = ed.inspector_scroll_thumb
+        self.send(("click", i_thumb.x + 2, i_thumb.y + 4, 1))
+        self.send(("drag", i_thumb.x + 2, i_thumb.y + 60, 1, 0, 0, 40))
+        self.send(("release", i_thumb.x + 2, i_thumb.y + 60, 1, 0))
+        self.assertGreater(ed.inspector.scroll, 0)
+
+        # Click track above thumb to page up
+        old_insp_scroll = ed.inspector.scroll
+        i_track = ed.inspector_scroll_track
+        self.send(("click", i_track.x + 2, i_track.y + 2, 1))
+        self.assertLessEqual(ed.inspector.scroll, old_insp_scroll)
+
+    def test_inspector_entity_name_editing_and_lifecycle_actions(self):
+        ed = self.editor
+
+        # Select Entity A
+        entity_a = ed.game.children[0]
+        self.select(entity_a)
+        self.runtime.step(0)
+
+        # 1. Edit entity name directly from name_field
+        self.type(ed.name_field, "HeroShip", commit=True)
+        self.assertEqual(entity_a.components.get("name"), "HeroShip")
+        self.assertIn("HeroShip", ed.name_field.buffer.text)
+
+        # 2. Quick entity action: + Child
+        self.click(ed.add_child_button)
+        new_child = ed.app.relations["selection"]
+        self.assertIs(new_child.parent, entity_a)
+        self.assertIn("Child_", new_child.components.get("name", ""))
+
+        # 3. Quick entity action: Duplicate
+        new_child.components["tag_sample"] = "original"
+        self.click(ed.duplicate_button)
+        dup = ed.app.relations["selection"]
+        self.assertIsNot(dup, new_child)
+        self.assertIs(dup.parent, entity_a)
+        self.assertEqual(dup.components.get("tag_sample"), "original")
+        self.assertTrue(dup.components.get("name", "").endswith("_copy"))
+
+        # 4. Quick entity action: Delete
+        dup_name = dup.components.get("name")
+        self.click(ed.delete_button)
+        self.assertFalse(dup.alive)
+        self.assertIs(ed.app.relations["selection"], entity_a)
+
+        # 5. Prevent deleting root Game or Application
+        self.select(ed.game)
+        self.click(ed.delete_button)
+        self.assertTrue(ed.game.alive)
+        self.assertIn("Cannot delete engine or editor root", ed.app.status)
+
+    def test_inspector_quick_presets_component_deletion_and_relations(self):
+        ed = self.editor
+
+        # Create fresh entity and select it
+        bare = self.runtime.create(parent=ed.game, name="BareEntity")
+        self.select(bare)
+        self.runtime.step(0)
+
+        # 1. Quick presets: + Pos, + Size, + Vel, + Color
+        self.click(ed.quick_pos_btn)
+        self.assertIn("x", bare.components)
+        self.assertIn("y", bare.components)
+
+        self.click(ed.quick_size_btn)
+        self.assertIn("w", bare.components)
+        self.assertIn("h", bare.components)
+
+        self.click(ed.quick_vel_btn)
+        self.assertIn("vx", bare.components)
+        self.assertIn("vy", bare.components)
+
+        self.click(ed.quick_color_btn)
+        self.assertIn("color", bare.components)
+
+        # 2. Component deletion via delete button [x]
+        color_idx = next(i for i, (lbl, fld) in enumerate(ed.component_rows) if fld.visible and fld.component_key == "color")
+        del_btn = ed.component_delete_buttons[color_idx]
+        self.assertTrue(del_btn.visible)
+        self.click(del_btn)
+        self.assertNotIn("color", bare.components)
+
+        # 3. Interactive relations list and unlinking
+        other = self.runtime.create(parent=ed.game, name="TargetAlly")
+        self.type(ed.relation_field, "ally=TargetAlly", commit=True)
+        self.assertIs(bare.relations.get("ally"), other)
+
+        # Check relation row exists and click unlink [x]
+        self.assertEqual(len([r for r, u in ed.relation_rows if r.visible]), 1)
+        rel_btn, unlink_btn = ed.relation_rows[0]
+        self.assertIn("ally -> TargetAlly", rel_btn.components.get("text", ""))
+
+        self.click(unlink_btn)
+        self.assertNotIn("ally", bare.relations)
+        self.assertEqual(len([r for r, u in ed.relation_rows if r.visible]), 0)
 
 
 

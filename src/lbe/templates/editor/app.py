@@ -184,7 +184,27 @@ def initialize():
     state.run_button = state.ui.button(state.header, 'ToggleRun', 'Pause (F5)', toggle_game_running)
     state.zoom_label = state.ui.create(state.app, 'ViewportCaption', 'label', text='WORLD', ink=MUTED)
     state.selection_label = state.ui.create(state.inspector, 'Selection', 'label', text='')
+    state.name_label = state.ui.create(state.inspector, 'EntityNameLabel', 'label', text='Name', ink=MUTED)
+    state.name_field = state.ui.field(state.inspector, 'EntityName', '', hint='entity name')
+    state.name_field.on_commit = commit_name
     state.identity_label = state.ui.create(state.inspector, 'Identity', 'label', text='', ink=MUTED)
+    state.add_child_button = state.ui.button(state.inspector, 'AddChildBtn', '+ Child', inspector_add_child)
+    state.duplicate_button = state.ui.button(state.inspector, 'DuplicateBtn', 'Duplicate', inspector_duplicate_entity)
+    state.delete_button = state.ui.button(state.inspector, 'DeleteBtn', 'Delete', inspector_delete_entity, color=(60, 30, 35))
+    state.quick_pos_btn = state.ui.button(state.inspector, 'QuickPosBtn', '+ Pos', quick_add_pos)
+    state.quick_size_btn = state.ui.button(state.inspector, 'QuickSizeBtn', '+ Size', quick_add_size)
+    state.quick_vel_btn = state.ui.button(state.inspector, 'QuickVelBtn', '+ Vel', quick_add_vel)
+    state.quick_color_btn = state.ui.button(state.inspector, 'QuickColorBtn', '+ Color', quick_add_color)
+    state.component_delete_buttons = []
+    state.relation_rows = []
+    state.hierarchy_scroll_track = state.ui.create(state.hierarchy, 'HierarchyScrollTrack', 'scrollbar_track', color=(28, 36, 48))
+    state.hierarchy_scroll_track.on_click = hierarchy_track_click
+    state.hierarchy_scroll_thumb = state.ui.create(state.hierarchy, 'HierarchyScrollThumb', 'scrollbar_thumb', color=(55, 75, 95), hover_color=(75, 115, 155), layer=3)
+    state.hierarchy_scroll_thumb.on_drag = hierarchy_scroll_drag
+    state.inspector_scroll_track = state.ui.create(state.inspector, 'InspectorScrollTrack', 'scrollbar_track', color=(28, 36, 48))
+    state.inspector_scroll_track.on_click = inspector_track_click
+    state.inspector_scroll_thumb = state.ui.create(state.inspector, 'InspectorScrollThumb', 'scrollbar_thumb', color=(55, 75, 95), hover_color=(75, 115, 155), layer=3)
+    state.inspector_scroll_thumb.on_drag = inspector_scroll_drag
     state.add_name = state.ui.field(state.inspector, 'ComponentName', '', hint='component name')
     state.add_value = state.ui.field(state.inspector, 'ComponentValue', '', hint='value, e.g. 2.0')
     state.add_button = state.ui.button(state.inspector, 'AddComponent', '+', add_component)
@@ -348,11 +368,15 @@ def hierarchy_sync():
         if entity.id in expanded:
             traversal_stack.extend(((child, depth + 1) for child in reversed(entity.children)))
     capacity = int((state.hierarchy.h - 34) // 22)
-    put(state.hierarchy, scroll=max(0, min(state.hierarchy.scroll, max(0, len(visible) - capacity))))
+    state.hierarchy.visible_count = len(visible)
+    max_scroll = max(0, len(visible) - capacity)
+    put(state.hierarchy, scroll=max(0, min(state.hierarchy.scroll, max_scroll)))
     while len(state.hierarchy_rows) < capacity:
         row = state.ui.create(state.hierarchy, f'HierarchyRow{len(state.hierarchy_rows)}', 'button', text='', indent=0)
         row.on_click = hierarchy_click
         state.hierarchy_rows.append(row)
+    has_scroll = len(visible) > capacity and capacity > 0
+    row_w = state.hierarchy.w - 20 if has_scroll else state.hierarchy.w - 16
     for index, row in enumerate(state.hierarchy_rows):
         source = index + state.hierarchy.scroll
         if index >= capacity or source >= len(visible):
@@ -367,9 +391,22 @@ def hierarchy_sync():
         indicator = '> ' if is_selected else '  '
         text = '  ' * min(depth, 8) + (marker if target.children else ' ') + ' ' + indicator + name
         put(row, visible=True, x=state.hierarchy.x + 8, y=state.hierarchy.y + 32 + index * 22,
-            w=state.hierarchy.w - 16, h=22, text=text, indent=min(depth, 8) * 16,
+            w=row_w, h=22, text=text, indent=min(depth, 8) * 16,
             color=(45, 95, 125) if is_selected else PANEL,
             ink=(255, 255, 255, 255) if is_selected else INK)
+    if has_scroll:
+        track_x = state.hierarchy.x + state.hierarchy.w - 10
+        track_y = state.hierarchy.y + 32
+        track_w = 6
+        track_h = capacity * 22
+        put(state.hierarchy_scroll_track, visible=True, x=track_x, y=track_y, w=track_w, h=track_h)
+        thumb_h = max(16, int(track_h * (capacity / len(visible))))
+        travel = max(1, track_h - thumb_h)
+        thumb_y = track_y + int(travel * (state.hierarchy.scroll / max_scroll)) if max_scroll > 0 else track_y
+        put(state.hierarchy_scroll_thumb, visible=True, x=track_x, y=thumb_y, w=track_w, h=thumb_h)
+    else:
+        put(state.hierarchy_scroll_track, visible=False)
+        put(state.hierarchy_scroll_thumb, visible=False)
 
 def inspector_sync():
     entity = selected()
@@ -380,23 +417,46 @@ def inspector_sync():
     ip = state.inspector
     i_pad = parse_box(ip.components.get("padding", (8, 12, 8, 12)))
 
-    # Header labels
-    put(state.selection_label, x=ip.x + i_pad[3], y=ip.y + 32, w=max(0, ip.w - i_pad[3] - i_pad[1]), h=20,
-        text=entity.components.get('name', str(entity.id)))
-    put(state.identity_label, x=ip.x + i_pad[3], y=ip.y + 54, w=max(0, ip.w - i_pad[3] - i_pad[1]), h=20,
-        text=str(entity.id))
+    # Header: Name field
+    ent_name = str(entity.components.get('name', ''))
+    put(state.name_label, x=ip.x + 12, y=ip.y + 32, w=38, h=22, text='Name')
+    put(state.name_field, x=ip.x + 54, y=ip.y + 30, w=max(30, ip.w - 66), h=24)
+    state.ui.set_text(state.name_field, ent_name)
+    put(state.selection_label, visible=False, text=ent_name or str(entity.id))
+
+    # Subheader: Identity label & Quick Entity Actions (+ Child, Duplicate, Delete)
+    put(state.identity_label, x=ip.x + 12, y=ip.y + 58, w=max(30, ip.w - 220), h=20,
+        text=f'id: {str(entity.id)[:8]}')
+    btn_del_w = 52
+    right_edge = ip.x + ip.w - 12
+    put(state.delete_button, x=right_edge - btn_del_w, y=ip.y + 56, w=btn_del_w, h=22)
+    put(state.duplicate_button, x=right_edge - btn_del_w - 4 - 68, y=ip.y + 56, w=68, h=22)
+    put(state.add_child_button, x=right_edge - btn_del_w - 4 - 68 - 4 - 56, y=ip.y + 56, w=56, h=22)
+
+    # Quick Preset Chips (+ Pos, + Size, + Vel, + Color)
+    preset_w = max(36, (ip.w - 24 - 18) // 4)
+    put(state.quick_pos_btn, x=ip.x + 12 + 0 * (preset_w + 6), y=ip.y + 84, w=preset_w, h=22)
+    put(state.quick_size_btn, x=ip.x + 12 + 1 * (preset_w + 6), y=ip.y + 84, w=preset_w, h=22)
+    put(state.quick_vel_btn, x=ip.x + 12 + 2 * (preset_w + 6), y=ip.y + 84, w=preset_w, h=22)
+    put(state.quick_color_btn, x=ip.x + 12 + 3 * (preset_w + 6), y=ip.y + 84, w=preset_w, h=22)
 
     # Dynamic calculation of bottom section height
+    num_rel_rows = min(len(relations), 3) if relations else 0
+    rel_rows_h = (num_rel_rows * 24 + 4) if relations else 0
     num_sys_rows = min(2, (len(systems) + 2) // 3) if systems else 0
     sys_h = (20 + num_sys_rows * 26) if systems else 0
     num_child_rows = min(3, (len(children) + 2) // 3) if children else 0
     child_h = (num_child_rows * 24 + 4) if children else 0
-    bottom_h = 30 * 4 + 22 + sys_h + child_h + 8
+    bottom_h = 30 * 4 + rel_rows_h + 22 + sys_h + child_h + 8
 
     # Component rows capacity & scroll
-    avail_comp_h = ip.h - 78 - bottom_h
+    comp_start_y = ip.y + 112
+    avail_comp_h = max(28, ip.h - (comp_start_y - ip.y) - bottom_h)
     capacity = max(1, int(avail_comp_h // 28))
-    put(state.inspector, scroll=max(0, min(state.inspector.scroll, max(0, len(items) - capacity))))
+    max_scroll = max(0, len(items) - capacity)
+    state.inspector.item_count = len(items)
+    state.inspector.capacity = capacity
+    put(state.inspector, scroll=max(0, min(state.inspector.scroll, max_scroll)))
 
     while len(state.component_rows) < capacity:
         n = len(state.component_rows)
@@ -404,18 +464,33 @@ def inspector_sync():
         field = state.ui.field(state.inspector, f'ComponentField{n}', '')
         state.component_rows.append((label, field))
 
+    while len(state.component_delete_buttons) < capacity:
+        n = len(state.component_delete_buttons)
+        btn = state.ui.button(state.inspector, f'ComponentDel{n}', 'x', lambda: None, color=(60, 30, 35))
+        state.component_delete_buttons.append(btn)
+
+    has_comp_scroll = len(items) > capacity and capacity > 0
+    sb_w = 12 if has_comp_scroll else 0
+
     for index, (label, field) in enumerate(state.component_rows):
         source = index + state.inspector.scroll
         shown = index < capacity and source < len(items)
         put(label, visible=shown)
         put(field, visible=shown)
+        del_btn = state.component_delete_buttons[index]
+        put(del_btn, visible=shown)
         if not shown:
             continue
         key, value = items[source]
         editable = type(value) in (int, float, bool, str, tuple, list, dict, type(None))
-        y = ip.y + 80 + index * 28
-        put(label, x=ip.x + 12, y=y + 4, w=112, h=24, text=key)
-        put(field, x=ip.x + 126, y=y, w=max(30, ip.w - 138), h=25, readonly=not editable)
+        y = comp_start_y + index * 28
+        del_w = 20
+        field_w = max(30, ip.w - 126 - 12 - del_w - 4 - sb_w)
+        del_x = ip.x + 126 + field_w + 4
+        put(label, x=ip.x + 12, y=y + 4, w=110, h=24, text=key)
+        put(field, x=ip.x + 126, y=y, w=field_w, h=25, readonly=not editable)
+        put(del_btn, x=del_x, y=y, w=del_w, h=25, text='x')
+        del_btn.action = lambda k=key: delete_component(k)
         if field.components.get('component_key') != key or field.relations.get('target') is not entity:
             if state.ui.focused is field:
                 del state.app.relations['focus']
@@ -425,8 +500,25 @@ def inspector_sync():
             field.on_click = component_click
         state.ui.set_text(field, safe_repr(value))
 
+    for btn in state.component_delete_buttons[capacity:]:
+        put(btn, visible=False)
+
+    if has_comp_scroll:
+        track_x = ip.x + ip.w - 10
+        track_y = comp_start_y
+        track_w = 6
+        track_h = capacity * 28
+        put(state.inspector_scroll_track, visible=True, x=track_x, y=track_y, w=track_w, h=track_h)
+        thumb_h = max(16, int(track_h * (capacity / len(items))))
+        travel = max(1, track_h - thumb_h)
+        thumb_y = track_y + int(travel * (state.inspector.scroll / max_scroll)) if max_scroll > 0 else track_y
+        put(state.inspector_scroll_thumb, visible=True, x=track_x, y=thumb_y, w=track_w, h=thumb_h)
+    else:
+        put(state.inspector_scroll_track, visible=False)
+        put(state.inspector_scroll_thumb, visible=False)
+
     # Flow bottom section downwards from bottom_start_y
-    bottom_start_y = max(ip.y + 80 + capacity * 28 + 6, ip.y + ip.h - bottom_h)
+    bottom_start_y = max(comp_start_y + capacity * 28 + 6, ip.y + ip.h - bottom_h)
     cur_y = bottom_start_y
 
     # 1. Add component row
@@ -451,6 +543,32 @@ def inspector_sync():
     put(state.relations_label, x=ip.x + 12, y=cur_y + 4, w=60, h=22)
     put(state.relation_field, x=ip.x + 76, y=cur_y, w=max(30, ip.w - 88), h=26)
     cur_y += 30
+
+    # Interactive existing relations list (up to 3 rows)
+    while len(state.relation_rows) < num_rel_rows:
+        n = len(state.relation_rows)
+        r_btn = state.ui.button(state.inspector, f'RelNav{n}', '', lambda: None)
+        u_btn = state.ui.button(state.inspector, f'RelUnlink{n}', 'x', lambda: None, color=(60, 30, 35))
+        state.relation_rows.append((r_btn, u_btn))
+
+    for index, (r_btn, u_btn) in enumerate(state.relation_rows):
+        shown = index < num_rel_rows
+        put(r_btn, visible=shown)
+        put(u_btn, visible=shown)
+        if shown:
+            r_name, r_target = relations[index]
+            tgt_name = str(r_target.components.get('name', str(r_target.id)[:8]))
+            r_w = max(40, ip.w - 24 - 26)
+            put(r_btn, x=ip.x + 12, y=cur_y, w=r_w, h=22, text=f"{r_name} -> {tgt_name}")
+            put(u_btn, x=ip.x + 12 + r_w + 4, y=cur_y, w=22, h=22, text='x')
+            r_btn.action = lambda t=r_target: select(t)
+            u_btn.action = lambda n=r_name: unlink_relation(n)
+            cur_y += 24
+    for r_btn, u_btn in state.relation_rows[num_rel_rows:]:
+        put(r_btn, visible=False)
+        put(u_btn, visible=False)
+    if num_rel_rows > 0:
+        cur_y += 4
 
     # 5. Metadata label
     put(state.metadata, x=ip.x + 12, y=cur_y, w=max(0, ip.w - 24), h=18,
@@ -522,6 +640,7 @@ def commit_component(field):
     target, key = (field.relations['target'], field.component_key)
     target.components[key] = parse_value(field.buffer.text)
     message(f'Updated {key}')
+    inspector_sync()
 
 def add_component():
     name = state.add_name.buffer.text.strip()
@@ -531,6 +650,7 @@ def add_component():
     state.add_name.buffer = TextBuffer()
     state.add_value.buffer = TextBuffer()
     message(f'Added {name}')
+    inspector_sync()
 
 def commit_tags():
     tags = {tag.strip() for tag in state.tags_field.buffer.text.split(',') if tag.strip()}
@@ -539,6 +659,7 @@ def commit_tags():
     for tag in tags:
         selected().tags.add(tag)
     message('Tags updated')
+    inspector_sync()
 
 def resolve_name(text):
     text = text.strip()
@@ -554,6 +675,8 @@ def commit_parent():
     text = state.parent_field.buffer.text.strip()
     selected().parent = resolve_name(text) if text else None
     message('Parent updated')
+    hierarchy_sync()
+    inspector_sync()
 
 def commit_relation():
     name, separator, text = state.relation_field.buffer.text.partition('=')
@@ -565,6 +688,166 @@ def commit_relation():
         selected().relations.pop(name.strip(), None)
     state.relation_field.buffer = TextBuffer()
     message('Relation updated')
+    inspector_sync()
+
+
+def commit_name():
+    name = state.name_field.buffer.text.strip()
+    ent = selected()
+    if name:
+        ent.components['name'] = name
+        message(f"Renamed entity to '{name}'")
+    else:
+        ent.components.pop('name', None)
+        message("Cleared entity name")
+    hierarchy_sync()
+    inspector_sync()
+
+
+def inspector_add_child():
+    parent = selected()
+    c_name = f"Child_{len(parent.children) + 1}"
+    child = state.runtime.create(parent=parent, name=c_name)
+    select(child)
+    message(f"Added child '{c_name}'")
+    hierarchy_sync()
+    inspector_sync()
+
+
+def inspector_duplicate_entity():
+    ent = selected()
+    if ent is state.app or ent is state.game or any(ent is r for r in (state.header, state.hierarchy, state.inspector, state.code_panel, state.status, state.viewport)):
+        message("Cannot duplicate engine or editor root")
+        return
+    parent = ent.parent or state.game
+    orig_name = str(ent.components.get('name', 'Entity'))
+    new_name = orig_name + "_copy"
+    comps = dict(ent.components)
+    comps['name'] = new_name
+    dup = state.runtime.create(parent=parent, tags=list(ent.tags), **comps)
+    select(dup)
+    message(f"Duplicated '{orig_name}' as '{new_name}'")
+    hierarchy_sync()
+    inspector_sync()
+
+
+def inspector_delete_entity():
+    ent = selected()
+    if ent is state.app or ent is state.game or any(ent is r for r in (state.header, state.hierarchy, state.inspector, state.code_panel, state.status, state.viewport)):
+        message("Cannot delete engine or editor root")
+        return
+    parent = ent.parent or state.game
+    ent_name = str(ent.components.get('name', str(ent.id)[:8]))
+    ent.destroy()
+    select(parent)
+    message(f"Deleted entity '{ent_name}'")
+    hierarchy_sync()
+    inspector_sync()
+
+
+def delete_component(key):
+    ent = selected()
+    if key in ent.components:
+        del ent.components[key]
+        if state.ui.focused and getattr(state.ui.focused, "component_key", None) == key:
+            del state.app.relations['focus']
+        message(f"Deleted component '{key}'")
+        inspector_sync()
+
+
+def unlink_relation(name):
+    ent = selected()
+    if name in ent.relations:
+        del ent.relations[name]
+        message(f"Unlinked relation '{name}'")
+        inspector_sync()
+
+
+def quick_add_pos():
+    ent = selected()
+    ent.components.setdefault("x", 0.0)
+    ent.components.setdefault("y", 0.0)
+    message("Added Pos (x, y)")
+    inspector_sync()
+
+
+def quick_add_size():
+    ent = selected()
+    ent.components.setdefault("w", 32.0)
+    ent.components.setdefault("h", 32.0)
+    message("Added Size (w, h)")
+    inspector_sync()
+
+
+def quick_add_vel():
+    ent = selected()
+    ent.components.setdefault("vx", 0.0)
+    ent.components.setdefault("vy", 0.0)
+    message("Added Vel (vx, vy)")
+    inspector_sync()
+
+
+def quick_add_color():
+    ent = selected()
+    ent.components.setdefault("color", (200, 200, 200))
+    message("Added Color")
+    inspector_sync()
+
+
+def hierarchy_scroll_drag(thumb, event):
+    visible_count = getattr(state.hierarchy, "visible_count", 0)
+    capacity = max(1, int((state.hierarchy.h - 34) // 22))
+    max_scroll = max(0, visible_count - capacity)
+    if max_scroll <= 0:
+        return True
+    track = state.hierarchy_scroll_track
+    travel = max(1, track.h - thumb.h)
+    rel_y = event[2] - track.y - thumb.h / 2
+    ratio = max(0.0, min(1.0, rel_y / travel))
+    state.hierarchy.scroll = int(round(ratio * max_scroll))
+    return True
+
+
+def hierarchy_track_click(track, event):
+    capacity = max(1, int((state.hierarchy.h - 34) // 22))
+    thumb = state.hierarchy_scroll_thumb
+    if not thumb.visible:
+        return True
+    visible_count = getattr(state.hierarchy, "visible_count", 0)
+    max_scroll = max(0, visible_count - capacity)
+    if event[2] < thumb.y:
+        state.hierarchy.scroll = max(0, state.hierarchy.scroll - capacity)
+    elif event[2] > thumb.y + thumb.h:
+        state.hierarchy.scroll = min(max_scroll, state.hierarchy.scroll + capacity)
+    return True
+
+
+def inspector_scroll_drag(thumb, event):
+    item_count = getattr(state.inspector, "item_count", 0)
+    capacity = getattr(state.inspector, "capacity", 1)
+    max_scroll = max(0, item_count - capacity)
+    if max_scroll <= 0:
+        return True
+    track = state.inspector_scroll_track
+    travel = max(1, track.h - thumb.h)
+    rel_y = event[2] - track.y - thumb.h / 2
+    ratio = max(0.0, min(1.0, rel_y / travel))
+    state.inspector.scroll = int(round(ratio * max_scroll))
+    return True
+
+
+def inspector_track_click(track, event):
+    capacity = getattr(state.inspector, "capacity", 1)
+    thumb = state.inspector_scroll_thumb
+    if not thumb.visible:
+        return True
+    item_count = getattr(state.inspector, "item_count", 0)
+    max_scroll = max(0, item_count - capacity)
+    if event[2] < thumb.y:
+        state.inspector.scroll = max(0, state.inspector.scroll - capacity)
+    elif event[2] > thumb.y + thumb.h:
+        state.inspector.scroll = min(max_scroll, state.inspector.scroll + capacity)
+    return True
 
 def source_path():
     name = state.path_field.buffer.text.strip()
@@ -855,11 +1138,23 @@ def bind_actions():
                             (state.save_project_button, save_project_action),
                             (state.panel_button, open_panel), (state.system_panel_button, inspect_system),
                             (state.detach_button, detach_system), (state.add_button, add_component),
-                            (state.run_button, toggle_game_running)):
+                            (state.run_button, toggle_game_running),
+                            (state.add_child_button, inspector_add_child),
+                            (state.duplicate_button, inspector_duplicate_entity),
+                            (state.delete_button, inspector_delete_entity),
+                            (state.quick_pos_btn, quick_add_pos),
+                            (state.quick_size_btn, quick_add_size),
+                            (state.quick_vel_btn, quick_add_vel),
+                            (state.quick_color_btn, quick_add_color)):
         control.action = action
     for control, action in ((state.path_field, open_path), (state.tags_field, commit_tags),
-                            (state.parent_field, commit_parent), (state.relation_field, commit_relation)):
+                            (state.parent_field, commit_parent), (state.relation_field, commit_relation),
+                            (state.name_field, commit_name)):
         control.on_commit = action
+    state.hierarchy_scroll_track.on_click = hierarchy_track_click
+    state.hierarchy_scroll_thumb.on_drag = hierarchy_scroll_drag
+    state.inspector_scroll_track.on_click = inspector_track_click
+    state.inspector_scroll_thumb.on_drag = inspector_scroll_drag
     for row in state.hierarchy_rows:
         row.on_click = hierarchy_click
     for _, field in state.component_rows:
