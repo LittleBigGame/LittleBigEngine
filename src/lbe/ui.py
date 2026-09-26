@@ -353,7 +353,7 @@ class UI:
         if kind == "motion":
             mx, my = event[1], event[2]
             for control in self.controls():
-                if "splitter" in control.tags and self.visible(control):
+                if ("splitter" in control.tags or "scrollbar_thumb" in control.tags) and self.visible(control):
                     active = self.root.relations.get("active_drag")
                     hovered = (active is control) or (active is None and contains(control, mx, my))
                     target_color = control.components.get("hover_color", ACCENT) if hovered else control.components.get("normal_color", control.components.get("color", PANEL))
@@ -363,7 +363,7 @@ class UI:
         if kind == "release":
             active_drag = self.root.relations.pop("active_drag", None)
             if active_drag is not None:
-                if "splitter" in active_drag.tags:
+                if "splitter" in active_drag.tags or "scrollbar_thumb" in active_drag.tags:
                     normal = active_drag.components.get("normal_color", active_drag.components.get("color", PANEL))
                     if active_drag.color != normal:
                         active_drag.color = normal
@@ -381,10 +381,10 @@ class UI:
             controls = [e for e in self.controls() if self.visible(e) and contains(e, event[1], event[2])]
             controls.sort(key=lambda e: (e.components.get("layer", 2), e.depth), reverse=True)
             for control in controls:
+                if "splitter" in control.tags or "scrollbar_thumb" in control.tags:
+                    continue  # Splitters and scrollbars must be directly clicked/pressed to initiate dragging
                 cb = control.components.get("on_drag")
                 if cb:
-                    if "splitter" in control.tags:
-                        self.root.relations["active_drag"] = control
                     if cb(control, event) is not False:
                         return
             if self.focused is not None and "multiline" in self.focused.tags:
@@ -401,7 +401,7 @@ class UI:
             controls = [e for e in self.controls() if self.visible(e) and contains(e, event[1], event[2])]
             controls.sort(key=lambda e: (e.components.get("layer", 2), e.depth), reverse=True)
             for control in controls:
-                if "splitter" in control.tags:
+                if "splitter" in control.tags or "scrollbar_thumb" in control.tags:
                     self.root.relations["active_drag"] = control
                     control.color = control.components.get("hover_color", ACCENT)
                 callback = control.components.get("on_"+kind)
