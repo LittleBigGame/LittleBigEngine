@@ -80,6 +80,15 @@ def find_matching_brackets(text, cursor):
 VISIBLE_ITEMS = 8
 
 
+def start():
+    """Attach input callbacks once at system start, not every frame."""
+    target = entity if "buffer" in entity.components else None
+    if target is not None:
+        target.components["on_text"] = handle_editor_text
+        target.components["on_key"] = handle_editor_key
+        target.components["on_scroll"] = handle_editor_scroll
+
+
 def find_open_bracket_indent(text, cursor, close_char):
     if close_char not in CLOSING:
         return None
@@ -216,6 +225,10 @@ def handle_editor_key(control, event):
             return True
     # Navigation, selection, deletion and Enter retain their normal text behavior.
     dismiss_completion(control, ac_state)
+
+    # Escape always consumed to prevent ui.py from dropping editor focus
+    if key == "ESCAPE":
+        return True
 
     # Backspace deleting empty pair
     if key == "BACKSPACE" and not ctrl and start == end:
@@ -385,11 +398,6 @@ def update(dt):
     if target is None:
         return
 
-    # Ensure input hooks are attached
-    target.components["on_text"] = handle_editor_text
-    target.components["on_key"] = handle_editor_key
-    target.components["on_scroll"] = handle_editor_scroll
-
     buffer = target.buffer
     text = buffer.text
 
@@ -405,8 +413,11 @@ def update(dt):
         target.components["diagnostic"] = check_diagnostics(text)
         target.components["_last_diag_text"] = text
 
-    # 3. Bracket matching
-    target.components["matching_brackets"] = find_matching_brackets(text, buffer.cursor)
+    # 3. Bracket matching (skip if text+cursor unchanged)
+    bracket_key = (text, buffer.cursor)
+    if target.components.get("_last_bracket_key") != bracket_key:
+        target.components["matching_brackets"] = find_matching_brackets(text, buffer.cursor)
+        target.components["_last_bracket_key"] = bracket_key
 
     # 4. Autocomplete
     ui = target.root.components.get("ui")
@@ -455,11 +466,12 @@ def update(dt):
             hover_state["last_mouse"] = (mx, my)
             hover_state["dwell_start"] = monotonic()
             hover_state["active"] = False
+            hover_state.pop("resolved_empty", None)  # reset sentinel on move
             fut = hover_state.pop("future", None)
             if fut:
                 fut.cancel()
         else:
-            if not hover_state.get("active") and not hover_state.get("future"):
+            if not hover_state.get("active") and not hover_state.get("future") and not hover_state.get("resolved_empty"):
                 if monotonic() - hover_state.get("dwell_start", monotonic()) >= 0.35:
                     pitch = target.components.get("pitch", 8)
                     line_h = target.components.get("line_height", 20)
@@ -472,8 +484,13 @@ def update(dt):
                             context = target.components.get("completion_context") or target.components.get("completion_components", ())
                             hover_state["future"] = request_hover(text, h_row, h_col, target.components.get("source_path", project / "untitled.py"), context)
                             hover_state["hover_pos"] = (mx, my)
+                        else:
+                            hover_state["resolved_empty"] = True
+                    else:
+                        hover_state["resolved_empty"] = True
     else:
         hover_state["active"] = False
+        hover_state.pop("resolved_empty", None)
         fut = hover_state.pop("future", None)
         if fut:
             fut.cancel()
@@ -485,8 +502,10 @@ def update(dt):
             info = h_fut.result()
             if info and (info.get("name") or info.get("description")):
                 hover_state.update(active=True, info=info)
+            else:
+                hover_state["resolved_empty"] = True
         except Exception:
-            pass
+            hover_state["resolved_empty"] = True
 
     # Sync UI Popups
     if ui:
@@ -500,7 +519,17 @@ def stop():
         dismiss_completion(entity, state)
     hover_state = entity.components.get('hover_state')
     if hover_state:
+        hover_state["active"] = False
         fut = hover_state.pop("future", None)
         if fut:
             fut.cancel()
-
+    # Hide popup child entities so they don't linger after system stop
+    popup_parts = ("autocomplete_popup", "ac_scroll_track", "ac_scroll_thumb",
+                   "hover_panel", "hover_title", "hover_doc")
+    for child in entity.children:
+        if child.components.get("part") in popup_parts:
+            child.visible = False
+    for i in range(VISIBLE_ITEMS):
+        for child in entity.children:
+            if child.components.get("part") == f"ac_item:{i}":
+                child.visible = False
