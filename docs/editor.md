@@ -46,12 +46,19 @@ reloads matching attachments. `Attach` saves and attaches the current file to th
 selected entity, using the filename without `.py` as the instance name.
 
 The source editor supports multiline typing, cursor movement, mouse selection,
-Shift selection, Home/End, page and word navigation, indentation, scrolling,
+double-click word selection, triple-click line selection, Shift selection, Home/End,
+page and word navigation (Ctrl+Left/Right), word deletion (Ctrl+Backspace),
+delimiter-aware smart auto-indentation and closing bracket dedent, scrolling,
 Ctrl+A/C/X/V, Ctrl+Z and Ctrl+Shift+Z. Ctrl+S saves. Repeating New or Open after an
 unsaved-change warning discards the current edits; save first to retain them.
 F5 (or the Run / Pause button in the header) toggles the game between running and paused,
 pausing game entity updates while viewport rendering and the editor remain fully active.
 Typing `.` (period) in the editor or text fields operates solely as text input and never runs the game.
+
+Autocomplete displays contextual completions for live entities, components, and LBE APIs,
+with a scrollable popup supporting arrow keys, PageUp/PageDown, and mouse wheel scrolling.
+Resting the mouse over any code symbol displays a hover inspection tooltip showing its
+signature, definition, and docstring via off-thread static code analysis.
 
 Syntax errors leave existing attachments running and appear in the status bar.
 A game script's runtime error stops that attachment while the editor continues.

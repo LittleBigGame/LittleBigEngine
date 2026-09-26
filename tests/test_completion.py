@@ -67,3 +67,22 @@ class CompletionTests(unittest.TestCase):
         # Components health, vx, x, y should appear first
         for comp in ('health', 'vx', 'x', 'y'):
             self.assertIn(comp, first_match_names)
+
+        # 5. More than 6 completions available for scrolling
+        self.assertGreater(len(matches4), 6)
+
+    def test_hover_info_extracts_signature_and_docstring(self):
+        from lbe.completion import hover_info
+        context = {
+            'entities': {'HeroShip': {'components': {'x': 'float', 'vx': 'float'}}},
+            'all_components': {'x': 'float', 'vx': 'float'}
+        }
+        source = 'def update(dt):\n    for child in query("x"):\n        child.x = 10\n'
+
+        # Hover on 'query' (line 1, col 18)
+        info = hover_info(source, 1, 18, 'test.py', context)
+        self.assertIsNotNone(info)
+        self.assertEqual(info['name'], 'query')
+        self.assertEqual(info['type'], 'function')
+        self.assertIn('query(*components', info['description'])
+

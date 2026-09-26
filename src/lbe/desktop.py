@@ -194,6 +194,11 @@ def launch(build, *, headless=False, frames=None, screenshot=None):
 
     @window.event
     def on_key_press(symbol, modifiers):
+        ctrl = bool(modifiers & key.MOD_CTRL)
+        shift = bool(modifiers & key.MOD_SHIFT)
+        if symbol in (key.BACKSPACE, key.DELETE) and ctrl:
+            input_state.pending.append(("key", key.symbol_string(symbol), True, shift))
+            return pyglet.event.EVENT_HANDLED
         if symbol in (key.LEFT, key.RIGHT, key.UP, key.DOWN, key.HOME, key.END,
                       key.PAGEUP, key.PAGEDOWN, key.BACKSPACE, key.DELETE):
             return pyglet.event.EVENT_HANDLED

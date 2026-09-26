@@ -175,9 +175,64 @@ def complete(source, cursor, path, context=()):
             matches.sort(key=lambda m: (0 if m[0] in known_components else 1, m[0]))
     except Exception:
         matches = []
-    return prefix, matches[:6]
+    return prefix, matches[:100]
 
 
 def request_completion(source, cursor, path, context=()):
     """Serialize analysis off the render thread; callers discard stale results."""
     return _worker.submit(complete, source, cursor, path, context)
+
+
+def hover_info(source, line, column, path, context=()):
+    """Return hover inspection dict for symbol at 0-indexed (line, column).
+
+    Returns None if no symbol or doc found, or a dict:
+    {
+        "name": str,
+        "type": str,
+        "description": str,
+        "docstring": str,
+        "line": int,
+        "column": int,
+    }
+    """
+    import jedi
+
+    prelude = build_prelude(context)
+    path = Path(path).resolve()
+    project = jedi.Project(path.parent, added_sys_path=[str(Path(__file__).parent.parent)])
+    script = jedi.Script(prelude + source, path=path, project=project)
+    jedi_line = prelude.count("\n") + line + 1
+    jedi_column = column
+    try:
+        definitions = script.help(jedi_line, jedi_column)
+        if not definitions:
+            definitions = script.infer(jedi_line, jedi_column)
+        if not definitions:
+            return None
+        d = definitions[0]
+        desc = getattr(d, "description", "") or f"{d.type} {d.name}"
+        signatures = getattr(d, "signatures", [])
+        if signatures:
+            sig_strs = [s.to_string() for s in signatures if hasattr(s, "to_string")]
+            if sig_strs:
+                desc = f"{d.type} {sig_strs[0]}"
+        elif d.type == "function" and d.docstring() and d.docstring().startswith(f"{d.name}("):
+            desc = f"def {d.docstring().splitlines()[0]}"
+        doc = d.docstring(raw=True) or d.docstring() or ""
+        return {
+            "name": d.name,
+            "type": d.type,
+            "description": desc,
+            "docstring": doc.strip(),
+            "line": line,
+            "column": column,
+        }
+    except Exception:
+        return None
+
+
+def request_hover(source, line, column, path, context=()):
+    """Serialize hover analysis off the render thread."""
+    return _worker.submit(hover_info, source, line, column, path, context)
+

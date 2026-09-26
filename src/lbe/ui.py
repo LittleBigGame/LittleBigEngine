@@ -1,6 +1,7 @@
 """General entity UI primitives shared by applications and tools."""
 
 from pathlib import Path
+from time import monotonic
 
 from .syntax import slice_spans
 from .text import TextBuffer
@@ -352,6 +353,7 @@ class UI:
         kind = event[0]
         if kind == "motion":
             mx, my = event[1], event[2]
+            self.mouse_pos = (mx, my)
             for control in self.controls():
                 if ("splitter" in control.tags or "scrollbar_thumb" in control.tags) and self.visible(control):
                     active = self.root.relations.get("active_drag")
@@ -425,11 +427,49 @@ class UI:
                     return
                 if "multiline" in control.tags:
                     self.focus(control)
-                    control.buffer.cursor = self.text_index(control, event[1], event[2])
-                    if not event[4] & 1:
-                        control.buffer.anchor = control.buffer.cursor
-                    if event[3] == 1:
-                        self.root.relations["text_drag"] = control
+                    now = monotonic()
+                    last_time, last_x, last_y, last_count, last_ctl = getattr(self, "_click_state", (0, 0, 0, 0, None))
+                    mx, my = event[1], event[2]
+                    if len(event) >= 6:
+                        click_count = event[5]
+                    elif last_ctl is control and (0.05 <= now - last_time <= 0.40) and abs(mx - last_x) <= 4 and abs(my - last_y) <= 4:
+                        click_count = (last_count % 3) + 1
+                    else:
+                        click_count = 1
+                    self._click_state = (now, mx, my, click_count, control)
+
+                    idx = self.text_index(control, mx, my)
+                    text = control.buffer.text
+
+                    if click_count == 2:
+                        start = end = idx
+                        if idx < len(text) and (text[idx].isalnum() or text[idx] == '_'):
+                            while start > 0 and (text[start - 1].isalnum() or text[start - 1] == '_'):
+                                start -= 1
+                            while end < len(text) and (text[end].isalnum() or text[end] == '_'):
+                                end += 1
+                        elif idx < len(text) and not text[idx].isspace():
+                            while start > 0 and not text[start - 1].isspace() and not (text[start - 1].isalnum() or text[start - 1] == '_'):
+                                start -= 1
+                            while end < len(text) and not text[end].isspace() and not (text[end].isalnum() or text[end] == '_'):
+                                end += 1
+                        control.buffer.anchor = start
+                        control.buffer.cursor = end
+                    elif click_count >= 3:
+                        line_start = text.rfind("\n", 0, idx) + 1
+                        line_end = text.find("\n", idx)
+                        if line_end == -1:
+                            line_end = len(text)
+                        else:
+                            line_end += 1
+                        control.buffer.anchor = line_start
+                        control.buffer.cursor = line_end
+                    else:
+                        control.buffer.cursor = idx
+                        if not event[4] & 1:
+                            control.buffer.anchor = control.buffer.cursor
+                        if event[3] == 1:
+                            self.root.relations["text_drag"] = control
                     control.components.touch("buffer")
                     pitch = control.components.get("pitch", self.pitch)
                     line = control.components.get("line_height", self.line_height)
@@ -471,9 +511,17 @@ class UI:
             elif ctrl and key == "Z":
                 buffer.undo(redo=shift)
             elif key in ("LEFT", "RIGHT", "UP", "DOWN", "HOME", "END", "FILE_HOME", "FILE_END", "PAGEUP", "PAGEDOWN", "WORD_LEFT", "WORD_RIGHT"):
-                buffer.move(key, select=shift)
+                move_dir = key
+                if ctrl and key == "LEFT":
+                    move_dir = "WORD_LEFT"
+                elif ctrl and key == "RIGHT":
+                    move_dir = "WORD_RIGHT"
+                buffer.move(move_dir, select=shift)
             elif key in ("BACKSPACE", "DELETE"):
-                buffer.delete(backward=key == "BACKSPACE")
+                if ctrl:
+                    buffer.delete_word(backward=key == "BACKSPACE")
+                else:
+                    buffer.delete(backward=key == "BACKSPACE")
             elif key in ("ENTER", "RETURN", "NUM_ENTER"):
                 if multiline:
                     buffer.newline()
