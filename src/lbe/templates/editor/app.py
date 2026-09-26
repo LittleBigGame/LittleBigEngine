@@ -19,11 +19,38 @@ from lbe.menus import open_menu
 state = entity.components.get("application_state")
 
 
+def format_float_clean(f):
+    if abs(f) < 1e-12:
+        return "0.0"
+    rounded = round(f, 6)
+    if rounded == int(rounded):
+        return f"{int(rounded)}.0"
+    s = f"{rounded:.6f}".rstrip("0")
+    if s.endswith("."):
+        s += "0"
+    return s
+
+
+def clean_repr(value):
+    if isinstance(value, float):
+        return format_float_clean(value)
+    if isinstance(value, tuple):
+        if len(value) == 1:
+            return f"({clean_repr(value[0])},)"
+        return f"({', '.join(clean_repr(v) for v in value)})"
+    if isinstance(value, list):
+        return f"[{', '.join(clean_repr(v) for v in value)}]"
+    if isinstance(value, dict):
+        return "{" + ", ".join(f"{clean_repr(k)}: {clean_repr(v)}" for k, v in value.items()) + "}"
+    return repr(value)
+
+
 def safe_repr(value):
     try:
-        return repr(value)
+        return clean_repr(value)
     except Exception:
         return f"<{type(value).__name__}>"
+
 
 
 def parse_value(text):
@@ -115,8 +142,20 @@ def initialize():
     state.hierarchy_rows = []
     state.component_rows = []
     state.system_rows = []
+    state.system_edit_buttons = []
+    state.system_detach_buttons = []
     state.child_rows = []
     state.extra_panels = []
+    state.quick_component_presets = [
+        ("pos", {"x": 0.0, "y": 0.0}),
+        ("size", {"w": 32.0, "h": 32.0}),
+        ("vel", {"vx": 0.0, "vy": 0.0}),
+        ("color", {"color": (200, 200, 200)}),
+        ("speed", {"speed": 100.0}),
+    ]
+    state.quick_presets_scroll = 0
+    state.quick_preset_chips = []
+    state.collapsed_sections = set()
     state._saved_source = None
     state._pending_discard = None
     state.app.status = 'Ready | Select an entity to inspect its data'
@@ -194,11 +233,14 @@ def initialize():
     state.add_child_button = state.ui.button(state.inspector, 'AddChildBtn', '+ Child', inspector_add_child)
     state.duplicate_button = state.ui.button(state.inspector, 'DuplicateBtn', 'Duplicate', inspector_duplicate_entity)
     state.delete_button = state.ui.button(state.inspector, 'DeleteBtn', 'Delete', inspector_delete_entity, color=(60, 30, 35))
-    state.quick_pos_btn = state.ui.button(state.inspector, 'QuickPosBtn', '+ Pos', quick_add_pos)
-    state.quick_size_btn = state.ui.button(state.inspector, 'QuickSizeBtn', '+ Size', quick_add_size)
-    state.quick_vel_btn = state.ui.button(state.inspector, 'QuickVelBtn', '+ Vel', quick_add_vel)
-    state.quick_color_btn = state.ui.button(state.inspector, 'QuickColorBtn', '+ Color', quick_add_color)
-    state.components_title = state.ui.create(state.inspector, 'ComponentsTitle', 'label', text='COMPONENTS', ink=MUTED)
+    state.quick_pos_btn = state.ui.button(state.inspector, 'QuickPosBtn', 'pos', quick_add_pos, color=PANEL, hover_color=(45, 60, 80))
+    state.quick_size_btn = state.ui.button(state.inspector, 'QuickSizeBtn', 'size', quick_add_size, color=PANEL, hover_color=(45, 60, 80))
+    state.quick_vel_btn = state.ui.button(state.inspector, 'QuickVelBtn', 'vel', quick_add_vel, color=PANEL, hover_color=(45, 60, 80))
+    state.quick_color_btn = state.ui.button(state.inspector, 'QuickColorBtn', 'color', quick_add_color, color=PANEL, hover_color=(45, 60, 80))
+    state.quick_speed_btn = state.ui.button(state.inspector, 'QuickSpeedBtn', 'speed', quick_add_speed, color=PANEL, hover_color=(45, 60, 80))
+    state.quick_preset_chips = [state.quick_pos_btn, state.quick_size_btn, state.quick_vel_btn, state.quick_color_btn, state.quick_speed_btn]
+    state.quick_add_chip_btn = state.ui.button(state.inspector, 'QuickAddChip', '+', open_add_chip_menu, color=PANEL, hover_color=(45, 60, 80))
+    state.components_title = state.ui.button(state.inspector, 'ComponentsTitle', '▼ COMPONENTS', lambda: toggle_section('components'), color=PANEL, hover_color=(38, 50, 66))
     state.add_comp_menu_button = state.ui.button(state.inspector, 'AddCompMenuBtn', '+ Component', open_add_component_menu)
     state.component_delete_buttons = []
     state.relation_rows = []
@@ -224,7 +266,10 @@ def initialize():
     state.relation_field.on_commit = commit_relation
     state.link_add_button = state.ui.button(state.inspector, 'AddLinkBtn', '+', commit_relation)
     state.metadata = state.ui.create(state.inspector, 'Metadata', 'label', text='', ink=MUTED)
-    state.system_label = state.ui.create(state.inspector, 'SystemsTitle', 'label', text='SYSTEMS', ink=MUTED)
+    state.system_label = state.ui.button(state.inspector, 'SystemsTitle', '▼ SYSTEMS', lambda: toggle_section('systems'), color=PANEL, hover_color=(38, 50, 66))
+    state.add_system_button = state.ui.button(state.inspector, 'AddSystemBtn', '+ Attach', open_attach_system_menu)
+    state.no_systems_label = state.ui.create(state.inspector, 'NoSystemsLabel', 'label', text='No systems attached', ink=MUTED)
+    state.links_header = state.ui.button(state.inspector, 'LinksHeader', '▼ LINKS & PARENT', lambda: toggle_section('links'), color=PANEL, hover_color=(38, 50, 66))
     state.tags_label = state.ui.create(state.inspector, 'TagsLabel', 'label', text='Tags', ink=MUTED)
     state.parent_label = state.ui.create(state.inspector, 'ParentLabel', 'label', text='Parent', ink=MUTED)
     state.relations_label = state.ui.create(state.inspector, 'RelationsLabel', 'label', text='Link', ink=MUTED)
@@ -437,237 +482,324 @@ def inspector_sync():
     put(state.identity_label, x=ip.x + 12, y=ip.y + 56, w=max(30, ip.w - 24), h=18,
         text=f'id: {str(entity.id)[:8]}')
 
-    # Row 3: Quick Entity Actions (+ Child, Duplicate, Delete) with ample room to prevent text clipping
+    # Row 3: Quick Entity Actions (+ Child, Duplicate, Delete)
     btn_w = max(60, (ip.w - 24 - 12) // 3)
     put(state.add_child_button, x=ip.x + 12 + 0 * (btn_w + 6), y=ip.y + 76, w=btn_w, h=24, text='+ Child')
     put(state.duplicate_button, x=ip.x + 12 + 1 * (btn_w + 6), y=ip.y + 76, w=btn_w, h=24, text='Duplicate')
     put(state.delete_button, x=ip.x + 12 + 2 * (btn_w + 6), y=ip.y + 76, w=btn_w, h=24, text='Delete')
 
-    # Row 4: Quick Preset Chips (+ Pos, + Size, + Vel, + Color)
-    preset_w = max(36, (ip.w - 24 - 18) // 4)
-    put(state.quick_pos_btn, x=ip.x + 12 + 0 * (preset_w + 6), y=ip.y + 104, w=preset_w, h=22)
-    put(state.quick_size_btn, x=ip.x + 12 + 1 * (preset_w + 6), y=ip.y + 104, w=preset_w, h=22)
-    put(state.quick_vel_btn, x=ip.x + 12 + 2 * (preset_w + 6), y=ip.y + 104, w=preset_w, h=22)
-    put(state.quick_color_btn, x=ip.x + 12 + 3 * (preset_w + 6), y=ip.y + 104, w=preset_w, h=22)
+    # Row 4: Single-line ultra-light horizontal Quick Component Auto-Adder / Preset Picker
+    chip_bar_y = ip.y + 104
+    chip_h = 22
+    avail_chip_w = max(50, ip.w - 24 - 30)
+    chip_x = ip.x + 12 - state.quick_presets_scroll
 
-    # Row 5: Components Section Header & Quick Add Menu Button
-    put(state.components_title, x=ip.x + 12, y=ip.y + 130, w=120, h=22, text='COMPONENTS')
+    while len(state.quick_preset_chips) < len(state.quick_component_presets):
+        idx = len(state.quick_preset_chips)
+        p_name = state.quick_component_presets[idx][0]
+        c_btn = state.ui.button(state.inspector, f'QuickChip{idx}', p_name, lambda n=p_name: apply_quick_preset(n), color=PANEL, hover_color=(45, 60, 80))
+        state.quick_preset_chips.append(c_btn)
+
+    for idx, chip in enumerate(state.quick_preset_chips):
+        if idx < len(state.quick_component_presets):
+            p_name, p_data = state.quick_component_presets[idx]
+            c_w = max(36, len(p_name) * 8 + 14)
+            in_view = (chip_x + c_w > ip.x + 12) and (chip_x < ip.x + 12 + avail_chip_w)
+            put(chip, visible=in_view, x=chip_x, y=chip_bar_y, w=c_w, h=chip_h, text=p_name)
+            chip.preset_key = p_name
+            chip.action = lambda n=p_name: apply_quick_preset(n)
+            chip_x += c_w + 5
+        else:
+            put(chip, visible=False)
+
+    plus_x = max(ip.x + 12 + 20, min(ip.x + ip.w - 12 - 24, chip_x + 2))
+    put(state.quick_add_chip_btn, visible=True, x=plus_x, y=chip_bar_y, w=24, h=chip_h, text='+')
+
+    cur_y = chip_bar_y + chip_h + 8
+
+    # SECTION 1: COMPONENTS (Collapsible)
+    comp_collapsed = "components" in state.collapsed_sections
+    put(state.components_title, visible=True, x=ip.x + 12, y=cur_y, w=max(80, ip.w - 24 - 100), h=22,
+        text=f"{'▶' if comp_collapsed else '▼'} COMPONENTS ({len(items)})")
     comp_btn_w = 96
-    put(state.add_comp_menu_button, x=ip.x + ip.w - 12 - comp_btn_w, y=ip.y + 130, w=comp_btn_w, h=22, text='+ Component')
+    put(state.add_comp_menu_button, visible=True, x=ip.x + ip.w - 12 - comp_btn_w, y=cur_y, w=comp_btn_w, h=22, text='+ Component')
+    cur_y += 26
 
-    # Dynamic calculation of bottom section height
-    num_rel_rows = min(len(relations), 3) if relations else 0
-    rel_rows_h = (num_rel_rows * 24 + 4) if relations else 0
-    num_sys_rows = min(2, (len(systems) + 2) // 3) if systems else 0
-    sys_h = (20 + num_sys_rows * 26) if systems else 0
-    num_child_rows = min(3, (len(children) + 2) // 3) if children else 0
-    child_h = (num_child_rows * 24 + 4) if children else 0
-    bottom_h = 30 * 4 + rel_rows_h + 22 + sys_h + child_h + 8
+    sys_collapsed = "systems" in state.collapsed_sections
+    links_collapsed = "links" in state.collapsed_sections
 
-    # Component rows capacity & scroll
-    comp_start_y = ip.y + 156
-    avail_comp_h = max(28, ip.h - (comp_start_y - ip.y) - bottom_h)
-    capacity = max(1, int(avail_comp_h // 28))
-    max_scroll = max(0, len(items) - capacity)
-    state.inspector.item_count = len(items)
-    state.inspector.capacity = capacity
-    put(state.inspector, scroll=max(0, min(state.inspector.scroll, max_scroll)))
+    num_sys_rows = min(len(systems), 6) if (systems and not sys_collapsed) else 0
+    sys_content_h = (18 if not systems else num_sys_rows * 25 + 4) if not sys_collapsed else 0
+    sys_section_h = 24 + sys_content_h
 
-    while len(state.component_rows) < capacity:
-        n = len(state.component_rows)
-        label = state.ui.create(state.inspector, f'ComponentLabel{n}', 'label', text='', ink=MUTED)
-        field = state.ui.field(state.inspector, f'ComponentField{n}', '')
-        state.component_rows.append((label, field))
+    num_rel_rows = min(len(relations), 3) if (relations and not links_collapsed) else 0
+    rel_rows_h = (num_rel_rows * 24 + 4) if (relations and not links_collapsed) else 0
+    num_child_rows = min(3, (len(children) + 2) // 3) if (children and not links_collapsed) else 0
+    child_h = (num_child_rows * 24 + 4) if (children and not links_collapsed) else 0
+    links_content_h = (26 * 3 + rel_rows_h + 18 + child_h) if not links_collapsed else 0
+    links_section_h = 24 + links_content_h
 
-    while len(state.component_delete_buttons) < capacity:
-        n = len(state.component_delete_buttons)
-        btn = state.ui.button(state.inspector, f'ComponentDel{n}', 'x', lambda: None, color=(60, 30, 35))
-        state.component_delete_buttons.append(btn)
+    add_comp_h = 28 if not comp_collapsed else 0
+    bottom_h = add_comp_h + sys_section_h + links_section_h + 8
 
-    has_comp_scroll = len(items) > capacity and capacity > 0
-    sb_w = 12 if has_comp_scroll else 0
-
-    for index, (label, field) in enumerate(state.component_rows):
-        source = index + state.inspector.scroll
-        shown = index < capacity and source < len(items)
-        put(label, visible=shown)
-        put(field, visible=shown)
-        del_btn = state.component_delete_buttons[index]
-        put(del_btn, visible=shown)
-        if not shown:
-            continue
-        key, value = items[source]
-        editable = type(value) in (int, float, bool, str, tuple, list, dict, type(None))
-        y = comp_start_y + index * 28
-        del_w = 20
-        field_w = max(30, ip.w - 126 - 12 - del_w - 4 - sb_w)
-        del_x = ip.x + 126 + field_w + 4
-        put(label, x=ip.x + 12, y=y + 4, w=110, h=24, text=key)
-        put(field, x=ip.x + 126, y=y, w=field_w, h=25, readonly=not editable)
-        put(del_btn, x=del_x, y=y, w=del_w, h=25, text='x')
-        del_btn.action = lambda k=key: delete_component(k)
-        label.component_key = key
-        label.relations['target'] = entity
-        del_btn.component_key = key
-        del_btn.relations['target'] = entity
-        if field.components.get('component_key') != key or field.relations.get('target') is not entity:
-            if state.ui.focused is field:
-                del state.app.relations['focus']
-            field.component_key = key
-            field.relations['target'] = entity
-            field.on_commit = lambda f=field: commit_component(f)
-            field.on_click = component_click
-        state.ui.set_text(field, safe_repr(value))
-
-    for btn in state.component_delete_buttons[capacity:]:
-        put(btn, visible=False)
-
-    if has_comp_scroll:
-        track_x = ip.x + ip.w - 10
-        track_y = comp_start_y
-        track_w = 6
-        track_h = capacity * 28
-        put(state.inspector_scroll_track, visible=True, x=track_x, y=track_y, w=track_w, h=track_h)
-        thumb_h = max(16, int(track_h * (capacity / len(items))))
-        travel = max(1, track_h - thumb_h)
-        thumb_y = track_y + int(travel * (state.inspector.scroll / max_scroll)) if max_scroll > 0 else track_y
-        put(state.inspector_scroll_thumb, visible=True, x=track_x, y=thumb_y, w=track_w, h=thumb_h)
-    else:
+    if comp_collapsed:
+        for lbl, fld in state.component_rows:
+            put(lbl, visible=False)
+            put(fld, visible=False)
+        for btn in state.component_delete_buttons:
+            put(btn, visible=False)
         put(state.inspector_scroll_track, visible=False)
         put(state.inspector_scroll_thumb, visible=False)
+        put(state.add_name, visible=False)
+        put(state.add_value, visible=False)
+        put(state.add_button, visible=False)
+    else:
+        comp_start_y = cur_y
+        avail_comp_h = max(25, ip.h - (comp_start_y - ip.y) - bottom_h)
+        capacity = max(1, int(avail_comp_h // 25))
+        max_scroll = max(0, len(items) - capacity)
+        state.inspector.item_count = len(items)
+        state.inspector.capacity = capacity
+        put(state.inspector, scroll=max(0, min(state.inspector.scroll, max_scroll)))
 
-    # Flow bottom section downwards from bottom_start_y
-    bottom_start_y = max(comp_start_y + capacity * 28 + 6, ip.y + ip.h - bottom_h)
-    cur_y = bottom_start_y
+        while len(state.component_rows) < capacity:
+            n = len(state.component_rows)
+            label = state.ui.create(state.inspector, f'ComponentLabel{n}', 'label', text='', ink=MUTED)
+            field = state.ui.field(state.inspector, f'ComponentField{n}', '')
+            state.component_rows.append((label, field))
 
-    # 1. Add component row
-    put(state.add_name, x=ip.x + 12, y=cur_y, w=120, h=26)
-    put(state.add_value, x=ip.x + 138, y=cur_y, w=max(30, ip.w - 186), h=26)
-    put(state.add_button, x=ip.x + ip.w - 42, y=cur_y, w=30, h=26)
-    cur_y += 30
+        has_comp_scroll = len(items) > capacity and capacity > 0
+        sb_w = 10 if has_comp_scroll else 0
 
-    # 2. Tags row
-    put(state.tags_label, x=ip.x + 12, y=cur_y + 4, w=60, h=22)
-    put(state.tags_field, x=ip.x + 76, y=cur_y, w=max(30, ip.w - 88), h=26)
-    state.ui.set_text(state.tags_field, ', '.join(entity.tags))
-    cur_y += 30
+        for btn in state.component_delete_buttons:
+            put(btn, visible=False)
 
-    # 3. Parent row
-    put(state.parent_label, x=ip.x + 12, y=cur_y + 4, w=60, h=22)
-    put(state.parent_field, x=ip.x + 76, y=cur_y, w=max(30, ip.w - 88), h=26)
-    state.ui.set_text(state.parent_field, str(entity.parent.components.get('name', entity.parent.id)) if entity.parent else '')
-    cur_y += 30
+        for index, (label, field) in enumerate(state.component_rows):
+            source = index + state.inspector.scroll
+            shown = index < capacity and source < len(items)
+            put(label, visible=shown)
+            put(field, visible=shown)
+            if not shown:
+                continue
+            key, value = items[source]
+            editable = type(value) in (int, float, bool, str, tuple, list, dict, type(None))
+            y = comp_start_y + index * 25
+            lbl_w = min(110, max(50, (ip.w - 24 - 8) // 3))
+            field_w = max(40, ip.w - 12 - lbl_w - 6 - sb_w - 12)
+            put(label, x=ip.x + 12, y=y + 3, w=lbl_w, h=22, text=key)
+            put(field, x=ip.x + 12 + lbl_w + 6, y=y, w=field_w, h=23, readonly=not editable)
+            if field.components.get('component_key') != key or field.relations.get('target') is not entity:
+                if state.ui.focused is field:
+                    del state.app.relations['focus']
+            field.component_key = key
+            field.relations['target'] = entity
+            label.component_key = key
+            label.relations['target'] = entity
+            field.on_commit = lambda f=field: commit_component(f)
+            field.on_click = component_click
+            state.ui.set_text(field, safe_repr(value))
 
-    # 4. Relations row (with '+' commit button)
-    put(state.relations_label, x=ip.x + 12, y=cur_y + 4, w=60, h=22)
-    put(state.relation_field, x=ip.x + 76, y=cur_y, w=max(30, ip.w - 88 - 36), h=26)
-    put(state.link_add_button, x=ip.x + ip.w - 42, y=cur_y, w=30, h=26, text='+')
-    cur_y += 30
+        if has_comp_scroll:
+            track_x = ip.x + ip.w - 10
+            track_y = comp_start_y
+            track_w = 6
+            track_h = capacity * 25
+            put(state.inspector_scroll_track, visible=True, x=track_x, y=track_y, w=track_w, h=track_h)
+            thumb_h = max(16, int(track_h * (capacity / len(items))))
+            travel = max(1, track_h - thumb_h)
+            thumb_y = track_y + int(travel * (state.inspector.scroll / max_scroll)) if max_scroll > 0 else track_y
+            put(state.inspector_scroll_thumb, visible=True, x=track_x, y=thumb_y, w=track_w, h=thumb_h)
+        else:
+            put(state.inspector_scroll_track, visible=False)
+            put(state.inspector_scroll_thumb, visible=False)
 
-    # Interactive existing relations list (up to 3 rows) with Edit button
-    while len(state.relation_rows) < num_rel_rows:
-        n = len(state.relation_rows)
-        r_btn = state.ui.button(state.inspector, f'RelNav{n}', '', lambda: None)
-        u_btn = state.ui.button(state.inspector, f'RelUnlink{n}', 'x', lambda: None, color=(60, 30, 35))
-        state.relation_rows.append((r_btn, u_btn))
-        edit_btn = state.ui.button(state.inspector, f'RelEdit{n}', 'Edit', lambda: None)
-        state.relation_edit_buttons.append(edit_btn)
+        cur_y = comp_start_y + capacity * 25 + 4
 
-    while len(state.relation_edit_buttons) < len(state.relation_rows):
-        n = len(state.relation_edit_buttons)
-        edit_btn = state.ui.button(state.inspector, f'RelEdit{n}', 'Edit', lambda: None)
-        state.relation_edit_buttons.append(edit_btn)
+        # Add component row
+        put(state.add_name, visible=True, x=ip.x + 12, y=cur_y, w=110, h=26)
+        put(state.add_value, visible=True, x=ip.x + 128, y=cur_y, w=max(30, ip.w - 176), h=26)
+        put(state.add_button, visible=True, x=ip.x + ip.w - 42, y=cur_y, w=30, h=26)
+        cur_y += 32
 
-    for index, (r_btn, u_btn) in enumerate(state.relation_rows):
-        shown = index < num_rel_rows
-        put(r_btn, visible=shown)
-        put(u_btn, visible=shown)
-        edit_btn = state.relation_edit_buttons[index]
-        put(edit_btn, visible=shown)
-        if shown:
-            r_name, r_target = relations[index]
-            tgt_name = str(r_target.components.get('name', str(r_target.id)[:8]))
-            btn_del_w = 22
+    # SECTION 2: SYSTEMS (Collapsible)
+    put(state.system_label, visible=True, x=ip.x + 12, y=cur_y, w=max(80, ip.w - 24 - 80), h=22,
+        text=f"{'▶' if sys_collapsed else '▼'} SYSTEMS ({len(systems)})")
+    sys_btn_w = 72
+    put(state.add_system_button, visible=True, x=ip.x + ip.w - 12 - sys_btn_w, y=cur_y, w=sys_btn_w, h=22, text='+ Attach')
+    cur_y += 26
+
+    if sys_collapsed:
+        put(state.no_systems_label, visible=False)
+        for b in state.system_rows:
+            put(b, visible=False)
+        for b in state.system_edit_buttons:
+            put(b, visible=False)
+        for b in state.system_detach_buttons:
+            put(b, visible=False)
+    else:
+        if not systems:
+            put(state.no_systems_label, visible=True, x=ip.x + 12, y=cur_y, w=max(30, ip.w - 24), h=20, text='No systems attached')
+            cur_y += 22
+            for b in state.system_rows:
+                put(b, visible=False)
+            for b in state.system_edit_buttons:
+                put(b, visible=False)
+            for b in state.system_detach_buttons:
+                put(b, visible=False)
+        else:
+            put(state.no_systems_label, visible=False)
+            max_sys = min(len(systems), 6)
+            while len(state.system_rows) < max_sys:
+                idx = len(state.system_rows)
+                s_btn = state.ui.button(state.inspector, f'System{idx}', '', lambda: None)
+                e_btn = state.ui.button(state.inspector, f'SystemEdit{idx}', 'Edit', lambda: None)
+                d_btn = state.ui.button(state.inspector, f'SystemDel{idx}', 'x', lambda: None, color=(60, 30, 35))
+                state.system_rows.append(s_btn)
+                state.system_edit_buttons.append(e_btn)
+                state.system_detach_buttons.append(d_btn)
+
+            while len(state.system_edit_buttons) < len(state.system_rows):
+                idx = len(state.system_edit_buttons)
+                e_btn = state.ui.button(state.inspector, f'SystemEdit{idx}', 'Edit', lambda: None)
+                d_btn = state.ui.button(state.inspector, f'SystemDel{idx}', 'x', lambda: None, color=(60, 30, 35))
+                state.system_edit_buttons.append(e_btn)
+                state.system_detach_buttons.append(d_btn)
+
             btn_edit_w = 40
-            r_w = max(40, ip.w - 24 - btn_del_w - btn_edit_w - 8)
-            put(r_btn, x=ip.x + 12, y=cur_y, w=r_w, h=22, text=f"{r_name} -> {tgt_name}")
-            put(edit_btn, x=ip.x + 12 + r_w + 4, y=cur_y, w=btn_edit_w, h=22, text='Edit')
-            put(u_btn, x=ip.x + 12 + r_w + 4 + btn_edit_w + 4, y=cur_y, w=btn_del_w, h=22, text='x')
-            r_btn.action = lambda t=r_target: select(t)
-            edit_btn.action = lambda n=r_name, tn=tgt_name: start_edit_link(n, tn)
-            u_btn.action = lambda n=r_name: unlink_relation(n)
-            r_btn.relation_key = r_name
-            r_btn.relations['target'] = entity
-            edit_btn.relation_key = r_name
-            edit_btn.relations['target'] = entity
-            cur_y += 24
-    for r_btn, u_btn in state.relation_rows[num_rel_rows:]:
-        put(r_btn, visible=False)
-        put(u_btn, visible=False)
-    for edit_btn in state.relation_edit_buttons[num_rel_rows:]:
-        put(edit_btn, visible=False)
-    if num_rel_rows > 0:
-        cur_y += 4
+            s_w = max(40, ip.w - 24 - btn_edit_w - 6)
 
-    # 5. Metadata label
-    put(state.metadata, x=ip.x + 12, y=cur_y, w=max(0, ip.w - 24), h=18,
-        text=f'{len(children)} children | {len(relations)} relations')
-    cur_y += 22
+            for index in range(len(state.system_rows)):
+                s_btn = state.system_rows[index]
+                e_btn = state.system_edit_buttons[index]
+                d_btn = state.system_detach_buttons[index]
+                put(d_btn, visible=False)
+                shown = index < max_sys
+                put(s_btn, visible=shown)
+                put(e_btn, visible=shown)
+                if shown:
+                    name, instance = systems[index]
+                    s_title = name + (' !' if instance.errors else '')
+                    s_ink = (255, 120, 120) if instance.errors else INK
+                    put(s_btn, x=ip.x + 12, y=cur_y, w=s_w, h=24, text=s_title, ink=s_ink)
+                    put(e_btn, x=ip.x + 12 + s_w + 4, y=cur_y, w=btn_edit_w, h=24, text='Edit')
+                    s_btn.system_key = (entity.id, name)
+                    s_btn.action = lambda e=entity, n=name: open_system(e, n)
+                    e_btn.action = lambda e=entity, n=name: open_system(e, n)
+                    cur_y += 26
+            cur_y += 4
 
-    # 6. Systems section
-    if systems:
-        put(state.system_label, visible=True, x=ip.x + 12, y=cur_y, w=90, h=18)
-        cur_y += 20
-        max_sys = min(len(systems), 6)
-        while len(state.system_rows) < max_sys:
-            idx = len(state.system_rows)
-            btn = state.ui.button(state.inspector, f'System{idx}', '', lambda: None)
-            state.system_rows.append(btn)
-        btn_w = max(60, (ip.w - 24 - 12) // 3)
-        for index, button in enumerate(state.system_rows):
-            shown = index < max_sys
-            put(button, visible=shown)
-            if shown:
-                name, instance = systems[index]
-                col = index % 3
-                row_idx = index // 3
-                put(button, x=ip.x + 12 + col * (btn_w + 6),
-                    y=cur_y + row_idx * 26,
-                    w=btn_w, h=24, text=name + (' !' if instance.errors else ''))
-                if button.components.get('system_key') != (entity.id, name):
-                    button.system_key = (entity.id, name)
-                    button.action = lambda e=entity, n=name: open_system(e, n)
-        cur_y += num_sys_rows * 26 + 4
-    else:
-        put(state.system_label, visible=False)
-        for button in state.system_rows:
-            put(button, visible=False)
+    # SECTION 3: LINKS & HIERARCHY (Collapsible)
+    put(state.links_header, visible=True, x=ip.x + 12, y=cur_y, w=max(100, ip.w - 24), h=22,
+        text=f"{'▶' if links_collapsed else '▼'} LINKS & HIERARCHY")
+    cur_y += 26
 
-    # 7. Children quick navigation
-    if children:
-        max_children = min(len(children), 9)
-        while len(state.child_rows) < max_children:
-            idx = len(state.child_rows)
-            btn = state.ui.button(state.inspector, f'Child{idx}', '', lambda: None)
-            state.child_rows.append(btn)
-        btn_w = max(60, (ip.w - 24 - 12) // 3)
-        for index, button in enumerate(state.child_rows):
-            shown = index < max_children
-            put(button, visible=shown)
-            if shown:
-                child = children[index]
-                c_name = str(child.components.get('name', str(child.id)[:8]))
-                col = index % 3
-                row_idx = index // 3
-                put(button, x=ip.x + 12 + col * (btn_w + 6),
-                    y=cur_y + row_idx * 24,
-                    w=btn_w, h=22, text=c_name)
-                if button.components.get('child_id') != child.id:
-                    button.child_id = child.id
-                    button.action = lambda c=child: select(c)
-    else:
+    if links_collapsed:
+        put(state.tags_label, visible=False)
+        put(state.tags_field, visible=False)
+        put(state.parent_label, visible=False)
+        put(state.parent_field, visible=False)
+        put(state.relations_label, visible=False)
+        put(state.relation_field, visible=False)
+        put(state.link_add_button, visible=False)
+        put(state.metadata, visible=False)
+        for r_btn, u_btn in state.relation_rows:
+            put(r_btn, visible=False)
+            put(u_btn, visible=False)
+        for edit_btn in state.relation_edit_buttons:
+            put(edit_btn, visible=False)
         for button in state.child_rows:
             put(button, visible=False)
+    else:
+        # Tags row
+        put(state.tags_label, visible=True, x=ip.x + 12, y=cur_y + 4, w=60, h=22)
+        put(state.tags_field, visible=True, x=ip.x + 76, y=cur_y, w=max(30, ip.w - 88), h=26)
+        state.ui.set_text(state.tags_field, ', '.join(entity.tags))
+        cur_y += 30
+
+        # Parent row
+        put(state.parent_label, visible=True, x=ip.x + 12, y=cur_y + 4, w=60, h=22)
+        put(state.parent_field, visible=True, x=ip.x + 76, y=cur_y, w=max(30, ip.w - 88), h=26)
+        state.ui.set_text(state.parent_field, str(entity.parent.components.get('name', entity.parent.id)) if entity.parent else '')
+        cur_y += 30
+
+        # Link row
+        put(state.relations_label, visible=True, x=ip.x + 12, y=cur_y + 4, w=60, h=22)
+        put(state.relation_field, visible=True, x=ip.x + 76, y=cur_y, w=max(30, ip.w - 88 - 36), h=26)
+        put(state.link_add_button, visible=True, x=ip.x + ip.w - 42, y=cur_y, w=30, h=26, text='+')
+        cur_y += 30
+
+        # Existing relations list
+        while len(state.relation_rows) < num_rel_rows:
+            n = len(state.relation_rows)
+            r_btn = state.ui.button(state.inspector, f'RelNav{n}', '', lambda: None)
+            u_btn = state.ui.button(state.inspector, f'RelUnlink{n}', 'x', lambda: None, color=(60, 30, 35))
+            state.relation_rows.append((r_btn, u_btn))
+            edit_btn = state.ui.button(state.inspector, f'RelEdit{n}', 'Edit', lambda: None)
+            state.relation_edit_buttons.append(edit_btn)
+
+        while len(state.relation_edit_buttons) < len(state.relation_rows):
+            n = len(state.relation_edit_buttons)
+            edit_btn = state.ui.button(state.inspector, f'RelEdit{n}', 'Edit', lambda: None)
+            state.relation_edit_buttons.append(edit_btn)
+
+        for index, (r_btn, u_btn) in enumerate(state.relation_rows):
+            shown = index < num_rel_rows
+            put(r_btn, visible=shown)
+            put(u_btn, visible=False)
+            edit_btn = state.relation_edit_buttons[index]
+            put(edit_btn, visible=shown)
+            if shown:
+                r_name, r_target = relations[index]
+                tgt_name = str(r_target.components.get('name', str(r_target.id)[:8]))
+                btn_edit_w = 40
+                r_w = max(40, ip.w - 24 - btn_edit_w - 6)
+                put(r_btn, x=ip.x + 12, y=cur_y, w=r_w, h=22, text=f"{r_name} -> {tgt_name}")
+                put(edit_btn, x=ip.x + 12 + r_w + 4, y=cur_y, w=btn_edit_w, h=22, text='Edit')
+                r_btn.action = lambda t=r_target: select(t)
+                edit_btn.action = lambda n=r_name, tn=tgt_name: start_edit_link(n, tn)
+                r_btn.relation_key = r_name
+                r_btn.relations['target'] = entity
+                edit_btn.relation_key = r_name
+                edit_btn.relations['target'] = entity
+                cur_y += 24
+        for r_btn, u_btn in state.relation_rows[num_rel_rows:]:
+            put(r_btn, visible=False)
+            put(u_btn, visible=False)
+        for edit_btn in state.relation_edit_buttons[num_rel_rows:]:
+            put(edit_btn, visible=False)
+        if num_rel_rows > 0:
+            cur_y += 4
+
+        # Metadata
+        put(state.metadata, visible=True, x=ip.x + 12, y=cur_y, w=max(0, ip.w - 24), h=18,
+            text=f'{len(children)} children | {len(relations)} relations')
+        cur_y += 22
+
+        # Children chips
+        if children:
+            max_children = min(len(children), 9)
+            while len(state.child_rows) < max_children:
+                idx = len(state.child_rows)
+                btn = state.ui.button(state.inspector, f'Child{idx}', '', lambda: None)
+                state.child_rows.append(btn)
+            btn_w = max(60, (ip.w - 24 - 12) // 3)
+            for index, button in enumerate(state.child_rows):
+                shown = index < max_children
+                put(button, visible=shown)
+                if shown:
+                    child = children[index]
+                    c_name = str(child.components.get('name', str(child.id)[:8]))
+                    col = index % 3
+                    row_idx = index // 3
+                    put(button, x=ip.x + 12 + col * (btn_w + 6),
+                        y=cur_y + row_idx * 24,
+                        w=btn_w, h=22, text=c_name)
+                    if button.components.get('child_id') != child.id:
+                        button.child_id = child.id
+                        button.action = lambda c=child: select(c)
+        else:
+            for button in state.child_rows:
+                put(button, visible=False)
 
     for owner in state.runtime.entities:
         for name, instance in owner.systems.items():
@@ -682,21 +814,43 @@ def commit_component(field):
     inspector_sync()
 
 def add_component():
+    ent = selected()
+    renaming_key = state.add_name.components.pop("renaming_key", None)
+    saving_preset = state.add_name.components.pop("saving_preset", False)
     name = state.add_name.buffer.text.strip()
     if not name:
         raise ValueError('Enter a component name')
-    selected().components[name] = parse_value(state.add_value.buffer.text)
+    val_text = state.add_value.buffer.text.strip() or '0'
+    val = parse_value(val_text)
+
+    if saving_preset:
+        pin_to_quick_bar(name, val)
+        state.add_name.buffer = TextBuffer()
+        state.add_value.buffer = TextBuffer()
+        return
+
+    if renaming_key:
+        if renaming_key != name:
+            ent.components.pop(renaming_key, None)
+        ent.components[name] = val
+        message(f"Renamed component '{renaming_key}' -> '{name}'")
+    else:
+        ent.components[name] = val
+        message(f"Added component '{name}'")
     state.add_name.buffer = TextBuffer()
     state.add_value.buffer = TextBuffer()
-    message(f'Added {name}')
+    save_editor_project()
     inspector_sync()
 
 def commit_tags():
+    ent = selected()
+    renaming_tag = state.tags_field.components.pop("renaming_tag", None)
     tags = {tag.strip() for tag in state.tags_field.buffer.text.split(',') if tag.strip()}
-    for tag in set(selected().tags) - tags:
-        selected().tags.discard(tag)
+    for tag in set(ent.tags) - tags:
+        ent.tags.discard(tag)
     for tag in tags:
-        selected().tags.add(tag)
+        ent.tags.add(tag)
+    save_editor_project()
     message('Tags updated')
     inspector_sync()
 
@@ -925,6 +1079,166 @@ def open_add_component_menu():
         dict(label="Custom Component...", run=lambda e: context_add_component(ent)),
     ]
     open_menu(state.ui, ent, state.add_comp_menu_button.x, state.add_comp_menu_button.y + state.add_comp_menu_button.h + 2, actions=actions)
+
+
+def open_attach_system_menu():
+    ent = selected()
+    candidates = []
+    # Project directory
+    if state.project and state.project.exists():
+        for p in sorted(state.project.glob("*.py")):
+            if p.name in ("ui.py", "app.py", "hierarchy.py", "inspector.py", "text_area.py", "code_editor.py"):
+                continue
+            candidates.append(p)
+    # Also check template directory
+    try:
+        from lbe.project import template_path
+        tpl = template_path("editor")
+        if tpl.exists():
+            for p in sorted(tpl.glob("*.py")):
+                if p.name in ("ui.py", "app.py", "hierarchy.py", "inspector.py", "text_area.py", "code_editor.py"):
+                    continue
+                if not any(c.name == p.name for c in candidates):
+                    candidates.append(p)
+    except Exception:
+        pass
+
+    actions = []
+    for p in candidates:
+        name = p.stem
+        already = name in ent.systems
+        if not already:
+            actions.append(dict(label=f"+ {name} ({p.name})", run=lambda e, path=p: attach_system_to_entity(ent, path)))
+        else:
+            actions.append(dict(label=f"{name} (attached)", run=None))
+
+    if actions:
+        actions.append(None)
+    actions.append(dict(label="+ New System Script...", run=lambda e: prompt_new_system(ent)))
+
+    open_menu(state.ui, ent, state.add_system_button.x, state.add_system_button.y + state.add_system_button.h + 2, actions=actions)
+
+
+def prompt_new_system(ent):
+    new_source()
+    state.code.relations['owner'] = ent
+    message(f"New system for {ent.components.get('name', ent.id)}: choose filename, edit, then Attach")
+
+
+def attach_system_to_entity(ent, path):
+    try:
+        definition = state.runtime.assets.system(path)
+        stem = path.stem
+        if stem in ent.systems:
+            instance = ent.systems.reload(stem, definition)
+        else:
+            instance = ent.systems.attach(stem, definition)
+        save_editor_project()
+        inspector_sync()
+        if instance.errors:
+            message(f"Attached {stem} with errors: {instance.errors[-1].message}")
+        else:
+            message(f"Attached {stem} to {ent.components.get('name', ent.id)}")
+    except Exception as err:
+        message(f"Failed to attach {path.stem}: {err}")
+
+
+def detach_system_from_entity(ent, name):
+    if ent is state.app and name in ('app', 'ui'):
+        message('The active editor cannot detach itself')
+        return
+    try:
+        del ent.systems[name]
+        if state.code.relations.get('owner') is ent and state.code.components.get('system_name') == name:
+            del state.code.relations['owner']
+            state.code.components.pop('system_name', None)
+        save_editor_project()
+        inspector_sync()
+        message(f"Detached system '{name}' from {ent.components.get('name', ent.id)}")
+    except Exception as err:
+        message(f"Failed to detach {name}: {err}")
+
+
+def toggle_section(name):
+    if name in state.collapsed_sections:
+        state.collapsed_sections.remove(name)
+    else:
+        state.collapsed_sections.add(name)
+    inspector_sync()
+
+
+def open_add_chip_menu():
+    ent = selected()
+    actions = [
+        dict(label="+ Add custom component to entity...", run=lambda _: context_add_component(ent)),
+        dict(label="+ Create new quick preset...", run=lambda _: prompt_add_preset()),
+    ]
+    unpinned = [k for k in ent.components if not any(p[0] == k for p in state.quick_component_presets)]
+    if unpinned:
+        actions.append(None)
+        for k in unpinned:
+            actions.append(dict(label=f"Pin '{k}' to quick-bar", run=lambda _, comp=k: pin_to_quick_bar(comp, ent.components.get(comp))))
+    open_menu(state.ui, ent, state.quick_add_chip_btn.x, state.quick_add_chip_btn.y + state.quick_add_chip_btn.h + 2, actions=actions)
+
+
+def prompt_add_preset():
+    state.add_name.buffer = TextBuffer("custom")
+    state.add_value.buffer = TextBuffer("1.0")
+    state.add_name.components["saving_preset"] = True
+    state.ui.focus(state.add_name)
+    message("Creating quick preset: type component name and default value, then press Enter")
+
+
+def pin_to_quick_bar(name, default_val):
+    if not any(p[0] == name for p in state.quick_component_presets):
+        state.quick_component_presets.append((name, {name: default_val}))
+        message(f"Pinned '{name}' to quick-bar")
+        inspector_sync()
+
+
+def apply_quick_preset(name):
+    ent = selected()
+    for p_name, p_data in state.quick_component_presets:
+        if p_name == name:
+            for k, v in p_data.items():
+                ent.components.setdefault(k, v)
+            message(f"Added {name} ({', '.join(p_data.keys())})")
+            inspector_sync()
+            return
+
+
+def remove_quick_preset(name):
+    state.quick_component_presets = [p for p in state.quick_component_presets if p[0] != name]
+    message(f"Removed '{name}' from quick-bar")
+    inspector_sync()
+
+
+def start_rename_component(ent, old_key):
+    state.add_name.buffer = TextBuffer(old_key)
+    state.add_value.buffer = TextBuffer(safe_repr(ent.components.get(old_key)))
+    state.add_name.components["renaming_key"] = old_key
+    state.ui.focus(state.add_name)
+    message(f"Renaming component '{old_key}': type new name and press Enter")
+
+
+def start_rename_tag(ent, old_tag):
+    state.tags_field.components["renaming_tag"] = old_tag
+    state.ui.focus(state.tags_field)
+    message(f"Renaming tag '{old_tag}': edit in Tags box and press Enter")
+
+
+def remove_tag(ent, tag):
+    ent.tags.discard(tag)
+    save_editor_project()
+    inspector_sync()
+    message(f"Removed tag '{tag}'")
+
+
+def start_add_tag(ent):
+    state.ui.focus(state.tags_field)
+    message("Type tag name and press Enter to save")
+
+
 
 
 def hierarchy_scroll_drag(thumb, event):
@@ -1305,10 +1619,16 @@ def bind_actions():
                             (state.add_child_button, inspector_add_child),
                             (state.duplicate_button, inspector_duplicate_entity),
                             (state.delete_button, inspector_delete_entity),
-                            (state.quick_pos_btn, quick_add_pos),
-                            (state.quick_size_btn, quick_add_size),
-                            (state.quick_vel_btn, quick_add_vel),
-                            (state.quick_color_btn, quick_add_color)):
+                            (state.quick_pos_btn, lambda: apply_quick_preset("pos")),
+                            (state.quick_size_btn, lambda: apply_quick_preset("size")),
+                            (state.quick_vel_btn, lambda: apply_quick_preset("vel")),
+                            (state.quick_color_btn, lambda: apply_quick_preset("color")),
+                            (state.quick_speed_btn, lambda: apply_quick_preset("speed")),
+                            (state.quick_add_chip_btn, open_add_chip_menu),
+                            (state.components_title, lambda: toggle_section("components")),
+                            (state.system_label, lambda: toggle_section("systems")),
+                            (state.add_system_button, open_attach_system_menu),
+                            (state.links_header, lambda: toggle_section("links"))):
         control.action = action
     for control, action in ((state.path_field, open_path), (state.tags_field, commit_tags),
                             (state.parent_field, commit_parent), (state.relation_field, commit_relation),
@@ -1324,6 +1644,10 @@ def bind_actions():
         field.on_commit = lambda field=field: commit_component(field)
         field.on_click = component_click
     for button in state.system_rows:
+        button.components.pop("system_key", None)
+    for button in state.system_edit_buttons:
+        button.components.pop("system_key", None)
+    for button in state.system_detach_buttons:
         button.components.pop("system_key", None)
 
 
@@ -1367,6 +1691,15 @@ def context_rename(target):
 
 
 def context_target(control, event):
+    if 'preset_key' in control.components:
+        return dict(preset=control.components['preset_key'], control=control)
+    if 'system_key' in control.components:
+        owner_id, sys_name = control.components['system_key']
+        owner = next((e for e in state.runtime.entities if e.id == owner_id), None)
+        if owner:
+            return dict(entity=owner, system=sys_name)
+    if control is state.tags_field or control is state.tags_label:
+        return dict(entity=selected(), tags=True)
     if 'component_key' in control.components and 'target' in control.relations:
         return dict(entity=control.relations['target'], component=control.component_key)
     if 'relation_key' in control.components and 'target' in control.relations:
@@ -1384,13 +1717,41 @@ def context_target(control, event):
 
 
 def context_actions(target):
+    if isinstance(target, dict) and 'preset' in target:
+        name = target['preset']
+        return [
+            dict(label=f"Apply '{name}'", run=lambda t: apply_quick_preset(name)),
+            dict(label=f"Remove '{name}' from quick-bar", run=lambda t: remove_quick_preset(name)),
+            None,
+            dict(label="+ New quick-add preset...", run=lambda t: prompt_add_preset()),
+        ]
+    if isinstance(target, dict) and 'system' in target:
+        ent = target['entity']
+        name = target['system']
+        return [
+            dict(label=f"Edit system '{name}'", run=lambda t: open_system(ent, name)),
+            None,
+            dict(label=f"Detach system '{name}'", run=lambda t: detach_system_from_entity(ent, name)),
+        ]
+    if isinstance(target, dict) and 'tags' in target:
+        ent = target['entity']
+        actions = []
+        for t in sorted(ent.tags):
+            actions.append(dict(label=f"Rename tag '{t}'...", run=lambda _, tag=t: start_rename_tag(ent, tag)))
+            actions.append(dict(label=f"Remove tag '{t}'", run=lambda _, tag=t: remove_tag(ent, tag)))
+        if actions:
+            actions.append(None)
+        actions.append(dict(label="+ Add new tag...", run=lambda _: start_add_tag(ent)))
+        return actions
     if isinstance(target, dict) and 'component' in target:
         ent = target['entity']
         comp = target['component']
         return [
             dict(label='Inspect component', run=lambda t: open_panel(target=ent, component=comp)),
+            dict(label=f"Rename '{comp}'...", run=lambda t: start_rename_component(ent, comp)),
             dict(label=f"Delete '{comp}'", run=lambda t: delete_component(comp)),
             None,
+            dict(label=f"Pin '{comp}' to quick-bar", run=lambda t: pin_to_quick_bar(comp, ent.components.get(comp))),
             dict(label="Add component...", run=lambda t: context_add_component(ent)),
         ]
     if isinstance(target, dict) and 'relation' in target:
