@@ -98,6 +98,7 @@ class TextBuffer:
         self.anchor = 0
         self.scroll = 0
         self.horizontal = 0
+        self.preferred_column = None
         self._undo = []
         self._redo = []
 
@@ -132,6 +133,7 @@ class TextBuffer:
         return self.text, self.cursor, self.anchor
 
     def insert(self, text):
+        self.preferred_column = None
         if not text:
             text = ""
         else:
@@ -193,16 +195,30 @@ class TextBuffer:
 
     def move(self, direction, select=False):
         row, column = self.position
+        if direction in ("UP", "DOWN", "PAGEUP", "PAGEDOWN"):
+            if self.preferred_column is None:
+                self.preferred_column = column
+            target_col = self.preferred_column
+        else:
+            self.preferred_column = None
+            target_col = column
+
         if direction == "LEFT":
             target = self.cursor - 1
         elif direction == "RIGHT":
             target = self.cursor + 1
         elif direction == "UP":
-            target = self.index(row - 1, column)
+            target = self.index(row - 1, target_col)
         elif direction == "DOWN":
-            target = self.index(row + 1, column)
+            target = self.index(row + 1, target_col)
         elif direction == "HOME":
-            target = self.index(row, 0)
+            lines = self.text.split("\n")
+            line = lines[row] if row < len(lines) else ""
+            first_non_ws = len(line) - len(line.lstrip(" \t"))
+            if column == first_non_ws:
+                target = self.index(row, 0)
+            else:
+                target = self.index(row, first_non_ws)
         elif direction == "END":
             target = self.index(row, 10**9)
         elif direction == "FILE_HOME":
@@ -210,7 +226,7 @@ class TextBuffer:
         elif direction == "FILE_END":
             target = len(self.text)
         elif direction in ("PAGEUP", "PAGEDOWN"):
-            target = self.index(row + (-20 if direction == "PAGEUP" else 20), column)
+            target = self.index(row + (-20 if direction == "PAGEUP" else 20), target_col)
         elif direction == "WORD_LEFT":
             target = self.cursor
             while target > 0 and self.text[target - 1].isspace():
@@ -250,7 +266,120 @@ class TextBuffer:
                 return
         self.insert("\n" + indent)
 
+    def indent(self, dedent=False):
+        """Indent or dedent the current line or selected lines by 4 spaces with atomic undo."""
+        self.preferred_column = None
+        start, end = self.selection
+        if start == end and not dedent:
+            self.insert("    ")
+            return
+
+        self._undo.append(self._snapshot())
+        del self._undo[:-200]
+        self._redo.clear()
+
+        start_row = self.text[:start].count("\n")
+        if end > start and self.text[end - 1] == "\n":
+            end_row = self.text[:end - 1].count("\n")
+        else:
+            end_row = self.text[:end].count("\n")
+
+        lines = self.text.split("\n")
+        new_lines = list(lines)
+        first_line_shift = 0
+
+        for r in range(start_row, end_row + 1):
+            line = new_lines[r]
+            if dedent:
+                count = 0
+                for ch in line[:4]:
+                    if ch == " ":
+                        count += 1
+                    elif ch == "\t":
+                        count += 1
+                        break
+                    else:
+                        break
+                new_lines[r] = line[count:]
+                if r == start_row:
+                    first_line_shift = -count
+            else:
+                if line or start == end:
+                    new_lines[r] = "    " + line
+                    if r == start_row:
+                        first_line_shift = 4
+
+        self.text = "\n".join(new_lines)
+        if start == end:
+            line_start_idx = self.text.rfind("\n", 0, self.cursor) + 1 if self.cursor > 0 else 0
+            cur_col = max(0, start - line_start_idx)
+            self.cursor = self.anchor = self.index(start_row, max(0, cur_col + first_line_shift))
+        else:
+            new_start = sum(len(new_lines[i]) + 1 for i in range(start_row))
+            new_end = sum(len(new_lines[i]) + 1 for i in range(end_row)) + len(new_lines[end_row])
+            if self.anchor <= self.cursor:
+                self.anchor = new_start
+                self.cursor = new_end
+            else:
+                self.anchor = new_end
+                self.cursor = new_start
+
+    def toggle_comment(self):
+        """Toggle Python comment (# ) on the current line or selected lines with atomic undo."""
+        self.preferred_column = None
+        self._undo.append(self._snapshot())
+        del self._undo[:-200]
+        self._redo.clear()
+
+        start, end = self.selection
+        start_row = self.text[:start].count("\n")
+        if end > start and self.text[end - 1] == "\n":
+            end_row = self.text[:end - 1].count("\n")
+        else:
+            end_row = self.text[:end].count("\n")
+
+        lines = self.text.split("\n")
+        new_lines = list(lines)
+
+        non_empty = [new_lines[r] for r in range(start_row, end_row + 1) if new_lines[r].strip()]
+        all_commented = bool(non_empty) and all(line.lstrip().startswith("#") for line in non_empty)
+
+        if all_commented:
+            for r in range(start_row, end_row + 1):
+                line = new_lines[r]
+                stripped = line.lstrip()
+                if stripped.startswith("#"):
+                    ws = line[:len(line) - len(stripped)]
+                    rest = stripped[1:]
+                    if rest.startswith(" "):
+                        rest = rest[1:]
+                    new_lines[r] = ws + rest
+        else:
+            min_indent = min((len(l) - len(l.lstrip(" ")) for l in non_empty), default=0)
+            for r in range(start_row, end_row + 1):
+                line = new_lines[r]
+                if line.strip():
+                    ws = line[:min_indent]
+                    rest = line[min_indent:]
+                    new_lines[r] = ws + "# " + rest
+                elif start == end:
+                    new_lines[r] = "# "
+
+        self.text = "\n".join(new_lines)
+        if start == end:
+            self.cursor = self.anchor = self.index(start_row, len(new_lines[start_row]))
+        else:
+            new_start = sum(len(new_lines[i]) + 1 for i in range(start_row))
+            new_end = sum(len(new_lines[i]) + 1 for i in range(end_row)) + len(new_lines[end_row])
+            if self.anchor <= self.cursor:
+                self.anchor = new_start
+                self.cursor = new_end
+            else:
+                self.anchor = new_end
+                self.cursor = new_start
+
     def undo(self, redo=False):
+        self.preferred_column = None
         source, target = (self._redo, self._undo) if redo else (self._undo, self._redo)
         if source:
             target.append(self._snapshot())

@@ -319,6 +319,18 @@ def handle_editor_key(control, event):
     if key == "ESCAPE":
         return True
 
+    # Ctrl+/ comment toggle
+    if ctrl and key in ("SLASH", "/"):
+        buffer.toggle_comment()
+        control.components.touch("buffer")
+        return True
+
+    # Tab / Shift+Tab indent and dedent
+    if key == "TAB":
+        buffer.indent(dedent=shift)
+        control.components.touch("buffer")
+        return True
+
     # Backspace deleting empty pair
     if key == "BACKSPACE" and not ctrl and start == end:
         if 0 < buffer.cursor < len(buffer.text):

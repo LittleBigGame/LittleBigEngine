@@ -530,10 +530,13 @@ class UI:
                     self.focus()
             elif key == "TAB":
                 if multiline:
-                    buffer.insert("    ")
+                    buffer.indent(dedent=shift)
                 else:
                     fields = [e for e in self.controls() if "field" in e.tags and self.visible(e) and not e.components.get("readonly", False)]
                     self.focus(fields[(fields.index(control)+(-1 if shift else 1)) % len(fields)])
+            elif ctrl and key in ("SLASH", "/"):
+                if multiline and hasattr(buffer, "toggle_comment"):
+                    buffer.toggle_comment()
             elif key == "ESCAPE":
                 self.focus()
         if control.alive:
