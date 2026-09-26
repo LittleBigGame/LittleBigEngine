@@ -172,6 +172,8 @@ class EditorTests(unittest.TestCase):
     def test_component_panel_and_save_preserve_cursor(self):
         field = next(field for _, field in self.editor.component_rows if field.visible and field.component_key == "color")
         self.send(("click", field.x+10, field.y+10, 4, 0))
+        self.send(("key", "DOWN", False, False))
+        self.send(("key", "ENTER", False, False))
         self.assertEqual(self.editor.extra_panels[-1].view_type, "component")
         self.editor.extra_panels[-1].destroy()
         self.type(self.editor.code, "def draw():\n    pass\n")

@@ -333,6 +333,9 @@ class UI:
                         callback(message)
 
     def dispatch(self, event):
+        from .menus import dispatch_menu
+        if dispatch_menu(self, event):
+            return
         kind = event[0]
         if kind in ("click", "scroll", "drag"):
             controls = [e for e in self.controls() if self.visible(e) and contains(e, event[1], event[2])]

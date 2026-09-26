@@ -86,3 +86,18 @@ The behavior comes from this script. There is no physics-specific code in the ke
 - Scripts execute trusted Python. Deliberately breaking the editor's own runtime
   script can interrupt its UI; restore `app.py` externally if necessary.
 - Inspection panels show a compact view; larger structured objects may be truncated.
+
+## Context actions
+
+Right-click a hierarchy row, viewport object, empty viewport area, editor panel,
+or component field to open its available actions. Use the mouse or Up/Down and
+Enter to choose; Escape or an outside click dismisses the menu. Long menus scroll
+with the mouse wheel. Component fields offer inspection; entity menus offer
+selection, inspection and component creation. Game entities also offer child
+creation and camera focus when they have position data.
+
+These actions are defined by the editor project's `app.py` using the reusable
+context-menu API described in `docs/ui.md`. Existing projects retain their own
+scripts: the updated editor menu bindings are included in newly initialized
+editor projects; upgrading an existing custom editor requires porting those
+bindings into its `app.py`.

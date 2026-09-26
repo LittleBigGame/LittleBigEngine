@@ -72,3 +72,31 @@ operations. The counter template uses the same text control for notes.
 For custom interaction, compose components and callbacks or attach another normal
 system. Game selection, tree expansion, property inspection and saving Python
 files are application-level behavior, not built-in UI control rules.
+# Context menus
+
+Right-click menus use ordinary UI entities. Register a `context_actions(target)`
+callback on the UI root or a target entity; both providers contribute actions.
+The optional root `context_target(control, event)` callback resolves a clicked
+control into an entity or any custom object. Providers are queried each time the
+menu opens, so actions can depend on current components or capabilities.
+
+```python
+from lbe.menus import open_menu
+
+root.context_actions = lambda target: [
+    {"label": "Inspect", "run": inspect_target},
+    None,  # separator
+    {"label": "Run", "run": run_target, "enabled": can_run(target)},
+]
+open_menu(ui, custom_target, x=200, y=100)
+```
+
+Each `run` callback receives the target. Pass `actions=[...]` to `open_menu` to
+provide a one-off menu instead of querying providers. No Core changes or entity
+subclasses are required. Menu panels and rows are inspectable entities; layout,
+selection, scrolling and action data live in their components.
+
+Click an enabled item or use Up/Down and Enter. Escape or an outside click closes
+the menu without activating controls underneath it. The wheel scrolls long
+menus. Disabled items cannot execute. Text focus is retained while popup input
+is captured. Callback errors use the UI's existing error reporting path.
