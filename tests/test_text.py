@@ -84,3 +84,36 @@ class TextTests(unittest.TestCase):
         # Direct property assignment normalizes as well
         buffer.text = "line1\r\nline2\rline3"
         self.assertEqual(buffer.text, "line1\nline2\nline3")
+
+    def test_delete_word_and_smart_indentation(self):
+        # 1. Word deletion backward
+        buffer = TextBuffer("def update(dt):")
+        buffer.cursor = buffer.anchor = len(buffer.text)
+        buffer.delete_word(backward=True)
+        self.assertEqual(buffer.text, "def update(dt)")
+        buffer.delete_word(backward=True)
+        self.assertEqual(buffer.text, "def update(dt")
+        buffer.delete_word(backward=True)
+        self.assertEqual(buffer.text, "def update(")
+        buffer.delete_word(backward=True)
+        self.assertEqual(buffer.text, "def update")
+
+        # 2. Indentation after comment following colon
+        b2 = TextBuffer("def foo():  # function comment")
+        b2.cursor = b2.anchor = len(b2.text)
+        b2.newline()
+        self.assertEqual(b2.text, "def foo():  # function comment\n    ")
+
+        # 3. Indentation inside open bracket
+        b3 = TextBuffer("items = (")
+        b3.cursor = b3.anchor = len(b3.text)
+        b3.newline()
+        self.assertEqual(b3.text, "items = (\n    ")
+
+        # 4. Pressing Enter between empty brackets
+        b4 = TextBuffer("x = ()")
+        b4.cursor = b4.anchor = 5 # between ( and )
+        b4.newline()
+        self.assertEqual(b4.text, "x = (\n    \n)")
+        self.assertEqual(b4.cursor, 10) # on the middle indented line
+

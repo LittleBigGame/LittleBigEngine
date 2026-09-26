@@ -1,5 +1,7 @@
 """Small platform-independent text buffer used by entity-based controls."""
 
+import re
+
 
 class TextBuffer:
     def __init__(self, text=""):
@@ -60,6 +62,42 @@ class TextBuffer:
         if self.cursor != self.anchor:
             self.insert("")
 
+    def delete_word(self, backward=True):
+        if self.cursor != self.anchor:
+            self.insert("")
+            return
+        orig = self.cursor
+        if backward:
+            target = orig
+            while target > 0 and self.text[target - 1].isspace():
+                target -= 1
+            if target > 0:
+                ch = self.text[target - 1]
+                if ch.isalnum() or ch == '_':
+                    while target > 0 and (self.text[target - 1].isalnum() or self.text[target - 1] == '_'):
+                        target -= 1
+                else:
+                    p_char = ch
+                    while target > 0 and self.text[target - 1] == p_char:
+                        target -= 1
+            self.anchor = max(0, target)
+        else:
+            target = orig
+            while target < len(self.text) and self.text[target].isspace():
+                target += 1
+            if target < len(self.text):
+                ch = self.text[target]
+                if ch.isalnum() or ch == '_':
+                    while target < len(self.text) and (self.text[target].isalnum() or self.text[target] == '_'):
+                        target += 1
+                else:
+                    p_char = ch
+                    while target < len(self.text) and self.text[target] == p_char:
+                        target += 1
+            self.anchor = min(len(self.text), target)
+        if self.cursor != self.anchor:
+            self.insert("")
+
     def move(self, direction, select=False):
         row, column = self.position
         if direction == "LEFT":
@@ -82,20 +120,24 @@ class TextBuffer:
             target = self.index(row + (-20 if direction == "PAGEUP" else 20), column)
         elif direction == "WORD_LEFT":
             target = self.cursor
-            while target > 0 and self.text[target-1].isspace():
+            while target > 0 and self.text[target - 1].isspace():
                 target -= 1
-            while target > 0 and not self.text[target-1].isspace():
-                target -= 1
+            if target > 0:
+                is_id = self.text[target - 1].isalnum() or self.text[target - 1] == '_'
+                while target > 0 and not self.text[target - 1].isspace() and (self.text[target - 1].isalnum() or self.text[target - 1] == '_') == is_id:
+                    target -= 1
         elif direction == "WORD_RIGHT":
             target = self.cursor
-            while target < len(self.text) and not self.text[target].isspace():
-                target += 1
+            if target < len(self.text):
+                is_id = self.text[target].isalnum() or self.text[target] == '_'
+                while target < len(self.text) and not self.text[target].isspace() and (self.text[target].isalnum() or self.text[target] == '_') == is_id:
+                    target += 1
             while target < len(self.text) and self.text[target].isspace():
                 target += 1
         else:
             return
-        if not select and self.cursor != self.anchor and direction in ("LEFT", "RIGHT"):
-            target = min(self.selection) if direction == "LEFT" else max(self.selection)
+        if not select and self.cursor != self.anchor and direction in ("LEFT", "RIGHT", "WORD_LEFT", "WORD_RIGHT"):
+            target = min(self.selection) if direction in ("LEFT", "WORD_LEFT") else max(self.selection)
         self.cursor = max(0, min(target, len(self.text)))
         if not select:
             self.anchor = self.cursor
@@ -103,9 +145,24 @@ class TextBuffer:
     def newline(self):
         start = self.text.rfind("\n", 0, self.cursor) + 1
         line = self.text[start:self.cursor]
-        indent = line[:len(line) - len(line.lstrip(" "))]
-        if line.rstrip().endswith(":"):
+        base_indent = line[:len(line) - len(line.lstrip(" "))]
+        indent = base_indent
+        code_part = re.sub(r"#.*$", "", line).rstrip()
+        if code_part.endswith(":"):
             indent += "    "
+        else:
+            line_opens = sum(1 for c in code_part if c in "([{")
+            line_closes = sum(1 for c in code_part if c in ")]}")
+            if line_opens > line_closes:
+                indent += "    "
+        # Check if cursor is between an open and close bracket pair, e.g. ( | )
+        if 0 < self.cursor < len(self.text):
+            pair = (self.text[self.cursor - 1], self.text[self.cursor])
+            if pair in (('(', ')'), ('[', ']'), ('{', '}')):
+                start_cursor = self.cursor
+                self.insert("\n" + indent + "\n" + base_indent)
+                self.cursor = self.anchor = start_cursor + len("\n" + indent)
+                return
         self.insert("\n" + indent)
 
     def undo(self, redo=False):

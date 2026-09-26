@@ -1336,3 +1336,126 @@ class EditorTests(unittest.TestCase):
             self.runtime.step(0.1)
             self.assertFalse(code.components.get("autocomplete_state", {}).get("active", False))
 
+    def test_scrollable_autocomplete_and_scrolling(self):
+        if importlib.util.find_spec("jedi") is None:
+            self.skipTest("Jedi is an optional editor dependency")
+        code = self.editor.code
+        self.click(code)
+        self.send(("key", "A", True, False), ("key", "BACKSPACE", False, False))
+        self.send(("text", "entity."))
+        self.await_completion()
+
+        ac_state = code.components.get("autocomplete_state", {})
+        self.assertTrue(ac_state.get("active"))
+        matches = ac_state.get("matches", [])
+        self.assertGreater(len(matches), 8)
+
+        # Popup and scrollbar thumb are visible
+        thumb = next(c for c in code.children if c.components.get("part") == "ac_scroll_thumb")
+        self.assertTrue(thumb.visible)
+
+        # Scrolling down with DOWN arrow key
+        for _ in range(8):
+            self.send(("key", "DOWN", False, False))
+        self.assertGreater(ac_state.get("scroll", 0), 0)
+
+        # Scrolling with mouse wheel on popup
+        popup = next(c for c in code.children if c.components.get("part") == "autocomplete_popup")
+        self.send(("scroll", popup.x + 10, popup.y + 10, 0, -2))
+        self.runtime.step(0)
+        self.assertGreater(ac_state.get("scroll", 0), 1)
+
+    def test_word_navigation_and_ctrl_backspace(self):
+        code = self.editor.code
+        self.click(code)
+        self.send(("key", "A", True, False), ("key", "BACKSPACE", False, False))
+        self.send(("text", "ship.speed = 100"))
+        self.assertEqual(code.buffer.text, "ship.speed = 100")
+
+        # 1. Ctrl+Left moves word by word
+        self.send(("key", "LEFT", True, False))
+        self.assertEqual(code.buffer.text[:code.buffer.cursor], "ship.speed = ")
+        self.send(("key", "LEFT", True, False))
+        self.assertEqual(code.buffer.text[:code.buffer.cursor], "ship.speed ")
+        self.send(("key", "LEFT", True, False))
+        self.assertEqual(code.buffer.text[:code.buffer.cursor], "ship.")
+
+        # 2. Ctrl+Shift+Left selects word
+        code.buffer.cursor = code.buffer.anchor = 10  # after 'speed'
+        self.send(("key", "LEFT", True, True))
+        self.assertEqual(code.buffer.selected_text, "speed")
+
+        # 3. Ctrl+Backspace deletes previous word
+        code.buffer.cursor = code.buffer.anchor = len(code.buffer.text)
+        self.send(("key", "BACKSPACE", True, False))
+        self.assertEqual(code.buffer.text, "ship.speed = ")
+
+    def test_double_click_and_triple_click_selection(self):
+        code = self.editor.code
+        pitch = code.components.get("pitch", 8.0)
+        line_height = code.components.get("line_height", 20)
+        code.buffer.text = "def update(dt):\n    pass\n"
+        code.buffer.cursor = code.buffer.anchor = 0
+        self.runtime.step(0)
+
+        # Double click on 'update' (x at col 6, y at row 0)
+        click_x = code.x + 48 + 6 * pitch + pitch / 2
+        click_y = code.y + 6 + line_height / 2
+        self.send(("click", click_x, click_y, 1, 0, 2))
+        self.assertEqual(code.buffer.selected_text, "update")
+
+        # Triple click on first line
+        self.send(("click", click_x, click_y, 1, 0, 3))
+        self.assertEqual(code.buffer.selected_text, "def update(dt):\n")
+
+    def test_multiline_tuple_closing_dedent(self):
+        code = self.editor.code
+        self.click(code)
+        self.send(("key", "A", True, False), ("key", "BACKSPACE", False, False))
+        self.send(("text", "def test():\n    data = (\n        1,\n        2,\n        "))
+        self.assertEqual(code.buffer.position[0], 4)
+
+        # Type ')' on line with 8 spaces indent
+        self.send(("text", ")"))
+        lines = code.buffer.text.split("\n")
+        self.assertEqual(lines[4], "    )")
+
+    def test_hover_inspection_tooltip(self):
+        if importlib.util.find_spec("jedi") is None:
+            self.skipTest("Jedi is an optional editor dependency")
+        code = self.editor.code
+        pitch = code.components.get("pitch", 8.0)
+        line_height = code.components.get("line_height", 20)
+        self.click(code)
+        self.send(("key", "A", True, False), ("key", "BACKSPACE", False, False))
+        self.send(("text", "def update(dt):\n    for child in query('x'):\n        pass\n"))
+        self.runtime.step(0)
+
+        # Position mouse over 'query' (row 1, col 18)
+        mx = code.x + 48 + 18 * pitch
+        my = code.y + 6 + 1 * line_height + line_height / 2
+        self.send(("motion", mx, my))
+
+        # Dwell for 0.4 seconds
+        self.runtime.step(0.4)
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            self.runtime.step(0.05)
+            h_state = code.components.get("hover_state", {})
+            if h_state.get("active"):
+                break
+            time.sleep(0.01)
+
+        self.assertTrue(h_state.get("active"), "Hover tooltip should activate")
+        self.assertEqual(h_state["info"]["name"], "query")
+
+        # Hover panel is visible
+        tip = next((c for c in code.children if c.components.get("part") == "hover_panel"), None)
+        self.assertIsNotNone(tip)
+        self.assertTrue(tip.visible)
+
+        # Moving mouse away dismisses hover
+        self.send(("motion", code.x - 100, code.y - 100))
+        self.runtime.step(0)
+        self.assertFalse(code.components.get("hover_state", {}).get("active", False))
+
