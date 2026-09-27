@@ -26,10 +26,11 @@ class SystemDefinition:
 
 
 class Assets:
-    """Cache immutable compiled system sources by canonical path and content."""
+    """Cache immutable compiled system sources and resolve persistent asset handles."""
 
-    def __init__(self):
+    def __init__(self, registry=None):
         self._systems = {}
+        self.registry = registry
 
     def system(self, path):
         path = Path(path).resolve()
@@ -39,6 +40,41 @@ class Assets:
             previous = SystemDefinition(source, str(path))
             self._systems[path] = previous
         return previous
+
+    def resolve(self, key):
+        """Resolve a path, UUID, or AssetRef to an asset object or resolved Path."""
+        from uuid import UUID
+        from .assets import AssetRef
+        if isinstance(key, AssetRef):
+            key = key.id
+        if isinstance(key, (UUID, str)):
+            uid = None
+            if isinstance(key, UUID):
+                uid = key
+            elif isinstance(key, str) and len(key) == 36 and "-" in key:
+                try:
+                    uid = UUID(key)
+                except ValueError:
+                    uid = None
+            if uid is not None and self.registry:
+                p = self.registry.get_path(uid)
+                if p is not None:
+                    if p.suffix.lower() == ".py":
+                        return self.system(p)
+                    return p
+        p = Path(key)
+        if p.suffix.lower() == ".py" and p.exists():
+            return self.system(p)
+        return p
+
+    def get(self, key, default=None):
+        try:
+            return self.resolve(key)
+        except Exception:
+            return default
+
+    def __getitem__(self, key):
+        return self.resolve(key)
 
 
 class SystemInstance:
@@ -89,6 +125,7 @@ class SystemInstance:
             "events": runtime.events,
             "changes": runtime.changes,
             "assets": runtime.assets,
+            "asset": runtime.assets.resolve,
         })
         self._injected = frozenset(self.namespace)
         try:

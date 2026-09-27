@@ -95,3 +95,21 @@ Optional Python completion uses Jedi static analysis in a serialized background
 worker outside Core. Editor entities own request state and discard stale results;
 UI and text selection remain reusable control behavior. The desktop extra includes
 Jedi, while the core package retains no runtime dependencies.
+
+### Asset Registry, File Explorer & Inline GUI Pills
+
+Project assets (scripts, images, audio, data) are managed by `AssetRegistry` (`lbe.assets`)
+using persistent UUID handles stored in `project.json`. Components reference assets via
+`AssetRef(uuid, type, name)` primitives. The File Explorer (`file_explorer.py`) provides
+an interactive project directory tree with drag-and-drop capability.
+
+Dragging assets into the Code Editor inserts persistent UUID tokens (`asset("<uuid>")`),
+which are rendered as rich inline GUI pills (chip buttons). To preserve exact caret navigation
+and text buffer indices, the underlying token characters are visually masked with whitespace
+in the text line label while an inline pill button is rendered directly above. Right-clicking
+an inline pill provides context actions to locate the file in the explorer, rename the file,
+replace the asset reference, copy its UUID, or remove the reference.
+
+Because references are bound by persistent UUIDs, files can be renamed on disk and in the
+registry without modifying script source code or component values, updating all visual pills
+and inspector chips automatically.

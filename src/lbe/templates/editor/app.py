@@ -208,6 +208,11 @@ def initialize():
     state.app.components["left_column_w"] = layout_data.get("left_column_w", 370)
     state.header = state.ui.create(state.app, 'Header', 'panel', text='LBE  /  LittleBigEngine', color=BG, dock='top', h=44, padding=(8, 16, 8, 16))
 
+    state.active_left_tab = "hierarchy"
+    state.tab_hierarchy = state.ui.button(state.app, 'TabHierarchy', 'HIERARCHY', lambda: switch_left_tab('hierarchy'),
+                                          color=(38, 55, 75), normal_color=(38, 55, 75), hover_color=(45, 60, 80))
+    state.tab_files = state.ui.button(state.app, 'TabFiles', 'PROJECT FILES', lambda: switch_left_tab('files'),
+                                      color=PANEL, normal_color=PANEL, hover_color=(45, 60, 80))
     h_conf = layout_data.get("hierarchy", {})
     state.hierarchy = state.ui.create(state.app, 'HierarchyPanel', 'panel', text='HIERARCHY', scroll=0,
                                      expanded={state.app.id, state.game.id}, dock=h_conf.get("dock", 'left_top'),
@@ -216,6 +221,13 @@ def initialize():
         state.hierarchy.expanded = {UUID(x) for x in h_conf["expanded"]} | {state.app.id, state.game.id}
     if "panel_w" in h_conf and h_conf["panel_w"] is not None:
         state.hierarchy.components["panel_w"] = h_conf["panel_w"]
+
+    state.file_explorer = state.ui.create(state.app, 'FileExplorerPanel', 'panel', text='PROJECT FILES', scroll=0,
+                                          expanded=set(), dock='left_top', panel_h=h_conf.get("panel_h", 240),
+                                          margin=(8, 8, 4, 8), resizable=True, visible=False)
+    state.file_explorer_rows = []
+    state.file_scroll_track = state.ui.create(state.file_explorer, 'FileScrollTrack', 'scrollbar_track', color=(28, 36, 48))
+    state.file_scroll_thumb = state.ui.create(state.file_explorer, 'FileScrollThumb', 'scrollbar_thumb', color=(55, 75, 95), hover_color=(75, 115, 155), layer=3)
 
     i_conf = layout_data.get("inspector", {})
     state.inspector = state.ui.create(state.app, 'InspectorPanel', 'panel', text='INSPECTOR', scroll=0,
@@ -336,8 +348,12 @@ def initialize():
     state.prompt_rename_file = prompt_rename_file
     state.open_file_menu = open_file_menu
     state.open_specific_file = open_specific_file
+    state.switch_left_tab = switch_left_tab
+    state.locate_in_file_explorer = locate_in_file_explorer
     if (project / 'hierarchy.py').exists() and 'hierarchy' not in state.hierarchy.systems:
         state.hierarchy.systems.attach('hierarchy', assets.system(project / 'hierarchy.py'))
+    if (project / 'file_explorer.py').exists() and 'file_explorer' not in state.file_explorer.systems:
+        state.file_explorer.systems.attach('file_explorer', assets.system(project / 'file_explorer.py'))
     if (project / 'inspector.py').exists() and 'inspector' not in state.inspector.systems:
         state.inspector.systems.attach('inspector', assets.system(project / 'inspector.py'))
     if "render" in state.game.systems:
@@ -376,22 +392,41 @@ def layout():
     left_col_w = state.app.components.get("left_column_w", 370)
     top_y = state.header.y + state.header.h
 
-    # Hierarchy panel (left top, movable/resizable)
-    hm = parse_box(state.hierarchy.components.get("margin", (8, 8, 4, 8)))
-    if state.hierarchy.components.get("dock") == "float":
-        pass  # Preserves custom/user-dragged x, y, w, h
-    else:
-        hw = state.hierarchy.components.get("panel_w", left_col_w - hm[3] - hm[1])
-        hh = state.hierarchy.components.get("panel_h", 240)
-        put(state.hierarchy, x=hm[3], y=top_y + hm[0], w=hw, h=hh)
+    # Hierarchy and File Explorer panels with tab switcher in header
+    is_hier = (getattr(state, "active_left_tab", "hierarchy") == "hierarchy")
+    put(state.tab_hierarchy, visible=True, x=200, y=8, w=110, h=28,
+        color=(38, 55, 75) if is_hier else PANEL,
+        ink=INK if is_hier else MUTED)
+    put(state.tab_files, visible=True, x=318, y=8, w=130, h=28,
+        color=(38, 55, 75) if not is_hier else PANEL,
+        ink=INK if not is_hier else MUTED)
 
-    # Inspector panel (left bottom, fills remaining height below hierarchy or custom float)
+    hm = parse_box(state.hierarchy.components.get("margin", (8, 8, 4, 8)))
+    hw = state.hierarchy.components.get("panel_w", left_col_w - hm[3] - hm[1])
+    hh = state.hierarchy.components.get("panel_h", 240)
+    top_panel_y = top_y + hm[0]
+    top_panel_h = hh
+
+    if state.hierarchy.components.get("dock") == "float":
+        put(state.hierarchy, visible=is_hier)
+    else:
+        put(state.hierarchy, visible=is_hier, x=hm[3], y=top_panel_y, w=hw, h=top_panel_h)
+
+    if hasattr(state, "file_explorer"):
+        if state.file_explorer.components.get("dock") == "float":
+            put(state.file_explorer, visible=not is_hier)
+        else:
+            put(state.file_explorer, visible=not is_hier, x=hm[3], y=top_panel_y, w=hw, h=top_panel_h)
+
+    active_top_panel = state.hierarchy if is_hier else getattr(state, "file_explorer", state.hierarchy)
+
+    # Inspector panel (left bottom, fills remaining height below active panel or custom float)
     if state.inspector.components.get("dock") == "float":
         pass
     else:
         im = parse_box(state.inspector.components.get("margin", (4, 8, 6, 8)))
         iw = state.inspector.components.get("panel_w", left_col_w - im[3] - im[1])
-        iy = state.hierarchy.y + state.hierarchy.h + hm[2] + im[0] if state.hierarchy.components.get("dock") != "float" else top_y + im[0]
+        iy = active_top_panel.y + active_top_panel.h + hm[2] + im[0] if active_top_panel.components.get("dock") != "float" else top_y + im[0]
         ih = max(100, status_y - iy - im[2] - 5)
         put(state.inspector, x=im[3], y=iy, w=iw, h=ih)
 
@@ -399,8 +434,8 @@ def layout():
     put(state.col_splitter, x=left_col_w + 1, y=top_y, w=6, h=max(0, status_y - top_y))
 
     # Hierarchy splitter between hierarchy and inspector
-    if state.hierarchy.components.get("dock") != "float" and state.inspector.components.get("dock") != "float":
-        put(state.hierarchy_splitter, visible=True, x=hm[3], y=state.hierarchy.y + state.hierarchy.h + 1,
+    if active_top_panel.components.get("dock") != "float" and state.inspector.components.get("dock") != "float":
+        put(state.hierarchy_splitter, visible=True, x=hm[3], y=active_top_panel.y + active_top_panel.h + 1,
             w=max(0, left_col_w - hm[3] - hm[1]), h=6)
     else:
         put(state.hierarchy_splitter, visible=False)
@@ -488,6 +523,69 @@ def inspector_scroll_drag(thumb, event):
 def inspector_track_click(track, event):
     fn = getattr(state, "inspector_track_click", None)
     if fn and fn is not inspector_track_click:
+        return fn(track, event)
+    return True
+
+
+def switch_left_tab(tab_name):
+    state.active_left_tab = tab_name
+    layout()
+    if tab_name == "files":
+        fn = getattr(state, "file_explorer_sync", None)
+        if fn:
+            fn()
+    else:
+        hierarchy_sync()
+
+
+def locate_in_file_explorer(target):
+    reg = getattr(state.runtime.assets, "registry", None)
+    rel_path = None
+    if isinstance(target, UUID):
+        item = reg.get(target) if reg else None
+        if item:
+            rel_path = item["path"]
+    elif isinstance(target, str):
+        try:
+            u = UUID(target)
+            item = reg.get(u) if reg else None
+            if item:
+                rel_path = item["path"]
+        except ValueError:
+            p = Path(target)
+            if state.project and p.is_relative_to(state.project):
+                rel_path = str(p.relative_to(state.project)).replace("\\", "/")
+            else:
+                rel_path = target.replace("\\", "/")
+    elif isinstance(target, Path):
+        try:
+            rel_path = str(target.relative_to(state.project)).replace("\\", "/")
+        except ValueError:
+            rel_path = str(target).replace("\\", "/")
+
+    if rel_path:
+        parts = rel_path.split("/")
+        fe = getattr(state, "file_explorer", None)
+        if fe:
+            expanded = fe.components.setdefault("expanded", set())
+            cur = ""
+            for part in parts[:-1]:
+                cur = f"{cur}/{part}" if cur else part
+                expanded.add(cur)
+        switch_left_tab("files")
+        message(f"Located {parts[-1]} in Project Files")
+
+
+def file_scroll_drag(thumb, event):
+    fn = getattr(state, "file_scroll_drag", None)
+    if fn and fn is not file_scroll_drag:
+        return fn(thumb, event)
+    return True
+
+
+def file_track_click(track, event):
+    fn = getattr(state, "file_track_click", None)
+    if fn and fn is not file_track_click:
         return fn(track, event)
     return True
 
@@ -892,6 +990,15 @@ def rename_file(new_name, old_name=None):
         state.runtime.assets._systems.pop(str(old_path), None)
     definition = state.runtime.assets.system(new_path)
 
+    # Update persistent asset registry
+    reg = getattr(state.runtime.assets, "registry", None)
+    if reg:
+        old_id = reg.get_id(old_path)
+        if old_id:
+            reg.rename(old_id, new_path)
+        else:
+            reg.register(new_path)
+
     updated_count = 0
     for ent in state.runtime.entities:
         for name, instance in tuple(ent.systems.items()):
@@ -960,11 +1067,22 @@ def confirm_discard(action):
 
 def get_project_entities():
     splitters = (getattr(state, "col_splitter", None), getattr(state, "hierarchy_splitter", None), getattr(state, "code_splitter", None))
-    editor_roots = (state.background, state.camera, state.viewport,
-                    state.header, state.hierarchy, state.inspector,
-                    state.code_panel, state.status, state.zoom_label,
-                    *(s for s in splitters if s is not None),
-                    *state.extra_panels)
+    editor_roots = [
+        state.background, state.camera, state.viewport,
+        state.header, state.hierarchy, state.inspector,
+        state.code_panel, state.status, state.zoom_label,
+    ]
+    if hasattr(state, "tab_hierarchy"):
+        editor_roots.append(state.tab_hierarchy)
+    if hasattr(state, "tab_files"):
+        editor_roots.append(state.tab_files)
+    if hasattr(state, "file_explorer"):
+        editor_roots.append(state.file_explorer)
+    for s in splitters:
+        if s is not None:
+            editor_roots.append(s)
+    editor_roots.extend(getattr(state, "extra_panels", []))
+
     def is_editor_entity(e):
         return e is state.app or any(e is r or r in e.ancestors for r in editor_roots)
     return [e for e in state.runtime.entities if not is_editor_entity(e)]
@@ -1032,7 +1150,8 @@ def get_editor_layout():
 
 def save_editor_project():
     entities_to_save = get_project_entities()
-    save_project(state.project, entities=entities_to_save, layout=get_editor_layout())
+    reg = getattr(state.runtime.assets, "registry", None)
+    save_project(state.project, entities=entities_to_save, layout=get_editor_layout(), assets=reg)
 
 
 def save_project_action():
@@ -1213,6 +1332,242 @@ def toggle_game_running():
     message(status)
 
 
+def on_asset_drop(asset_drag, event):
+    if not asset_drag or len(event) < 3:
+        return
+    mx, my = event[1], event[2]
+
+    # 1. Dropped on Code Editor
+    if (contains(state.code, mx, my) or contains(state.code_panel, mx, my)) and getattr(state.code, "visible", True):
+        uid = asset_drag.get("id")
+        if uid:
+            token = f'asset("{uid}")'
+            state.code.buffer.insert(token)
+            message(f"Inserted reference to {asset_drag.get('name', 'asset')}")
+            return
+
+    # 2. Dropped on Viewport
+    if hasattr(state, "viewport") and contains(state.viewport, mx, my):
+        wx, wy = screen_to_world(state.camera, state.viewport, mx, my)
+        tgt = find_hit_game_entity(wx, wy)
+        if tgt is None:
+            hits = set(space.query(wx, wy))
+            tgt = next((child for child in reversed(state.game.descendants) if child in hits), None)
+        if tgt is None:
+            tgt = selected()
+        if tgt:
+            select(tgt)
+            apply_asset_to_entity(tgt, asset_drag)
+        return
+
+    # 3. Dropped on Hierarchy
+    if hasattr(state, "hierarchy") and getattr(state, "active_left_tab", "hierarchy") == "hierarchy" and contains(state.hierarchy, mx, my):
+        tgt = None
+        for row in getattr(state, "hierarchy_rows", []):
+            if state.ui.visible(row) and contains(row, mx, my):
+                tgt = row.relations.get("target")
+                break
+        if tgt is None:
+            tgt = selected()
+        if tgt:
+            select(tgt)
+            apply_asset_to_entity(tgt, asset_drag)
+        return
+
+    # 4. Dropped on Inspector
+    if hasattr(state, "inspector") and contains(state.inspector, mx, my):
+        tgt = selected()
+        if tgt:
+            apply_asset_to_entity(tgt, asset_drag)
+        return
+
+
+def apply_asset_to_entity(tgt, asset_drag):
+    from lbe.assets import AssetRef
+    atype = asset_drag.get("type")
+    uid = asset_drag.get("id")
+    name = asset_drag.get("name", "asset")
+    path_str = asset_drag.get("path")
+
+    if atype == "system" and path_str:
+        path = (state.project / path_str).resolve()
+        if path.exists():
+            definition = state.runtime.assets.system(path)
+            if path.stem in tgt.systems:
+                tgt.systems.reload(path.stem, definition)
+            else:
+                tgt.systems.attach(path.stem, definition)
+            save_editor_project()
+            inspector_sync()
+            message(f"Attached system '{path.stem}' to {tgt.components.get('name', tgt.id)}")
+            return
+
+    if atype == "image":
+        ref = AssetRef(id=uid, type="image", name=name)
+        tgt.components["sprite"] = ref
+        save_editor_project()
+        inspector_sync()
+        message(f"Set sprite on {tgt.components.get('name', tgt.id)} to {name}")
+        return
+
+    ref = AssetRef(id=uid, type=atype, name=name)
+    comp_name = path_str.split("/")[-1].split(".")[0] if path_str else "asset"
+    tgt.components[comp_name] = ref
+    save_editor_project()
+    inspector_sync()
+    message(f"Set '{comp_name}' on {tgt.components.get('name', tgt.id)} to {name}")
+
+
+def open_replace_asset_menu(pill_control):
+    reg = getattr(state.runtime.assets, "registry", None)
+    if not reg:
+        return
+    from lbe.assets import ASSET_ICONS
+    cur_id = pill_control.components.get("asset_id")
+    actions = []
+    for uid, entry in sorted(reg._entries.items(), key=lambda x: (x[1]["type"], x[1]["name"].lower())):
+        icon = ASSET_ICONS.get(entry["type"], "📦")
+        is_cur = (str(uid) == str(cur_id))
+        pref = "> " if is_cur else "   "
+        actions.append(dict(
+            label=f"{pref}{icon} {entry['name']}",
+            run=lambda _, u=uid, e=entry: replace_asset_reference(pill_control, u, e)
+        ))
+    if not actions:
+        actions.append(dict(label="(No assets in registry)", run=None))
+    mouse = getattr(state.ui, "mouse_pos", None)
+    x, y = mouse if mouse else (pill_control.x, pill_control.y + pill_control.h + 2)
+    open_menu(state.ui, state.code_panel, x, y, actions=actions)
+
+
+def replace_asset_reference(pill_control, new_uid, new_entry):
+    row = pill_control.components.get("asset_row")
+    span = pill_control.components.get("asset_span")
+    if row is None or span is None:
+        return
+    buf = state.code.buffer
+    lines = buf.text.split("\n")
+    if row >= len(lines):
+        return
+    line_text = lines[row]
+    col_start, col_end = span
+    new_token = f'asset("{new_uid}")'
+    new_line = line_text[:col_start] + new_token + line_text[col_end:]
+    lines[row] = new_line
+    buf.text = "\n".join(lines)
+    message(f"Replaced asset reference with '{new_entry['name']}'")
+
+
+def remove_asset_reference(pill_control):
+    row = pill_control.components.get("asset_row")
+    span = pill_control.components.get("asset_span")
+    if row is None or span is None:
+        return
+    buf = state.code.buffer
+    lines = buf.text.split("\n")
+    if row >= len(lines):
+        return
+    line_text = lines[row]
+    col_start, col_end = span
+    new_line = line_text[:col_start] + line_text[col_end:]
+    lines[row] = new_line
+    buf.text = "\n".join(lines)
+    message("Removed asset reference")
+
+
+def prompt_rename_asset(asset_id):
+    reg = getattr(state.runtime.assets, "registry", None)
+    if not reg:
+        return
+    entry = reg.get(asset_id)
+    if not entry:
+        return
+    path = state.project / entry["path"]
+    if path.suffix == ".py":
+        open_specific_file(path)
+        prompt_rename_file()
+    else:
+        message(f"To rename '{entry['name']}', right-click it in Project Files")
+        locate_in_file_explorer(asset_id)
+
+
+def assign_entity_sprite(ent, item):
+    from lbe.assets import AssetRef
+    reg = getattr(state.runtime.assets, "registry", None)
+    uid = item.get("asset_id")
+    if uid is None and reg:
+        uid = reg.register(item["path"])
+        item["asset_id"] = uid
+    ent.components["sprite"] = AssetRef(id=uid, type="image", name=item["name"])
+    save_editor_project()
+    inspector_sync()
+    message(f"Assigned sprite '{item['name']}' to {ent.components.get('name', ent.id)}")
+
+
+def attach_system_to_entity(ent, path):
+    path = Path(path).resolve()
+    definition = state.runtime.assets.system(path)
+    if path.stem in ent.systems:
+        ent.systems.reload(path.stem, definition)
+    else:
+        ent.systems.attach(path.stem, definition)
+    save_editor_project()
+    inspector_sync()
+    message(f"Attached {path.stem} to {ent.components.get('name', ent.id)}")
+
+
+def refresh_project_files():
+    reg = getattr(state.runtime.assets, "registry", None)
+    if reg:
+        reg.scan(state.project)
+    if hasattr(state, "file_explorer_sync"):
+        state.file_explorer_sync()
+    message("Refreshed project files")
+
+
+def new_source_in_dir(folder_path):
+    f_path = Path(folder_path).resolve()
+    rel_folder = f_path.relative_to(state.project) if f_path.is_relative_to(state.project) else f_path.name
+    i = 1
+    while (f_path / f"system_{i}.py").exists():
+        i += 1
+    new_name = str(rel_folder / f"system_{i}.py").replace("\\", "/")
+    state.path_field.buffer = TextBuffer(new_name)
+    state.code.buffer = TextBuffer("def update(dt):\n    pass\n")
+    state._saved_source = (new_name, state.code.buffer.text)
+    state.code.source_path = str(state.project / new_name)
+    state.code.components["system_name"] = f"system_{i}"
+    save()
+    refresh_project_files()
+    message(f"Created {new_name}")
+
+
+def prompt_rename_file_item(item):
+    if item["type"] == "system":
+        open_specific_file(item["path"])
+        prompt_rename_file()
+    else:
+        message(f"Renaming '{item['name']}'")
+
+
+def delete_file_item(item):
+    p = Path(item["path"]).resolve()
+    try:
+        if item["is_dir"]:
+            import shutil
+            shutil.rmtree(p)
+        else:
+            p.unlink()
+            reg = getattr(state.runtime.assets, "registry", None)
+            if reg and item.get("asset_id"):
+                reg.unregister(item["asset_id"])
+        save_editor_project()
+        refresh_project_files()
+        message(f"Deleted {item['name']}")
+    except Exception as e:
+        message(f"Delete failed: {e}")
+
+
 def keyboard(event):
     if event[1] == "ESCAPE":
         if not state.path_field.components.get("readonly", True):
@@ -1229,6 +1584,10 @@ def keyboard(event):
         return True
     if event[1] == "F5":
         toggle_game_running()
+        return True
+    if event[1] == "F2":
+        cur = getattr(state, "active_left_tab", "hierarchy")
+        switch_left_tab("files" if cur == "hierarchy" else "hierarchy")
         return True
     return False
 
@@ -1287,6 +1646,13 @@ def bind_actions():
         button.components.pop("system_key", None)
     for button in state.system_detach_buttons:
         button.components.pop("system_key", None)
+    state.app.components["on_asset_drop"] = on_asset_drop
+    if hasattr(state, "tab_hierarchy") and hasattr(state, "tab_files"):
+        state.tab_hierarchy.action = lambda: switch_left_tab("hierarchy")
+        state.tab_files.action = lambda: switch_left_tab("files")
+    if hasattr(state, "file_scroll_track") and hasattr(state, "file_scroll_thumb"):
+        state.file_scroll_track.on_click = file_track_click
+        state.file_scroll_thumb.on_drag = file_scroll_drag
 
 
 def start():
@@ -1422,6 +1788,14 @@ def context_target(control, event):
         owner = next((e for e in state.runtime.entities if e.id == owner_id), None)
         if owner:
             return dict(entity=owner, system=sys_name)
+    if "asset_pill" in control.tags:
+        return dict(asset_pill=control, asset_id=control.components.get("asset_id"),
+                    asset_name=control.components.get("asset_name"), control=control)
+    for candidate in (control,) + control.ancestors:
+        if "file_item" in candidate.components:
+            return dict(file_item=candidate.components["file_item"], control=candidate)
+    if hasattr(state, "file_explorer") and (control is state.file_explorer or state.file_explorer in control.ancestors):
+        return dict(file_explorer=True, control=state.file_explorer)
     if control is state.tags_field or control is state.tags_label:
         return dict(entity=selected(), tags=True)
     if 'component_key' in control.components and 'target' in control.relations:
@@ -1511,6 +1885,53 @@ def context_actions(target):
             if ent not in protected:
                 actions.append(dict(label=f"Delete '{ent_name}'", run=lambda _: (select(ent), inspector_delete_entity())))
         return actions
+
+    if isinstance(target, dict) and target.get('asset_pill'):
+        pill = target['control']
+        uid = target.get('asset_id')
+        name = target.get('asset_name', 'asset')
+        return [
+            dict(label=f"Locate '{name}' in Project Files", run=lambda _: locate_in_file_explorer(uid)),
+            dict(label=f"Rename '{name}'...", run=lambda _: prompt_rename_asset(uid)),
+            dict(label="Replace asset reference...", run=lambda _: open_replace_asset_menu(pill)),
+            dict(label="Copy Asset UUID", run=lambda _: (state.window.set_clipboard_text(str(uid)), message(f"Copied UUID: {uid}"))),
+            None,
+            dict(label="Remove reference", run=lambda _: remove_asset_reference(pill)),
+        ]
+
+    if isinstance(target, dict) and target.get('file_item'):
+        item = target['file_item']
+        actions = []
+        if item['is_dir']:
+            actions.append(dict(label=f"+ New script in '{item['name']}'...", run=lambda _: new_source_in_dir(item['path'])))
+            actions.append(dict(label=f"Rename folder '{item['name']}'...", run=lambda _: prompt_rename_file_item(item)))
+            actions.append(None)
+            actions.append(dict(label=f"Delete folder '{item['name']}'", run=lambda _: delete_file_item(item)))
+        else:
+            if item['type'] == 'system':
+                actions.append(dict(label=f"Open '{item['name']}' in editor", run=lambda _: open_specific_file(item['path'])))
+                sel = selected()
+                if sel:
+                    sel_name = str(sel.components.get('name', sel.id))
+                    actions.append(dict(label=f"Attach to '{sel_name}'", run=lambda _: attach_system_to_entity(sel, item['path'])))
+            elif item['type'] == 'image':
+                sel = selected()
+                if sel:
+                    sel_name = str(sel.components.get('name', sel.id))
+                    actions.append(dict(label=f"Assign sprite to '{sel_name}'", run=lambda _: assign_entity_sprite(sel, item)))
+            actions.append(dict(label=f"Rename '{item['name']}'...", run=lambda _: prompt_rename_file_item(item)))
+            actions.append(dict(label="Copy relative path", run=lambda _: (state.window.set_clipboard_text(item['rel_path']), message(f"Copied path '{item['rel_path']}'"))))
+            if item.get('asset_id'):
+                actions.append(dict(label="Copy Asset UUID", run=lambda _: (state.window.set_clipboard_text(str(item['asset_id'])), message(f"Copied UUID: {item['asset_id']}"))))
+            actions.append(None)
+            actions.append(dict(label=f"Delete '{item['name']}'", run=lambda _: delete_file_item(item)))
+        return actions
+
+    if isinstance(target, dict) and target.get('file_explorer'):
+        return [
+            dict(label="+ New system script...", run=lambda _: new_source()),
+            dict(label="Refresh project files", run=lambda _: refresh_project_files()),
+        ]
 
     if isinstance(target, dict) and target.get('code'):
         cur_file = state.path_field.buffer.text.strip() or "system.py"

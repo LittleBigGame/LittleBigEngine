@@ -4,7 +4,7 @@ import ast
 from pathlib import Path
 from uuid import UUID
 
-from lbe.ui import put, contains, parse_box, PANEL, INK, MUTED
+from lbe.ui import put, contains, parse_box, PANEL, FIELD, INK, MUTED
 from lbe.text import TextBuffer
 from lbe.menus import open_menu
 from lbe.project import template_path
@@ -168,12 +168,22 @@ def inspector_sync():
             if not shown:
                 continue
             key, value = items[source]
-            editable = type(value) in (int, float, bool, str, tuple, list, dict, type(None))
+            from lbe.assets import AssetRef, ASSET_ICONS
+            is_asset = isinstance(value, AssetRef)
+            editable = type(value) in (int, float, bool, str, tuple, list, dict, type(None)) and not is_asset
             y = comp_start_y + index * 25
             lbl_w = min(110, max(50, (ip.w - 24 - 8) // 3))
             field_w = max(40, ip.w - 12 - lbl_w - 6 - sb_w - 12)
             put(label, x=ip.x + 12, y=y + 1, w=lbl_w, h=23)
-            put(field, x=ip.x + 12 + lbl_w + 6, y=y, w=field_w, h=23, readonly=not editable)
+            if is_asset:
+                icon = ASSET_ICONS.get(value.type, "📦")
+                display_val = f" {icon} {value.name or value.id} "
+                put(field, x=ip.x + 12 + lbl_w + 6, y=y, w=field_w, h=23, readonly=True,
+                    color=(35, 55, 75), normal_color=(35, 55, 75), hover_color=(50, 80, 110),
+                    ink=(220, 240, 255))
+            else:
+                put(field, x=ip.x + 12 + lbl_w + 6, y=y, w=field_w, h=23, readonly=not editable,
+                    color=FIELD, normal_color=FIELD, ink=INK)
             if field.components.get('component_key') != key or field.relations.get('target') is not entity:
                 if state.ui.focused is field:
                     del state.app.relations['focus']
@@ -186,7 +196,7 @@ def inspector_sync():
             label.on_commit = lambda lbl=label: commit_component_key(lbl)
             label.on_click = component_click
             state.ui.set_text(label, key)
-            state.ui.set_text(field, safe_repr(value))
+            state.ui.set_text(field, display_val if is_asset else safe_repr(value))
 
         if has_comp_scroll:
             track_x = ip.x + ip.w - 10
@@ -775,6 +785,16 @@ def change_component_type(ent, comp, target_type):
                 new_val = [0.0, 0.0]
         elif target_type == "dict":
             new_val = dict(val) if isinstance(val, dict) else {}
+        elif target_type == "AssetRef":
+            from lbe.assets import AssetRef
+            reg = getattr(state.runtime.assets, "registry", None)
+            ref = None
+            if reg:
+                ref = reg.get_ref(val)
+                if ref is None and reg._entries:
+                    first_id, first_entry = next(iter(reg._entries.items()))
+                    ref = AssetRef(id=first_id, type=first_entry["type"], name=first_entry["name"])
+            new_val = ref or val
         elif target_type == "NoneType":
             new_val = None
         else:
@@ -807,6 +827,7 @@ def open_change_type_menu(ent, comp):
         ("int", "int (e.g. 0)"),
         ("str", "str (text)"),
         ("bool", "bool (True/False)"),
+        ("AssetRef", "Asset (project file reference)"),
         ("tuple", "tuple (e.g. (1, 2))"),
         ("list", "list (e.g. [1, 2])"),
         ("dict", "dict (e.g. {})"),
@@ -1028,10 +1049,56 @@ def inspector_track_click(track, event):
 
 
 def component_click(control, event):
-    if event[3] == 4:
-        open_panel(target=control.relations["target"], component=control.component_key)
-        return True
+    if len(event) > 3 and event[3] in (2, 4):
+        return False
+    target = control.relations.get("target")
+    key = getattr(control, "component_key", None)
+    if target and key:
+        from lbe.assets import AssetRef
+        val = target.components.get(key)
+        if isinstance(val, AssetRef):
+            open_asset_picker_menu(target, key)
+            return True
     return False
+
+
+def open_asset_picker_menu(ent, comp):
+    current_val = ent.components.get(comp)
+    reg = getattr(state.runtime.assets, "registry", None)
+    from lbe.assets import ASSET_ICONS, AssetRef
+    actions = []
+    if reg:
+        for uid, entry in sorted(reg._entries.items(), key=lambda x: (x[1]["type"], x[1]["name"].lower())):
+            icon = ASSET_ICONS.get(entry["type"], "📦")
+            is_active = (isinstance(current_val, AssetRef) and current_val.id == uid)
+            pref = "> " if is_active else "   "
+            actions.append(dict(
+                label=f"{pref}{icon} {entry['name']}",
+                run=lambda _, u=uid, e=entry: assign_asset_ref(ent, comp, u, e)
+            ))
+    if actions:
+        actions.append(None)
+    if hasattr(current_val, "id") and hasattr(state, "locate_in_file_explorer"):
+        actions.append(dict(label="Locate in File Explorer", run=lambda _: state.locate_in_file_explorer(current_val.id)))
+    actions.append(dict(label="Clear reference", run=lambda _: clear_asset_ref(ent, comp)))
+    mouse = getattr(state.ui, "mouse_pos", None)
+    x, y = mouse if mouse else (state.inspector.x + 20, state.inspector.y + 40)
+    open_menu(state.ui, ent, x, y, actions=actions)
+
+
+def assign_asset_ref(ent, comp, uid, entry):
+    from lbe.assets import AssetRef
+    ent.components[comp] = AssetRef(id=uid, type=entry["type"], name=entry["name"])
+    save_editor_project()
+    inspector_sync()
+    message(f"Set '{comp}' to {entry['name']}")
+
+
+def clear_asset_ref(ent, comp):
+    ent.components[comp] = None
+    save_editor_project()
+    inspector_sync()
+    message(f"Cleared '{comp}'")
 
 def start():
     state.inspector_sync = inspector_sync

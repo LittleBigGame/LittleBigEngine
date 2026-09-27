@@ -1,10 +1,13 @@
 """General entity UI primitives shared by applications and tools."""
 
 from pathlib import Path
+import re
 from time import monotonic
 
 from .syntax import slice_spans
 from .text import TextBuffer
+
+ASSET_PATTERN = re.compile(r'asset\(\s*["\']([0-9a-fA-F-]{36})["\']\s*\)|assets\[\s*["\']([0-9a-fA-F-]{36})["\']\s*\]')
 
 PITCH = 8
 LINE = 20
@@ -423,6 +426,11 @@ class UI:
             return
         if kind == "release":
             self.root.relations.pop("text_drag", None)
+            asset_drag = self.root.components.pop("asset_drag", None)
+            if asset_drag is not None:
+                cb = self.root.components.get("on_asset_drop")
+                if cb:
+                    cb(asset_drag, event)
             active_drag = self.root.relations.pop("active_drag", None)
             if active_drag is not None:
                 if "splitter" in active_drag.tags or "scrollbar_thumb" in active_drag.tags or "button" in active_drag.tags or "chip" in active_drag.tags:
@@ -678,9 +686,51 @@ class UI:
             y = control.y+6+index*line_height
             is_error = (row == err_row)
             put(number, visible=True, x=control.x+6, y=y, w=40, h=line_height, text=str(row+1), ink=(ERROR if is_error else MUTED))
+            raw_line = lines[row]
+            matches = list(ASSET_PATTERN.finditer(raw_line))
+            display_line = raw_line
+            if matches:
+                line_chars = list(display_line)
+                for m in matches:
+                    cs, ce = m.span()
+                    line_chars[cs:ce] = [" "] * (ce - cs)
+                display_line = "".join(line_chars)
+
             spans = slice_spans(line_spans[row], buffer.horizontal, columns) if (line_spans and row < len(line_spans)) else None
             put(line, visible=True, x=control.x+48, y=y, w=control.w-64, h=line_height,
-                text=lines[row][buffer.horizontal:buffer.horizontal+columns], spans=spans)
+                text=display_line[buffer.horizontal:buffer.horizontal+columns], spans=spans)
+
+            for m_i, m in enumerate(matches):
+                uid_str = m.group(1) or m.group(2)
+                reg = getattr(self.runtime.assets, "registry", None) if hasattr(self.runtime, "assets") else None
+                entry = reg.get(uid_str) if reg else None
+                from .assets import ASSET_ICONS
+                icon = ASSET_ICONS.get(entry["type"], "📦") if entry else "📦"
+                display_name = entry["name"] if entry else (uid_str[:8] + "...")
+                pill_label = f" {icon} {display_name} "
+
+                col_start, col_end = m.span()
+                c_vis_start = max(0, col_start - buffer.horizontal)
+                c_vis_end = min(columns, col_end - buffer.horizontal)
+
+                pill_part_name = f"pill:{row}:{m_i}"
+                used.add(pill_part_name)
+                pill = part(pill_part_name, "button", layer=control.layer+2)
+                pill.tags.add("asset_pill")
+                if c_vis_end > c_vis_start and (col_start >= buffer.horizontal or col_end > buffer.horizontal):
+                    pill_x = line.x + c_vis_start * pitch
+                    pill_w = max(40, len(pill_label) * pitch)
+                    pill.components["asset_id"] = uid_str
+                    pill.components["asset_token"] = m.group(0)
+                    pill.components["asset_name"] = display_name
+                    pill.components["asset_row"] = row
+                    pill.components["asset_span"] = (col_start, col_end)
+                    pill.components["text_control"] = control
+                    put(pill, visible=True, x=pill_x, y=y + 1, w=pill_w, h=line_height - 2,
+                        text=pill_label, color=(35, 55, 75), normal_color=(35, 55, 75), hover_color=(50, 80, 110),
+                        ink=(230, 245, 255))
+                else:
+                    put(pill, visible=False)
             if is_error:
                 col_start = max(0, diag.get("column", 1) - 1)
                 col_end = max(col_start + 1, diag.get("end_column", col_start + 1) - 1)
@@ -837,4 +887,15 @@ class UI:
                 graphics.rect(rx, ry + rh - outline_w, rw, outline_w, color, key=("ctrl_hl", item_key, "bottom"), layer=layer)
                 graphics.rect(rx, ry, outline_w, rh, color, key=("ctrl_hl", item_key, "left"), layer=layer)
                 graphics.rect(rx + rw - outline_w, ry, outline_w, rh, color, key=("ctrl_hl", item_key, "right"), layer=layer)
+
+        asset_drag = self.root.components.get("asset_drag")
+        if asset_drag and hasattr(self, "mouse_pos"):
+            mx, my = self.mouse_pos
+            icon = asset_drag.get("icon", "📦")
+            name = asset_drag.get("name", "Asset")
+            label_text = f" {icon} {name} "
+            chip_w = max(50, len(label_text) * 8 + 12)
+            chip_h = 22
+            graphics.rect(mx + 12, my + 12, chip_w, chip_h, (35, 55, 75, 230), key="asset_drag_bg", layer=15)
+            graphics.text(label_text, mx + 16, my + 15, color=(240, 245, 255, 255), key="asset_drag_txt", layer=16)
 
