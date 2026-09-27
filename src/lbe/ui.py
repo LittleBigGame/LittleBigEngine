@@ -15,6 +15,13 @@ ACCENT = (69, 182, 199)
 INK = (220, 230, 239, 255)
 MUTED = (145, 163, 183, 255)
 ERROR = (248, 81, 73, 255)
+STACK_COLORS = [
+    (56, 189, 248, 255),   # 0: Cyan (Leaf / innermost target)
+    (52, 211, 153, 255),   # 1: Emerald Green (Direct parent)
+    (251, 191, 36, 255),   # 2: Amber (Grandparent)
+    (232, 121, 249, 255),  # 3: Fuchsia / Purple
+    (251, 113, 133, 255),  # 4: Coral / Rose
+]
 
 
 def put(entity, **values):
@@ -376,9 +383,29 @@ class UI:
 
     def dispatch(self, event):
         from .menus import dispatch_menu
+        kind = event[0]
+        if kind == "motion":
+            if len(event) > 3 and isinstance(event[3], int):
+                self.ctrl_held = bool(event[3] & 2)
+        elif kind in ("click", "release"):
+            if len(event) > 4 and isinstance(event[4], int):
+                self.ctrl_held = bool(event[4] & 2)
+        elif kind == "drag":
+            if len(event) > 4 and isinstance(event[4], int):
+                self.ctrl_held = bool(event[4] & 2)
+        elif kind == "key":
+            if len(event) > 1 and event[1] in ("LCTRL", "RCTRL", "CTRL"):
+                self.ctrl_held = True
+            elif len(event) > 2 and isinstance(event[2], bool):
+                self.ctrl_held = event[2]
+        elif kind == "key_up":
+            if len(event) > 1 and event[1] in ("LCTRL", "RCTRL", "CTRL"):
+                self.ctrl_held = False
+            elif len(event) > 2 and isinstance(event[2], bool):
+                self.ctrl_held = event[2]
+
         if dispatch_menu(self, event):
             return
-        kind = event[0]
         if kind == "motion":
             mx, my = event[1], event[2]
             self.mouse_pos = (mx, my)
@@ -386,7 +413,10 @@ class UI:
                 if ("splitter" in control.tags or "scrollbar_thumb" in control.tags or "button" in control.tags or "chip" in control.tags or "hoverable" in control.tags) and self.visible(control):
                     active = self.root.relations.get("active_drag")
                     hovered = (active is control) or (active is None and contains(control, mx, my))
-                    normal = control.components.get("normal_color", control.components.get("color", FIELD))
+                    normal = control.components.get("normal_color")
+                    if normal is None:
+                        normal = control.components.get("color", FIELD)
+                        control.components["normal_color"] = normal
                     target_color = control.components.get("hover_color", ACCENT) if hovered else normal
                     if control.color != target_color:
                         control.color = target_color
@@ -756,7 +786,8 @@ class UI:
                                    ACCENT, key=(control.id, "caret"), layer=layer+2)
                 text = buffer.text.replace("\n", " ")[buffer.horizontal:buffer.horizontal+width]
                 text = text or control.components.get("hint", "")[:width]
-                graphics.text(text, control.x+6, control.y+5, color=INK, key=(control.id, "text"), layer=layer+2)
+                ink = INK if self.focused is control else control.components.get("ink", INK)
+                graphics.text(text, control.x+6, control.y+5, color=ink, key=(control.id, "text"), layer=layer+2)
             elif "text" in control.components:
                 pitch = control.components.get("pitch", self.pitch)
                 inset = 8 if "panel" in control.tags or "button" in control.tags else 0
@@ -776,3 +807,34 @@ class UI:
                 else:
                     graphics.text(str(control.text)[:width], control.x+inset, control.y+(8 if "panel" in control.tags else 4),
                                   color=control.components.get("ink", INK), key=(control.id, "text"), layer=layer+1)
+
+        is_ctrl = bool(getattr(self.input, "ctrl", False) or getattr(self, "ctrl_held", False))
+        if is_ctrl:
+            mx, my = getattr(self, "mouse_pos", (getattr(self.input, "x", 0), getattr(self.input, "y", 0)))
+            provider = self.root.components.get("highlight_provider")
+            if provider:
+                stack = provider(mx, my)
+            else:
+                hits = [c for c in self.controls() if self.visible(c) and contains(c, mx, my)]
+                stack = []
+                if hits:
+                    hits.reverse()
+                    hits.sort(key=lambda c: (c.components.get("layer", 2), c.depth), reverse=True)
+                    leaf = hits[0]
+                    curr = leaf
+                    idx = 0
+                    while curr is not None and hasattr(curr, "w"):
+                        if curr.w > 0 and curr.h > 0:
+                            stack.append((curr, (curr.x, curr.y, curr.w, curr.h), STACK_COLORS[idx % len(STACK_COLORS)]))
+                            idx += 1
+                        curr = curr.parent
+
+            outline_w = 2
+            for i, (item, (rx, ry, rw, rh), color) in enumerate(reversed(stack)):
+                layer = 6 + i
+                item_key = getattr(item, "id", i)
+                graphics.rect(rx, ry, rw, outline_w, color, key=("ctrl_hl", item_key, "top"), layer=layer)
+                graphics.rect(rx, ry + rh - outline_w, rw, outline_w, color, key=("ctrl_hl", item_key, "bottom"), layer=layer)
+                graphics.rect(rx, ry, outline_w, rh, color, key=("ctrl_hl", item_key, "left"), layer=layer)
+                graphics.rect(rx + rw - outline_w, ry, outline_w, rh, color, key=("ctrl_hl", item_key, "right"), layer=layer)
+

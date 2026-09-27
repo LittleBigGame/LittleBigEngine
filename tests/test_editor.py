@@ -84,10 +84,14 @@ class EditorTests(unittest.TestCase):
         moving, still = self.editor.game.children
         original = moving.x, moving.y
         stationary = still.x, still.y
-        for name, value in (("vx", "2.0"), ("vy", "-1.0")):
-            self.type(self.editor.add_name, name)
-            self.type(self.editor.add_value, value)
-            self.click(self.editor.add_button)
+        self.click(self.editor.add_comp_menu_button)
+        menu = self.editor.app.relations.get("context_menu")
+        vel_item = next(c for c in menu.children if "+ Velocity" in c.components.get("text", ""))
+        self.click(vel_item)
+        vx_field = next(fld for _, fld in self.editor.component_rows if fld.visible and fld.component_key == "vx")
+        vy_field = next(fld for _, fld in self.editor.component_rows if fld.visible and fld.component_key == "vy")
+        self.type(vx_field, "2.0", commit=True)
+        self.type(vy_field, "-1.0", commit=True)
         self.assertEqual((moving.vx, moving.vy), (2, -1))
         self.click(self.editor.new_button)
         self.type(self.editor.path_field, "physics.py")
@@ -507,10 +511,14 @@ class EditorTests(unittest.TestCase):
 
         # 1. Edit components on moving entity
         self.select(moving)
-        for name, value in (("vx", "2.0"), ("vy", "-1.0")):
-            self.type(ed.add_name, name)
-            self.type(ed.add_value, value)
-            self.click(ed.add_button)
+        self.click(ed.add_comp_menu_button)
+        menu = ed.app.relations.get("context_menu")
+        vel_item = next(c for c in menu.children if "+ Velocity" in c.components.get("text", ""))
+        self.click(vel_item)
+        vx_field = next(fld for _, fld in ed.component_rows if fld.visible and fld.component_key == "vx")
+        vy_field = next(fld for _, fld in ed.component_rows if fld.visible and fld.component_key == "vy")
+        self.type(vx_field, "2.0", commit=True)
+        self.type(vy_field, "-1.0", commit=True)
         self.assertEqual((moving.vx, moving.vy), (2, -1))
 
         # 2. Add relation with reference to another entity
@@ -937,15 +945,16 @@ class EditorTests(unittest.TestCase):
         # Verify metadata correctly reflects total children without layout overflow
         self.assertIn(f"{children_count} children", ed.metadata.components.get("text", ""))
 
-        # Verify component rows do NOT overlap the bottom section
+        # Verify component rows do NOT overlap the systems section
         visible_comp_rows = [(lbl, fld) for lbl, fld in ed.component_rows if fld.visible]
         if visible_comp_rows:
             max_comp_y = max(fld.y + fld.h for _, fld in visible_comp_rows)
-            # Add component row must start strictly below the last visible component row
-            self.assertLessEqual(max_comp_y, ed.add_name.y)
+            self.assertLessEqual(max_comp_y, ed.system_label.y)
 
-        # Verify bottom section controls do not overlap each other in redesigned section order
-        self.assertLessEqual(ed.add_name.y + ed.add_name.h, ed.system_label.y)
+        # Verify section order and dividers
+        self.assertTrue(ed.divider_identity.visible)
+        self.assertTrue(ed.divider_components.visible)
+        self.assertLessEqual(ed.components_title.y, ed.system_label.y)
         visible_sys = [b for b in ed.system_rows if b.visible]
         if visible_sys:
             for btn in visible_sys:
@@ -1018,32 +1027,44 @@ class EditorTests(unittest.TestCase):
         self.assertEqual(entity_a.components.get("name"), "HeroShip")
         self.assertIn("HeroShip", ed.name_field.buffer.text)
 
-        # 2. Quick entity action: + Child
-        self.click(ed.add_child_button)
+        # 2. Right-click context action: Add child entity
+        self.send(("click", ed.name_field.x + 10, ed.name_field.y + 5, 4, 0))
+        menu = ed.app.relations.get("context_menu")
+        self.assertIsNotNone(menu)
+        add_child_item = next(c for c in menu.children if c.components.get("text") == "Add child entity")
+        self.click(add_child_item)
         new_child = ed.app.relations["selection"]
         self.assertIs(new_child.parent, entity_a)
-        self.assertIn("Child_", new_child.components.get("name", ""))
+        self.assertIn("Entity", new_child.components.get("name", ""))
 
-        # 3. Quick entity action: Duplicate
+        # 3. Right-click context action: Duplicate entity
         new_child.components["tag_sample"] = "original"
-        self.click(ed.duplicate_button)
+        self.send(("click", ed.name_field.x + 10, ed.name_field.y + 5, 4, 0))
+        menu = ed.app.relations.get("context_menu")
+        dup_item = next(c for c in menu.children if c.components.get("text") == "Duplicate entity")
+        self.click(dup_item)
         dup = ed.app.relations["selection"]
         self.assertIsNot(dup, new_child)
         self.assertIs(dup.parent, entity_a)
         self.assertEqual(dup.components.get("tag_sample"), "original")
         self.assertTrue(dup.components.get("name", "").endswith("_copy"))
 
-        # 4. Quick entity action: Delete
+        # 4. Right-click context action: Delete entity
         dup_name = dup.components.get("name")
-        self.click(ed.delete_button)
+        self.send(("click", ed.name_field.x + 10, ed.name_field.y + 5, 4, 0))
+        menu = ed.app.relations.get("context_menu")
+        del_item = next(c for c in menu.children if c.components.get("text") == "Delete entity")
+        self.click(del_item)
         self.assertFalse(dup.alive)
         self.assertIs(ed.app.relations["selection"], entity_a)
 
-        # 5. Prevent deleting root Game or Application
+        # 5. Prevent deleting root Game or Application (Delete entity not offered)
         self.select(ed.game)
-        self.click(ed.delete_button)
+        self.send(("click", ed.name_field.x + 10, ed.name_field.y + 5, 4, 0))
+        menu = ed.app.relations.get("context_menu")
+        del_item = next((c for c in menu.children if c.components.get("text") == "Delete entity"), None)
+        self.assertIsNone(del_item)
         self.assertTrue(ed.game.alive)
-        self.assertIn("Cannot delete engine or editor root", ed.app.status)
 
     def test_inspector_quick_presets_component_deletion_and_relations(self):
         ed = self.editor
@@ -1053,20 +1074,28 @@ class EditorTests(unittest.TestCase):
         self.select(bare)
         self.runtime.step(0)
 
-        # 1. Quick presets: + Pos, + Size, + Vel, + Color
-        self.click(ed.quick_pos_btn)
+        # 1. Quick presets via '+ Add' dropdown menu: + Pos, + Size, + Vel, + Color
+        self.click(ed.add_comp_menu_button)
+        menu = ed.app.relations.get("context_menu")
+        self.click(next(c for c in menu.children if "+ Transform" in c.components.get("text", "")))
         self.assertIn("x", bare.components)
         self.assertIn("y", bare.components)
 
-        self.click(ed.quick_size_btn)
+        self.click(ed.add_comp_menu_button)
+        menu = ed.app.relations.get("context_menu")
+        self.click(next(c for c in menu.children if "+ Size" in c.components.get("text", "")))
         self.assertIn("w", bare.components)
         self.assertIn("h", bare.components)
 
-        self.click(ed.quick_vel_btn)
+        self.click(ed.add_comp_menu_button)
+        menu = ed.app.relations.get("context_menu")
+        self.click(next(c for c in menu.children if "+ Velocity" in c.components.get("text", "")))
         self.assertIn("vx", bare.components)
         self.assertIn("vy", bare.components)
 
-        self.click(ed.quick_color_btn)
+        self.click(ed.add_comp_menu_button)
+        menu = ed.app.relations.get("context_menu")
+        self.click(next(c for c in menu.children if "+ Color" in c.components.get("text", "")))
         self.assertIn("color", bare.components)
 
         # 2. Component deletion via right-click context menu
@@ -1202,21 +1231,21 @@ class EditorTests(unittest.TestCase):
         self.runtime.step(0)
 
         ip = ed.inspector
-        # Check Row 3 entity action buttons have sufficient width (>= 60px) and no overlap
-        b_child, b_dup, b_del = ed.add_child_button, ed.duplicate_button, ed.delete_button
-        self.assertGreaterEqual(b_child.w, 60)
-        self.assertGreaterEqual(b_dup.w, 60)
-        self.assertGreaterEqual(b_del.w, 60)
+        # Check streamlined header layout: name_field, identity_label, and divider_identity visible
+        self.assertTrue(ed.name_field.visible)
+        self.assertTrue(ed.identity_label.visible)
+        self.assertTrue(ed.divider_identity.visible)
 
-        self.assertLessEqual(b_child.x + b_child.w, b_dup.x)
-        self.assertLessEqual(b_dup.x + b_dup.w, b_del.x)
-        self.assertLessEqual(b_del.x + b_del.w, ip.x + ip.w)
+        # Removed action buttons are not visible in header
+        self.assertFalse(ed.add_child_button.visible)
+        self.assertFalse(ed.duplicate_button.visible)
+        self.assertFalse(ed.delete_button.visible)
 
-        # Check section header COMPONENTS
+        # Check section header COMPONENTS and divider
         self.assertTrue(ed.components_title.visible)
         self.assertIn("COMPONENTS", ed.components_title.components.get("text"))
         self.assertTrue(ed.add_comp_menu_button.visible)
-        self.assertLess(ed.components_title.y, ed.add_name.y)
+        self.assertLess(ed.divider_identity.y, ed.components_title.y)
 
 
 
@@ -1871,23 +1900,26 @@ class EditorTests(unittest.TestCase):
         self.assertEqual(coords_fld.buffer.text, "(0.0, -103.77)")
 
     def test_quick_component_bar_and_renaming(self):
-        """Issue #57: Quick-bar single line horizontal picker and right-click component renaming."""
+        """Issue #59: Dropdown presets, inline renaming, and smart focus."""
         ed = self.editor
         ent = self.runtime.create(parent=ed.game, name="Hero")
         self.select(ent)
         self.runtime.step(0)
 
-        # Quick preset chips are all on the same compact horizontal row (height 22)
-        self.assertEqual(ed.quick_pos_btn.y, ed.quick_size_btn.y)
-        self.assertEqual(ed.quick_pos_btn.y, ed.quick_vel_btn.y)
-        self.assertEqual(ed.quick_pos_btn.h, 22)
-
-        # Add pos component via quick chip
-        self.click(ed.quick_pos_btn)
+        # 1. Preset via + Add button focuses value with highlight
+        self.click(ed.add_comp_menu_button)
+        menu = ed.app.relations.get("context_menu")
+        self.assertIsNotNone(menu)
+        pos_item = next(c for c in menu.children if "+ Transform" in c.components.get("text", ""))
+        self.click(pos_item)
         self.assertIn("x", ent.components)
         self.assertIn("y", ent.components)
+        # Value field is focused with text highlighted
+        x_fld = next(fld for _, fld in ed.component_rows if fld.visible and fld.component_key == "x")
+        self.assertIs(ed.ui.focused, x_fld)
+        self.assertEqual(x_fld.buffer.selection, (0, len(x_fld.buffer.text)))
 
-        # Right-click 'y' component field to rename
+        # 2. Right-click 'y' component to rename inline
         lbl, y_fld = next((lbl, fld) for (lbl, fld) in ed.component_rows if fld.visible and fld.component_key == "y")
         self.send(("click", y_fld.x + 10, y_fld.y + 10, 4, 0))
         menu = ed.app.relations.get("context_menu")
@@ -1895,36 +1927,205 @@ class EditorTests(unittest.TestCase):
         rename_item = next(c for c in menu.children if "Rename" in c.components.get("text", ""))
         self.click(rename_item)
 
-        # add_name field is now focused with 'y'
-        self.assertIs(ed.ui.focused, ed.add_name)
-        self.assertEqual(ed.add_name.buffer.text, "y")
+        # Label field is now focused with 'y' selected
+        self.assertIs(ed.ui.focused, lbl)
+        self.assertEqual(lbl.buffer.text, "y")
+        self.assertEqual(lbl.buffer.selection, (0, len("y")))
 
         # Commit rename to 'pos_y'
-        self.type(ed.add_name, "pos_y", commit=True)
+        self.type(lbl, "pos_y", commit=True)
         self.assertNotIn("y", ent.components)
         self.assertIn("pos_y", ent.components)
 
+        # 3. Add Custom Component automatically focuses name field with highlight
+        self.click(ed.add_comp_menu_button)
+        menu = ed.app.relations.get("context_menu")
+        custom_item = next(c for c in menu.children if "Custom Component" in c.components.get("text", ""))
+        self.click(custom_item)
+        self.assertIn("custom_component", ent.components)
+        custom_lbl = next(l for l, _ in ed.component_rows if l.visible and l.component_key == "custom_component")
+        self.assertIs(ed.ui.focused, custom_lbl)
+        self.assertEqual(custom_lbl.buffer.selection, (0, len("custom_component")))
+
     def test_inspector_collapsible_sections(self):
-        """Issue #57: Inspector sections can be collapsed and expanded."""
+        """Issue #59: Inspector sections can be collapsed and expanded with dividers."""
         ed = self.editor
         ent = self.runtime.create(parent=ed.game, name="CollapsibleEntity", x=1.0, y=2.0)
         self.select(ent)
         self.runtime.step(0)
 
-        # Components are visible initially
+        # Components are visible initially, as is divider
         visible_comps = [fld for lbl, fld in ed.component_rows if fld.visible]
         self.assertGreater(len(visible_comps), 0)
+        self.assertTrue(ed.divider_components.visible)
 
         # Click COMPONENTS header to collapse
         self.click(ed.components_title)
         visible_comps_after = [fld for lbl, fld in ed.component_rows if fld.visible]
         self.assertEqual(len(visible_comps_after), 0)
-        self.assertFalse(ed.add_name.visible)
+        self.assertFalse(ed.divider_components.visible)
 
         # Click COMPONENTS header again to re-expand
         self.click(ed.components_title)
         visible_comps_reexpanded = [fld for lbl, fld in ed.component_rows if fld.visible]
         self.assertGreater(len(visible_comps_reexpanded), 0)
-        self.assertTrue(ed.add_name.visible)
+        self.assertTrue(ed.divider_components.visible)
+
+    def test_hierarchy_hover_color_and_no_flashing(self):
+        """Hierarchy row colors have matching normal/hover colors between sync and motion, preventing flashing."""
+        ed = self.editor
+        row = next(r for r in ed.hierarchy_rows if r.visible)
+        self.assertIn("normal_color", row.components)
+        self.assertIn("hover_color", row.components)
+        self.assertEqual(row.hover_color, (35, 45, 58))
+
+        # Mouse motion over row sets hover_color
+        self.send(("motion", row.x + 10, row.y + 10))
+        self.assertEqual(row.color, row.hover_color)
+
+        # Step update preserves hover_color while mouse remains on row (no flashing to normal)
+        self.runtime.step(0)
+        self.assertEqual(row.color, row.hover_color)
+
+        # Mouse motion away restores normal_color
+        self.send(("motion", ed.viewport.x + 10, ed.viewport.y + 10))
+        self.assertEqual(row.color, row.normal_color)
+
+    def test_system_edit_button_dimensions_and_visibility(self):
+        """System Edit button width is at least 52px so 'Edit' text fits without truncation to 'Edi'."""
+        ed = self.editor
+        ent = self.runtime.create(parent=ed.game, name="SysEntity")
+        self.select(ent)
+        self.runtime.step(0)
+        # Attach a system
+        from lbe.systems import SystemDefinition
+        ent.systems.attach("sample", SystemDefinition('def update(dt): pass'))
+        self.runtime.step(0)
+        edit_btn = next(b for b in ed.system_edit_buttons if b.visible)
+        self.assertEqual(edit_btn.text, "Edit")
+        self.assertGreaterEqual(edit_btn.w, 52)
+        # Pitch is 8, 4 chars * 8 = 32px; width 52 leaves 20px padding (>= 16px required)
+        self.assertGreaterEqual(edit_btn.w - 16, 4 * 8)
+
+    def test_hierarchy_right_click_selects_target(self):
+        """Right-clicking a hierarchy row immediately selects the entity in hierarchy and inspector."""
+        ed = self.editor
+        child = self.runtime.create(parent=ed.game, name="RightClickTarget")
+        self.runtime.step(0)
+        row = next(r for r in ed.hierarchy_rows if r.visible and r.relations.get("target") is child)
+        self.send(("click", row.x + 40, row.y + 10, 4, 0))
+        # Child is now selected
+        self.assertIs(ed.app.relations.get("selection"), child)
+        # Context menu is open targeting child
+        menu = ed.app.relations.get("context_menu")
+        self.assertIsNotNone(menu)
+        self.assertIs(menu.context_target, child)
+
+    def test_ctrl_right_click_deep_selection_and_highlight(self):
+        """Normal right-click uses game workflows; Ctrl+Right-Click provides deep inspect on any UI element."""
+        ed = self.editor
+
+        # 1. Normal right-click on Code Editor provides code actions, not selecting CodeEditor in hierarchy
+        self.send(("click", ed.code.x + 20, ed.code.y + 20, 4, 0))
+        menu = ed.app.relations.get("context_menu")
+        self.assertIsNotNone(menu)
+        self.assertIsInstance(menu.context_target, dict)
+        self.assertTrue(menu.context_target.get("code"))
+        action_labels = [c.text for c in menu.children if "text" in c.components]
+        self.assertIn("Select All", action_labels)
+        self.assertIn("Copy", action_labels)
+        self.assertNotIn("Select 'CodeEditor' in hierarchy", action_labels)
+        self.send(("key", "ESCAPE", False, False))
+
+        # 2. Holding Ctrl immediately highlights the stack without clicking
+        self.send(("key", "LCTRL", True, False))
+        self.send(("motion", ed.header.x + 20, ed.header.y + 10, 2))
+        self.assertTrue(ed.ui.ctrl_held)
+        # Call draw and verify outline rects for Header (leaf) and App (parent) are generated
+        self.graphics.rectangles.clear()
+        ed.ui.draw()
+        hl_keys = [kw.get("key") for _, kw in self.graphics.rectangles if kw.get("key") and isinstance(kw["key"], tuple) and kw["key"][0] == "ctrl_hl"]
+        self.assertEqual(len(hl_keys), 8)  # 4 for Header + 4 for App
+
+        # 3. Holding Ctrl over a game entity highlights both entity and viewport
+        player = self.runtime.create(parent=ed.game, name="Player", x=0.0, y=0.0, w=1.0, h=1.0)
+        self.runtime.step(0)
+        from lbe.space import world_to_screen
+        sx, sy = world_to_screen(ed.camera, ed.viewport, 0.0, 0.0)
+        self.send(("motion", sx, sy, 2))
+        self.graphics.rectangles.clear()
+        ed.ui.draw()
+        hl_rects = [kw for _, kw in self.graphics.rectangles if kw.get("key") and isinstance(kw["key"], tuple) and kw["key"][0] == "ctrl_hl"]
+        self.assertEqual(len(hl_rects), 12)  # 4 for Player + 4 for Viewport + 4 for App
+
+        # Releasing Ctrl removes outlines on next draw
+        self.send(("key_up", "LCTRL", False, False))
+        self.assertFalse(ed.ui.ctrl_held)
+        self.graphics.rectangles.clear()
+        ed.ui.draw()
+        hl_keys_after = [kw.get("key") for _, kw in self.graphics.rectangles if kw.get("key") and isinstance(kw["key"], tuple) and kw["key"][0] == "ctrl_hl"]
+        self.assertEqual(len(hl_keys_after), 0)
+
+        # 4. Ctrl + Right-Click on game entity provides color-coded stack selection
+        self.send(("click", sx, sy, 4, 2))  # Modifier 2 = MOD_CTRL
+        menu_game = ed.app.relations.get("context_menu")
+        self.assertIsNotNone(menu_game)
+        self.assertTrue(menu_game.context_target.get("deep"))
+        game_items = [c for c in menu_game.children if "text" in c.components]
+        sel_labels = [c.text for c in game_items if "Select" in c.text]
+        self.assertTrue(any("Player" in lbl and "Leaf" in lbl for lbl in sel_labels))
+        self.assertTrue(any("Viewport" in lbl and "Parent" in lbl for lbl in sel_labels))
+        self.assertTrue(any("Application" in lbl and "Root" in lbl for lbl in sel_labels))
+
+        # Clicking '> Select 'Viewport' (Parent)' selects the viewport
+        vp_btn = next(c for c in game_items if "Viewport" in c.text and "Select" in c.text)
+        self.click(vp_btn)
+        self.assertIs(ed.app.relations.get("selection"), ed.viewport)
+        self.send(("key", "ESCAPE", False, False))
+
+        # 5. Ctrl + Right-Click on RunButton deeply targets it and allows selection
+        self.send(("click", ed.run_button.x + 10, ed.run_button.y + 10, 4, 2))
+        menu_btn = ed.app.relations.get("context_menu")
+        self.assertIsNotNone(menu_btn)
+        self.assertTrue(menu_btn.context_target.get("deep"))
+        self.assertIs(menu_btn.context_target.get("entity"), ed.run_button)
+        deep_labels = [c.text for c in menu_btn.children if "text" in c.components]
+        self.assertTrue(any("Select" in lbl and "ToggleRun" in lbl for lbl in deep_labels))
+        self.send(("key", "ESCAPE", False, False))
+
+        # 6. Child entity under Player is drawn, highlighted in full stack, and selectable
+        turret = self.runtime.create(parent=player, name="Turret", x=0.2, y=0.2, w=0.6, h=0.6, color=(255, 100, 100))
+        self.runtime.step(0)
+        tx, ty = world_to_screen(ed.camera, ed.viewport, 0.5, 0.5)
+        ed.ui.mouse_pos = (tx, ty)
+        ed.input.ctrl = True
+        self.graphics.rectangles.clear()
+        ed.ui.draw()
+        hl_rects = [kw for _, kw in self.graphics.rectangles if kw.get("key") and isinstance(kw["key"], tuple) and kw["key"][0] == "ctrl_hl"]
+        # 4 for Turret (Leaf) + 4 for Player (Parent) + 4 for Viewport (Parent) + 4 for App (Root) = 16
+        self.assertEqual(len(hl_rects), 16)
+
+        # Viewport click directly on child entity selects the child entity
+        self.send(("click", tx, ty, 1, 0))
+        self.assertIs(ed.app.relations.get("selection"), turret)
+
+        # Ctrl + Right-Click on turret includes Turret as Leaf and Player as Parent
+        self.send(("click", tx, ty, 4, 2))
+        menu_turret = ed.app.relations.get("context_menu")
+        self.assertIsNotNone(menu_turret)
+        turret_items = [c.text for c in menu_turret.children if "text" in c.components and "Select" in c.text]
+        self.assertTrue(any("Turret" in lbl and "Leaf" in lbl for lbl in turret_items))
+        self.assertTrue(any("Player" in lbl and "Parent" in lbl for lbl in turret_items))
+        self.send(("key", "ESCAPE", False, False))
+
+        # 7. Moving parent automatically moves child entity's rendered world position
+        player.x = 2.0
+        player.y = 3.0
+        self.runtime.step(0)
+        tx_moved, ty_moved = world_to_screen(ed.camera, ed.viewport, 2.5, 3.5)
+        # Clicking at new world position selects turret
+        self.send(("click", tx_moved, ty_moved, 1, 0))
+        self.assertIs(ed.app.relations.get("selection"), turret)
+
 
 

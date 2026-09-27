@@ -39,9 +39,11 @@ def open_menu(ui, target, x, y, actions=None):
         if action is None:
             ui.create(menu, "Separator", "rect", h=8, w=width-8, layer=layer+1)
         else:
+            ink = action.get("ink", INK if action.get("enabled", True) else MUTED)
+            color = action.get("color", FIELD)
             ui.create(menu, action["label"], "button", text=action["label"], h=28,
                       w=width-8, layer=layer+1, menu_action=dict(action),
-                      ink=INK if action.get("enabled", True) else MUTED, color=FIELD)
+                      ink=ink, color=color)
     _layout(menu)
     return menu
 

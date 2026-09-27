@@ -12,6 +12,7 @@ class Input:
     pending: list = field(default_factory=list)
     x: float = 0
     y: float = 0
+    ctrl: bool = False
 
     def drain(self):
         pending, self.pending = self.pending, []
@@ -141,6 +142,8 @@ def launch(build, *, headless=False, frames=None, screenshot=None):
     window = pyglet.window.Window(1440, 900, caption="LittleBigEngine", resizable=True, vsync=True,
                                   visible=not headless)
     window.set_minimum_size(1000, 700)
+    pressed_keys = set()
+    is_active = True
     graphics = Graphics(window)
     input_state = Input()
     runtime = build(window, graphics, input_state)
@@ -148,6 +151,30 @@ def launch(build, *, headless=False, frames=None, screenshot=None):
     rendered = 0
     closed = False
     failures = set()
+    last_ctrl = False
+
+    def check_ctrl():
+        if not is_active:
+            return False
+        if sys.platform == "win32":
+            try:
+                import ctypes
+                return bool(ctypes.windll.user32.GetAsyncKeyState(0x11) & 0x8000)
+            except Exception:
+                pass
+        return bool({key.LCTRL, key.RCTRL} & pressed_keys)
+
+    @window.event
+    def on_activate():
+        nonlocal is_active
+        is_active = True
+
+    @window.event
+    def on_deactivate():
+        nonlocal is_active
+        is_active = False
+        pressed_keys.clear()
+        input_state.ctrl = False
 
     @window.event
     def on_draw():
@@ -168,20 +195,34 @@ def launch(build, *, headless=False, frames=None, screenshot=None):
 
     @window.event
     def on_mouse_press(x, y, button, modifiers):
-        input_state.pending.append(("click", x, window.height - y, button, modifiers))
+        ctrl = check_ctrl() or bool(modifiers & key.MOD_CTRL)
+        mods = modifiers | (key.MOD_CTRL if ctrl else 0)
+        input_state.ctrl = ctrl
+        input_state.pending.append(("click", x, window.height - y, button, mods))
 
     @window.event
     def on_mouse_release(x, y, button, modifiers):
-        input_state.pending.append(("release", x, window.height - y, button, modifiers))
+        ctrl = check_ctrl() or bool(modifiers & key.MOD_CTRL)
+        mods = modifiers | (key.MOD_CTRL if ctrl else 0)
+        input_state.ctrl = ctrl
+        input_state.pending.append(("release", x, window.height - y, button, mods))
 
     @window.event
     def on_mouse_drag(x, y, dx, dy, buttons, modifiers):
-        input_state.pending.append(("drag", x, window.height - y, buttons, modifiers, dx, -dy))
+        ctrl = check_ctrl() or bool(modifiers & key.MOD_CTRL)
+        mods = modifiers | (key.MOD_CTRL if ctrl else 0)
+        input_state.ctrl = ctrl
+        input_state.pending.append(("drag", x, window.height - y, buttons, mods, dx, -dy))
 
     @window.event
     def on_mouse_motion(x, y, dx, dy):
+        ctrl = check_ctrl()
+        input_state.ctrl = ctrl
+        shift = bool({key.LSHIFT, key.RSHIFT} & pressed_keys)
+        alt = bool({key.LALT, key.RALT} & pressed_keys)
+        mods = (key.MOD_CTRL if ctrl else 0) | (key.MOD_SHIFT if shift else 0) | (key.MOD_ALT if alt else 0)
         input_state.x, input_state.y = x, window.height - y
-        input_state.pending.append(("motion", x, window.height - y))
+        input_state.pending.append(("motion", x, window.height - y, mods))
 
     @window.event
     def on_mouse_scroll(x, y, scroll_x, scroll_y):
@@ -194,8 +235,10 @@ def launch(build, *, headless=False, frames=None, screenshot=None):
 
     @window.event
     def on_key_press(symbol, modifiers):
-        ctrl = bool(modifiers & key.MOD_CTRL)
-        shift = bool(modifiers & key.MOD_SHIFT)
+        pressed_keys.add(symbol)
+        ctrl = check_ctrl() or bool(modifiers & key.MOD_CTRL) or symbol in (key.LCTRL, key.RCTRL)
+        input_state.ctrl = ctrl
+        shift = bool(modifiers & key.MOD_SHIFT) or bool({key.LSHIFT, key.RSHIFT} & pressed_keys)
         if symbol in (key.BACKSPACE, key.DELETE) and ctrl:
             input_state.pending.append(("key", key.symbol_string(symbol), True, shift))
             return pyglet.event.EVENT_HANDLED
@@ -203,8 +246,17 @@ def launch(build, *, headless=False, frames=None, screenshot=None):
                       key.PAGEUP, key.PAGEDOWN, key.BACKSPACE, key.DELETE):
             return pyglet.event.EVENT_HANDLED
         input_state.pending.append(("key", key.symbol_string(symbol),
-                                    bool(modifiers & key.MOD_CTRL), bool(modifiers & key.MOD_SHIFT)))
+                                    ctrl, shift))
         return pyglet.event.EVENT_HANDLED
+
+    @window.event
+    def on_key_release(symbol, modifiers):
+        pressed_keys.discard(symbol)
+        ctrl = check_ctrl() or bool(modifiers & key.MOD_CTRL) or bool({key.LCTRL, key.RCTRL} & pressed_keys)
+        input_state.ctrl = ctrl
+        shift = bool(modifiers & key.MOD_SHIFT) or bool({key.LSHIFT, key.RSHIFT} & pressed_keys)
+        input_state.pending.append(("key_up", key.symbol_string(symbol), ctrl, shift))
+
 
     motions = {
         key.MOTION_LEFT: "LEFT", key.MOTION_RIGHT: "RIGHT", key.MOTION_UP: "UP", key.MOTION_DOWN: "DOWN",
@@ -235,8 +287,13 @@ def launch(build, *, headless=False, frames=None, screenshot=None):
             pyglet.clock.unschedule(tick)
 
     def tick(dt):
-        nonlocal elapsed
+        nonlocal elapsed, last_ctrl
         elapsed += dt
+        ctrl = check_ctrl()
+        input_state.ctrl = ctrl
+        if ctrl != last_ctrl:
+            last_ctrl = ctrl
+            input_state.pending.append(("key" if ctrl else "key_up", "LCTRL", ctrl, False))
         window.invalid = True
 
     pyglet.clock.schedule_interval(tick, 1 / 60)
