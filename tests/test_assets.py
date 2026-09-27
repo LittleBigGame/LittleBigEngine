@@ -385,3 +385,133 @@ class AssetSystemTests(unittest.TestCase):
         self.assertIn("HeroPlayer", ed.identity_label.text)
         self.assertNotIn("id:", ed.identity_label.text)
         self.assertNotIn(str(hero.id), ed.identity_label.text)
+
+    def test_floating_drag_preview_attached_to_mouse(self):
+        """While dragging an asset or entity, a floating pill badge is drawn at mouse coordinates."""
+        ed = self.editor
+        reg = self.runtime.assets.registry
+        player_id = reg.get_id(self.player_img)
+
+        # 1. Asset drag preview
+        ed.app.components["asset_drag"] = {
+            "id": player_id,
+            "name": "player.png",
+            "path": "textures/player.png",
+            "type": "image",
+            "icon": "🖼️",
+        }
+        # Send motion to move cursor
+        self.send(("motion", 320, 240, 0))
+        self.runtime.step(0)
+
+        # Check graphics for active_drag badge
+        bg_matches = [rect for rect in self.graphics.rectangles if rect[1].get("key") == "active_drag_bg"]
+        self.assertTrue(len(bg_matches) >= 1)
+        x, y = bg_matches[-1][0][:2]
+        self.assertEqual(x, 320 + 12)
+        self.assertEqual(y, 240 + 12)
+
+        txt_matches = [txt for txt in self.graphics.texts if txt[1].get("key") == "active_drag_txt"]
+        self.assertTrue(len(txt_matches) >= 1)
+        self.assertIn("player.png", txt_matches[-1][0][0])
+
+        # 2. Entity drag preview
+        ed.app.components.pop("asset_drag", None)
+        hero = self.runtime.create(parent=ed.game, name="DragonBoss")
+        ed.app.components["entity_drag"] = {
+            "id": str(hero.id),
+            "name": "DragonBoss",
+            "type": "entity",
+            "entity": hero,
+        }
+        self.send(("motion", 450, 350, 0))
+        self.runtime.step(0)
+
+        bg_matches2 = [rect for rect in self.graphics.rectangles if rect[1].get("key") == "active_drag_bg"]
+        self.assertTrue(len(bg_matches2) >= 1)
+        self.assertEqual(bg_matches2[-1][0][:2], (450 + 12, 350 + 12))
+
+        txt_matches2 = [txt for txt in self.graphics.texts if txt[1].get("key") == "active_drag_txt"]
+        self.assertTrue(len(txt_matches2) >= 1)
+        self.assertIn("DragonBoss", txt_matches2[-1][0][0])
+        self.assertIn("🔷", txt_matches2[-1][0][0])
+
+    def test_drag_system_into_inspector_components_vs_systems_area(self):
+        """Dragging system script into Components area adds it as component; into Systems area attaches it as system."""
+        ed = self.editor
+        reg = self.runtime.assets.registry
+        enemy_id = reg.get_id(self.enemy_script)
+
+        hero = self.runtime.create(parent=ed.game, name="PlayerTarget")
+        ed.select(hero)
+        self.runtime.step(0)
+
+        drag_data = {
+            "id": enemy_id,
+            "name": "enemy.py",
+            "path": "enemy.py",
+            "type": "system",
+            "icon": "⚡",
+        }
+
+        # Drop 1: Dropped onto Components area (above system_label)
+        comp_area_y = ed.components_title.y + 15
+        ed.app.components["on_asset_drop"](drag_data, ("release", ed.inspector.x + 30, comp_area_y, 0, 0))
+
+        # Should be added as component, NOT attached as a system
+        self.assertIn("enemy", hero.components)
+        self.assertIsInstance(hero.components["enemy"], AssetRef)
+        self.assertNotIn("enemy", hero.systems)
+
+        # Drop 2: Dropped onto Systems area (below system_label)
+        sys_area_y = ed.system_label.y + 15
+        ed.app.components["on_asset_drop"](drag_data, ("release", ed.inspector.x + 30, sys_area_y, 0, 0))
+
+        # Should now be attached as a system
+        self.assertIn("enemy", hero.systems)
+
+    def test_drag_entity_from_hierarchy(self):
+        """Dragging entity from hierarchy allows dropping into code editor, inspector, or reparenting."""
+        ed = self.editor
+
+        parent_ent = self.runtime.create(parent=ed.game, name="FolderNode")
+        child_ent = self.runtime.create(parent=ed.game, name="HeroNode")
+        self.runtime.step(0)
+
+        # 1. Dropping entity into Code Editor inserts resolve("<id>") token and renders inline pill
+        ent_drag = {
+            "id": str(child_ent.id),
+            "name": "HeroNode",
+            "type": "entity",
+            "entity": child_ent,
+        }
+        drop_code = ("release", ed.code.x + 50, ed.code.y + 50, 0, 0)
+        ed.app.components["on_entity_drop"](ent_drag, drop_code)
+
+        expected_token = f'resolve("{child_ent.id}")'
+        self.assertIn(expected_token, ed.code.buffer.text)
+
+        # Step to sync text and render inline pill
+        self.runtime.step(0)
+        pills = [c for c in ed.ui.controls() if "asset_pill" in c.tags and c.visible]
+        self.assertTrue(len(pills) >= 1)
+        self.assertIn("HeroNode", pills[0].text)
+        self.assertIn("🔷", pills[0].text)
+
+        # 2. Dropping entity into Inspector adds component pointing to the entity
+        ed.select(parent_ent)
+        self.runtime.step(0)
+
+        drop_insp = ("release", ed.inspector.x + 50, ed.components_title.y + 15, 0, 0)
+        ed.app.components["on_entity_drop"](ent_drag, drop_insp)
+
+        self.assertIn("heronode", parent_ent.components)
+        self.assertIs(parent_ent.components["heronode"], child_ent)
+
+        # 3. Dropping entity onto another entity row in Hierarchy reparents it
+        # Find row for parent_ent
+        row = next(r for r in ed.hierarchy_rows if r.visible and r.relations.get("target") is parent_ent)
+        drop_hier = ("release", row.x + 20, row.y + 10, 0, 0)
+        ed.app.components["on_entity_drop"](ent_drag, drop_hier)
+
+        self.assertIs(child_ent.parent, parent_ent)

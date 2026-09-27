@@ -409,11 +409,13 @@ class UI:
             elif len(event) > 2 and isinstance(event[2], bool):
                 self.ctrl_held = event[2]
 
+        if kind in ("motion", "drag") and len(event) >= 3 and isinstance(event[1], (int, float)) and isinstance(event[2], (int, float)):
+            self.mouse_pos = (event[1], event[2])
+
         if dispatch_menu(self, event):
             return
         if kind == "motion":
             mx, my = event[1], event[2]
-            self.mouse_pos = (mx, my)
             for control in self.controls():
                 if ("splitter" in control.tags or "scrollbar_thumb" in control.tags or "button" in control.tags or "chip" in control.tags or "hoverable" in control.tags) and self.visible(control):
                     active = self.root.relations.get("active_drag")
@@ -428,6 +430,12 @@ class UI:
             return
         if kind == "release":
             self.root.relations.pop("text_drag", None)
+            entity_drag = self.root.components.pop("entity_drag", None)
+            if entity_drag is not None:
+                cb = self.root.components.get("on_entity_drop")
+                if cb:
+                    cb(entity_drag, event)
+                return
             asset_drag = self.root.components.pop("asset_drag", None)
             if asset_drag is not None:
                 cb = self.root.components.get("on_asset_drop")
@@ -445,7 +453,7 @@ class UI:
                     cb(active_drag, event)
             return
         if kind == "drag":
-            if self.root.components.get("asset_drag") is not None:
+            if self.root.components.get("asset_drag") is not None or self.root.components.get("entity_drag") is not None:
                 return
             text_drag = self.root.relations.get("text_drag")
             if text_drag is not None and self.visible(text_drag) and event[3] & 1:
@@ -985,14 +993,21 @@ class UI:
                 graphics.rect(rx, ry, outline_w, rh, color, key=("ctrl_hl", item_key, "left"), layer=layer)
                 graphics.rect(rx + rw - outline_w, ry, outline_w, rh, color, key=("ctrl_hl", item_key, "right"), layer=layer)
 
-        asset_drag = self.root.components.get("asset_drag")
-        if asset_drag and hasattr(self, "mouse_pos"):
+        active_drag = self.root.components.get("entity_drag") or self.root.components.get("asset_drag")
+        if active_drag and hasattr(self, "mouse_pos"):
             mx, my = self.mouse_pos
-            icon = asset_drag.get("icon", "📦")
-            name = asset_drag.get("name", "Asset")
-            label_text = f" {icon} {name} "
-            chip_w = max(50, len(label_text) * 8 + 12)
-            chip_h = 22
-            graphics.rect(mx + 12, my + 12, chip_w, chip_h, (35, 55, 75, 230), key="asset_drag_bg", layer=15)
-            graphics.text(label_text, mx + 16, my + 15, color=(240, 245, 255, 255), key="asset_drag_txt", layer=16)
+            if "entity" in active_drag or active_drag.get("type") == "entity":
+                ename = active_drag.get("name", "Entity")
+                label_text = f" 🔷 Entity: {ename} "
+            else:
+                icon = active_drag.get("icon", "📦")
+                name = active_drag.get("name", "Asset")
+                etype = active_drag.get("type", "asset")
+                label_text = f" {icon} {etype.capitalize()}: {name} "
+            pitch = getattr(self, "pitch", 8)
+            chip_w = max(60, len(label_text) * pitch + 16)
+            chip_h = 24
+            graphics.rect(mx + 12, my + 12, chip_w, chip_h, (25, 45, 68, 245), key="active_drag_bg", layer=30)
+            graphics.rect(mx + 12, my + 12, chip_w, 1, (88, 166, 255, 200), key="active_drag_top", layer=31)
+            graphics.text(label_text, mx + 16, my + 16, color=(240, 248, 255, 255), key="active_drag_txt", layer=32)
 

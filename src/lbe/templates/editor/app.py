@@ -1297,7 +1297,7 @@ def find_hit_game_entity(wx, wy):
 
 
 def viewport_click(control, event):
-    if state.app.components.get("asset_drag") is not None:
+    if state.app.components.get("asset_drag") is not None or state.app.components.get("entity_drag") is not None:
         return False
     control.drag_pos = None
     wx, wy = screen_to_world(state.camera, control, event[1], event[2])
@@ -1310,7 +1310,7 @@ def viewport_click(control, event):
 
 
 def viewport_drag(control, event):
-    if state.app.components.get("asset_drag") is not None:
+    if state.app.components.get("asset_drag") is not None or state.app.components.get("entity_drag") is not None:
         return False
     x, y = event[1], event[2]
     if len(event) >= 7:
@@ -1391,7 +1391,9 @@ def on_asset_drop(asset_drag, event):
     if hasattr(state, "inspector") and contains(state.inspector, mx, my):
         tgt = selected()
         if tgt:
-            apply_asset_to_entity(tgt, asset_drag)
+            sys_y = getattr(getattr(state, "system_label", None), "y", state.inspector.y + state.inspector.h / 2)
+            target_area = "systems" if my >= sys_y else "components"
+            apply_asset_to_entity(tgt, asset_drag, target_area=target_area)
         return
 
     # 5. Dropped on File Explorer
@@ -1411,7 +1413,77 @@ def on_asset_drop(asset_drag, event):
         return
 
 
-def apply_asset_to_entity(tgt, asset_drag):
+def on_entity_drop(entity_drag, event):
+    if not entity_drag or len(event) < 3:
+        return
+    mx, my = event[1], event[2]
+    dragged_ent = entity_drag.get("entity")
+    ent_id = entity_drag.get("id")
+    ent_name = entity_drag.get("name", "Entity")
+
+    # 1. Dropped on Code Editor
+    if (contains(state.code, mx, my) or contains(state.code_panel, mx, my)) and getattr(state.code, "visible", True):
+        if ent_id:
+            token = f'resolve("{ent_id}")'
+            state.code.buffer.insert(token)
+            message(f"Inserted entity reference to {ent_name}")
+            return
+
+    # 2. Dropped on Inspector
+    if hasattr(state, "inspector") and contains(state.inspector, mx, my):
+        tgt = selected()
+        if tgt and dragged_ent and tgt is not dragged_ent:
+            target_comp_key = None
+            for lbl, fld in getattr(state, "component_rows", []):
+                if state.ui.visible(fld) and (contains(lbl, mx, my) or contains(fld, mx, my)):
+                    target_comp_key = fld.components.get("component_key")
+                    break
+            if target_comp_key:
+                tgt.components[target_comp_key] = dragged_ent
+                message(f"Set component '{target_comp_key}' to {ent_name}")
+            else:
+                comp_key = ent_name.lower().replace(" ", "_")
+                tgt.components[comp_key] = dragged_ent
+                message(f"Added component '{comp_key}' referencing {ent_name}")
+            save_editor_project()
+            inspector_sync()
+        return
+
+    # 3. Dropped on Hierarchy
+    if hasattr(state, "hierarchy") and getattr(state, "active_left_tab", "hierarchy") == "hierarchy" and contains(state.hierarchy, mx, my):
+        if dragged_ent:
+            target_parent = None
+            for row in getattr(state, "hierarchy_rows", []):
+                if state.ui.visible(row) and contains(row, mx, my):
+                    target_parent = row.relations.get("target")
+                    break
+            if target_parent is not None and target_parent is not dragged_ent:
+                dragged_ent.parent = target_parent
+                message(f"Moved {ent_name} under {target_parent.components.get('name', target_parent.id)}")
+            elif target_parent is None:
+                dragged_ent.parent = state.game
+                message(f"Moved {ent_name} to root")
+            save_editor_project()
+            if hasattr(state, "hierarchy_sync"):
+                state.hierarchy_sync()
+        return
+
+    # 4. Dropped on Viewport
+    if hasattr(state, "viewport") and contains(state.viewport, mx, my):
+        if dragged_ent:
+            wx, wy = screen_to_world(state.camera, state.viewport, mx, my)
+            select(dragged_ent)
+            if "x" in dragged_ent.components and "y" in dragged_ent.components:
+                dragged_ent.x = wx
+                dragged_ent.y = wy
+                message(f"Placed {ent_name} at ({int(wx)}, {int(wy)})")
+            else:
+                message(f"Selected {ent_name}")
+            save_editor_project()
+        return
+
+
+def apply_asset_to_entity(tgt, asset_drag, target_area=None):
     from lbe.assets import AssetRef
     atype = asset_drag.get("type")
     uid = asset_drag.get("id")
@@ -1419,16 +1491,25 @@ def apply_asset_to_entity(tgt, asset_drag):
     path_str = asset_drag.get("path")
 
     if atype == "system" and path_str:
-        path = (state.project / path_str).resolve()
-        if path.exists():
-            definition = state.runtime.assets.system(path)
-            if path.stem in tgt.systems:
-                tgt.systems.reload(path.stem, definition)
-            else:
-                tgt.systems.attach(path.stem, definition)
+        if target_area == "systems" or target_area is None:
+            path = (state.project / path_str).resolve()
+            if path.exists():
+                definition = state.runtime.assets.system(path)
+                if path.stem in tgt.systems:
+                    tgt.systems.reload(path.stem, definition)
+                else:
+                    tgt.systems.attach(path.stem, definition)
+                save_editor_project()
+                inspector_sync()
+                message(f"Attached system '{path.stem}' to {tgt.components.get('name', tgt.id)}")
+                return
+        else:
+            ref = AssetRef(id=uid, type="system", name=name)
+            comp_name = Path(path_str).stem if path_str else "system"
+            tgt.components[comp_name] = ref
             save_editor_project()
             inspector_sync()
-            message(f"Attached system '{path.stem}' to {tgt.components.get('name', tgt.id)}")
+            message(f"Added system component '{comp_name}' on {tgt.components.get('name', tgt.id)}")
             return
 
     if atype == "image":
@@ -1760,6 +1841,7 @@ def bind_actions():
     for button in state.system_detach_buttons:
         button.components.pop("system_key", None)
     state.app.components["on_asset_drop"] = on_asset_drop
+    state.app.components["on_entity_drop"] = on_entity_drop
     if hasattr(state, "tab_hierarchy") and hasattr(state, "tab_files"):
         state.tab_hierarchy.action = lambda: switch_left_tab("hierarchy")
         state.tab_files.action = lambda: switch_left_tab("files")
