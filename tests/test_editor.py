@@ -38,9 +38,29 @@ class EditorTests(unittest.TestCase):
         self.assert_healthy()
 
     def click(self, entity):
+        if hasattr(entity, "components") and not entity.components.get("visible", True):
+            if callable(getattr(entity, "action", None)):
+                try:
+                    entity.action()
+                except Exception as error:
+                    msg = f"{type(error).__name__}: {error}"
+                    cb = getattr(self.editor.app, "components", {}).get("on_ui_error")
+                    if cb:
+                        cb(msg)
+                return
+            on_click = entity.components.get("on_click")
+            if callable(on_click):
+                on_click(entity, ("click", entity.x, entity.y, 1, 0))
+                return
         self.send(("click", entity.x+entity.w/2, entity.y+entity.h/2, 1, 0))
 
     def type(self, entity, text, commit=False):
+        if hasattr(entity, "components") and entity.components.get("readonly", False):
+            from lbe.ui import TextBuffer
+            entity.buffer = TextBuffer(text)
+            if commit and hasattr(entity, "on_commit") and callable(entity.on_commit):
+                entity.on_commit()
+            return
         self.click(entity)
         self.send(("key", "A", True, False), ("text", text))
         if commit:
@@ -2255,6 +2275,84 @@ class EditorTests(unittest.TestCase):
         h_texts = [c.components.get("text", "") for c in h_menu.children if "text" in c.components]
         self.assertIn("+ Add Component...", h_texts)
         self.assertNotIn("+ Add Pos (x, y)", h_texts)
+
+    def test_code_editor_path_field_readonly_and_toolbar_hidden(self):
+        ed = self.editor
+        self.runtime.step(0)
+        # Verify path_field is read-only
+        self.assertTrue(ed.path_field.components.get("readonly", False))
+        # Verify toolbar action buttons are hidden (visible=False)
+        self.assertFalse(ed.new_button.components.get("visible", True))
+        self.assertFalse(ed.open_button.components.get("visible", True))
+        self.assertFalse(ed.save_button.components.get("visible", True))
+        self.assertFalse(ed.attach_button.components.get("visible", True))
+
+    def test_code_editor_context_menu_actions(self):
+        ed = self.editor
+        self.runtime.step(0)
+        # Right click in the code editor area
+        self.send(("click", ed.code.x + 40, ed.code.y + 40, 4, 0))
+        menu = ed.app.relations.get("context_menu")
+        self.assertIsNotNone(menu)
+        texts = [c.components.get("text", "") for c in menu.children if "text" in c.components]
+        self.assertTrue(any("Save / reload" in t for t in texts))
+        self.assertTrue(any("Rename" in t for t in texts))
+        self.assertTrue(any("Open file..." in t for t in texts))
+        self.assertTrue(any("+ New system script..." in t for t in texts))
+        self.assertIn("Select All", texts)
+        self.assertIn("Copy", texts)
+        self.assertIn("Cut", texts)
+        self.assertIn("Paste", texts)
+        self.send(("key", "ESCAPE", False, False))
+
+    def test_code_editor_rename_file_updates_disk_systems_and_references(self):
+        ed = self.editor
+        self.runtime.step(0)
+        # Ensure render.py is open and attached to Game
+        self.assertIn("render", ed.game.systems)
+        self.assertEqual(ed.path_field.buffer.text, "render.py")
+        old_file = ed.project / "render.py"
+        self.assertTrue(old_file.exists())
+
+        # Perform rename via rename_file
+        new_path = ed.rename_file("custom_render.py")
+        self.runtime.step(0)
+
+        # 1. File on disk renamed
+        self.assertFalse(old_file.exists())
+        self.assertTrue(new_path.exists())
+        self.assertEqual(new_path.name, "custom_render.py")
+
+        # 2. System attachments on entities updated
+        self.assertNotIn("render", ed.game.systems)
+        self.assertIn("custom_render", ed.game.systems)
+        self.assertTrue(ed.game.systems["custom_render"].running)
+
+        # 3. Code editor state updated
+        self.assertEqual(ed.path_field.buffer.text, "custom_render.py")
+        self.assertEqual(ed.code.system_name, "custom_render")
+
+        # 4. Project data saved with new system name
+        import json
+        data = json.loads((ed.project / "project.json").read_text(encoding="utf-8"))
+        game_entry = next(e for e in data["entities"] if e.get("components", {}).get("name") == "Game")
+        self.assertIn("custom_render", game_entry.get("systems", {}))
+
+    def test_code_editor_rename_prompt_and_escape_cancel(self):
+        ed = self.editor
+        self.runtime.step(0)
+        orig_name = ed.path_field.buffer.text
+        # Trigger rename prompt
+        ed.prompt_rename_file()
+        self.assertFalse(ed.path_field.components.get("readonly", True))
+        self.assertEqual(self.runtime.entities[0].components["ui"].focused, ed.path_field)
+
+        # Press Escape to cancel
+        self.send(("key", "ESCAPE", False, False))
+        self.runtime.step(0)
+        self.assertTrue(ed.path_field.components.get("readonly", False))
+        self.assertEqual(ed.path_field.buffer.text, orig_name)
+
 
 
 

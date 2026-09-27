@@ -49,10 +49,14 @@ its source. `Inspect system` shows the opened attachment's definition path,
 lifecycle, running state, errors and public globals. `Detach system` removes that
 attachment; the active editor attachment is protected from accidental detachment.
 
-The source path is relative to the selected project directory. `Open` reads that
-file, and `New` starts a small blank system. `Save / reload` writes the file and
-reloads matching attachments. `Attach` saves and attaches the current file to the
-selected entity, using the filename without `.py` as the instance name.
+The source path is displayed in a read-only header field relative to the project directory.
+Double-click the path field or right-click anywhere in the code editor and choose `Rename '<file>'...`
+to safely rename the script on disk; the editor automatically updates all attached system instances
+across entities, updates matching component references, and saves project state.
+
+File operations (`Save / reload`, `Rename...`, `Open file...`, and `+ New system script...`) are
+available from the code editor right-click context menu (and `Ctrl+S` to save). Attaching scripts
+to entities is managed directly in the Inspector panel via **+ Attach**.
 
 The source editor supports multiline typing, cursor movement, mouse selection,
 double-click word selection, triple-click line selection, Shift selection, Home/End,

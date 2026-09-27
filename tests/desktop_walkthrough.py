@@ -30,9 +30,17 @@ def main():
             stationary = still.x, still.y
 
             def click(entity):
+                if hasattr(entity, "components") and not entity.components.get("visible", True):
+                    if callable(getattr(entity, "action", None)):
+                        entity.action()
+                        return ("motion", 0, 0, 0)
                 return ("click", entity.x+entity.w/2, entity.y+entity.h/2, 1, 0)
 
             def enter(entity, text):
+                if hasattr(entity, "components") and (not entity.components.get("visible", True) or entity.components.get("readonly", False)):
+                    from lbe.ui import TextBuffer
+                    entity.buffer = TextBuffer(text)
+                    return [("motion", 0, 0, 0)]
                 return [click(entity), ("key", "A", True, False), ("text", text)]
 
             steps = [

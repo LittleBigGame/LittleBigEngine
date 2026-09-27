@@ -245,8 +245,8 @@ def initialize():
 
     state.status = state.ui.create(state.app, 'StatusBar', 'label', text='', dock='bottom', h=20, margin=(0, 16, 5, 16))
     state.code = state.ui.multiline(state.code_panel, 'TextArea')
-    state.path_field = state.ui.field(state.code_panel, 'SourcePath', 'render.py', hint='system_name.py')
-    state.path_field.on_commit = open_path
+    state.path_field = state.ui.field(state.code_panel, 'SourcePath', 'render.py', hint='system_name.py', readonly=True, ink=(160, 180, 205))
+    state.path_field.on_click = on_path_field_click
     state.new_button = state.ui.button(state.code_panel, 'NewSource', 'New', new_source)
     state.open_button = state.ui.button(state.code_panel, 'OpenSource', 'Open', open_path)
     state.save_button = state.ui.button(state.code_panel, 'SaveSource', 'Save / reload', save)
@@ -332,6 +332,10 @@ def initialize():
     state.open_panel = open_panel
     state.save_editor_project = lambda: save_editor_project()
     state.new_source = lambda: new_source()
+    state.rename_file = rename_file
+    state.prompt_rename_file = prompt_rename_file
+    state.open_file_menu = open_file_menu
+    state.open_specific_file = open_specific_file
     if (project / 'hierarchy.py').exists() and 'hierarchy' not in state.hierarchy.systems:
         state.hierarchy.systems.attach('hierarchy', assets.system(project / 'hierarchy.py'))
     if (project / 'inspector.py').exists() and 'inspector' not in state.inspector.systems:
@@ -430,10 +434,15 @@ def layout():
     cp = state.code_panel
     c_pad = parse_box(cp.components.get("padding", (8, 12, 8, 12)))
     tb_y = cp.y + 32
-    put(state.path_field, x=cp.x + c_pad[3], y=tb_y, w=max(130, cp.w - 380), h=28)
-    for button, offset, width in ((state.new_button, -360, 52), (state.open_button, -302, 52),
-                                  (state.save_button, -244, 126), (state.attach_button, -112, 100)):
-        put(button, x=cp.x + cp.w + offset, y=tb_y, w=width, h=28)
+    if state.ui.focused is not state.path_field and not state.path_field.components.get("readonly", True):
+        state.path_field.components["readonly"] = True
+        state.path_field.components["ink"] = (160, 180, 205)
+        state.path_field.on_commit = None
+        if state._saved_source:
+            state.path_field.buffer = TextBuffer(state._saved_source[0])
+    put(state.path_field, x=cp.x + c_pad[3], y=tb_y, w=max(130, cp.w - c_pad[3] - c_pad[1]), h=28)
+    for button in (state.new_button, state.open_button, state.save_button, state.attach_button):
+        put(button, visible=False)
     put(state.code, x=cp.x + c_pad[3], y=cp.y + 68, w=max(0, cp.w - c_pad[3] - c_pad[1]), h=max(0, cp.h - 100))
     put(state.code_info, x=cp.x + c_pad[3], y=cp.y + cp.h - 25, w=max(0, cp.w - c_pad[3] - c_pad[1]), h=20)
 
@@ -731,22 +740,199 @@ def source_path():
         raise ValueError('Use a .py path inside the project folder')
     return path
 
+
 def new_source():
     if not confirm_discard('new'):
         return
     state.path_field.buffer = TextBuffer('new_system.py')
     state.code.buffer = TextBuffer('def update(dt):\n    pass\n')
     state._saved_source = (state.path_field.buffer.text, state.code.buffer.text)
-    message('New source: choose a filename, edit, then Save / reload')
+    state.code.components.pop('system_name', None)
+    state.code.relations.pop('owner', None)
+    message('New source: right-click to Rename file... or Save / reload')
+
 
 def open_path():
     path = source_path()
+    if not path.exists():
+        message(f"File not found: {path.name}")
+        return
     text = path.read_text(encoding='utf-8')
     if not confirm_discard('open'):
         return
     state.code.buffer = TextBuffer(text)
     state._saved_source = (state.path_field.buffer.text, text)
+    state.code.source_path = str(path)
+    state.code.components['system_name'] = path.stem
+    sel = selected()
+    if sel and path.stem in sel.systems:
+        state.code.relations['owner'] = sel
+    else:
+        state.code.relations.pop('owner', None)
     message(f'Opened {path.name}')
+
+
+def open_specific_file(path):
+    path = Path(path).resolve()
+    if not path.exists():
+        message(f"File not found: {path.name}")
+        return
+    if not confirm_discard('open'):
+        return
+    text = path.read_text(encoding='utf-8')
+    rel_name = str(path.relative_to(state.project)) if path.is_relative_to(state.project) else path.name
+    state.path_field.buffer = TextBuffer(rel_name)
+    state.code.buffer = TextBuffer(text)
+    state._saved_source = (rel_name, text)
+    state.code.source_path = str(path)
+    state.code.components['system_name'] = path.stem
+    sel = selected()
+    if sel and path.stem in sel.systems:
+        state.code.relations['owner'] = sel
+    else:
+        state.code.relations.pop('owner', None)
+    message(f"Opened {rel_name}")
+
+
+def open_file_menu(x=None, y=None):
+    candidates = []
+    if state.project and state.project.exists():
+        for p in sorted(state.project.glob("*.py")):
+            candidates.append(p)
+    actions = []
+    cur_text = state.path_field.buffer.text.strip()
+    for p in candidates:
+        rel = str(p.relative_to(state.project)) if p.is_relative_to(state.project) else p.name
+        is_cur = (rel == cur_text or p.name == cur_text)
+        label = f"• {rel}" if is_cur else f"  {rel}"
+        actions.append(dict(label=label, run=lambda _, path=p: open_specific_file(path)))
+    if not actions:
+        actions.append(dict(label="(No .py files in project)", run=None))
+    if x is None or y is None:
+        mouse = getattr(state.ui, "mouse_pos", None)
+        if mouse:
+            x, y = mouse
+        else:
+            x, y = state.path_field.x, state.path_field.y + state.path_field.h + 2
+    open_menu(state.ui, state.code_panel, x, y, actions=actions)
+
+
+def on_path_field_click(control, event):
+    if len(event) > 3 and event[3] in (2, 4):
+        return False
+    click_count = event[5] if len(event) >= 6 else 1
+    if click_count >= 2:
+        prompt_rename_file()
+        return True
+    return False
+
+
+def prompt_rename_file():
+    state.path_field.components["readonly"] = False
+    state.path_field.components["ink"] = INK
+    state.ui.focus(state.path_field)
+    state.path_field.buffer.anchor = 0
+    state.path_field.buffer.cursor = len(state.path_field.buffer.text)
+    state.path_field.on_commit = commit_rename_file
+    message(f"Type new name for '{state.path_field.buffer.text}' and press Enter (Esc to cancel)")
+
+
+def commit_rename_file():
+    new_name = state.path_field.buffer.text.strip()
+    state.path_field.components["readonly"] = True
+    state.path_field.components["ink"] = (160, 180, 205)
+    state.path_field.on_commit = None
+    old_text = state._saved_source[0] if state._saved_source else state.path_field.buffer.text
+    if not new_name or new_name == old_text:
+        state.path_field.buffer = TextBuffer(old_text)
+        return
+    try:
+        rename_file(new_name, old_name=old_text)
+    except Exception as e:
+        message(f"Rename failed: {e}")
+        state.path_field.buffer = TextBuffer(old_text)
+
+
+def rename_file(new_name, old_name=None):
+    new_name = new_name.strip()
+    if not new_name.endswith('.py'):
+        new_name += '.py'
+    if old_name is None:
+        old_path = source_path()
+        old_name = old_path.name
+    else:
+        old_path = (state.project / old_name).resolve()
+
+    new_path = (state.project / new_name).resolve()
+    if not new_path.is_relative_to(state.project):
+        raise ValueError('Rename destination must be inside the project folder')
+
+    if new_path == old_path:
+        return new_path
+
+    if new_path.exists():
+        raise FileExistsError(f"A file named '{new_name}' already exists in the project")
+
+    if old_path.exists():
+        old_path.rename(new_path)
+    else:
+        new_path.parent.mkdir(parents=True, exist_ok=True)
+        new_path.write_text(state.code.buffer.text, encoding='utf-8')
+
+    old_stem = old_path.stem
+    new_stem = new_path.stem
+
+    # Update asset cache
+    if hasattr(state.runtime.assets, "_systems"):
+        state.runtime.assets._systems.pop(old_path, None)
+        try:
+            state.runtime.assets._systems.pop(old_path.resolve(), None)
+        except Exception:
+            pass
+        state.runtime.assets._systems.pop(str(old_path), None)
+    definition = state.runtime.assets.system(new_path)
+
+    updated_count = 0
+    for ent in state.runtime.entities:
+        for name, instance in tuple(ent.systems.items()):
+            inst_def_path = None
+            if hasattr(instance, "definition") and hasattr(instance.definition, "path"):
+                inst_def_path = Path(instance.definition.path)
+            is_match = False
+            if inst_def_path is not None:
+                try:
+                    if inst_def_path.resolve() == old_path.resolve():
+                        is_match = True
+                except Exception:
+                    if inst_def_path == old_path:
+                        is_match = True
+            if is_match or name == old_stem:
+                if name == old_stem:
+                    del ent.systems[name]
+                    ent.systems.attach(new_stem, definition)
+                    updated_count += 1
+                else:
+                    ent.systems.reload(name, definition)
+                    updated_count += 1
+
+        for comp_k, comp_v in tuple(ent.components.items()):
+            if isinstance(comp_v, str):
+                if comp_v == old_path.name:
+                    ent.components[comp_k] = new_path.name
+                elif comp_v == old_stem:
+                    ent.components[comp_k] = new_stem
+
+    rel_name = str(new_path.relative_to(state.project))
+    state.path_field.buffer = TextBuffer(rel_name)
+    state._saved_source = (rel_name, state.code.buffer.text)
+    state.code.source_path = str(new_path)
+    if state.code.components.get("system_name") == old_stem:
+        state.code.system_name = new_stem
+
+    save_editor_project()
+    inspector_sync()
+    message(f"Renamed {old_path.name} to {new_path.name}; updated {updated_count} system attachment(s)")
+    return new_path
 
 def open_system(owner, name):
     if not confirm_discard((owner.id, name)):
@@ -1028,6 +1214,16 @@ def toggle_game_running():
 
 
 def keyboard(event):
+    if event[1] == "ESCAPE":
+        if not state.path_field.components.get("readonly", True):
+            state.path_field.components["readonly"] = True
+            state.path_field.components["ink"] = (160, 180, 205)
+            state.path_field.on_commit = None
+            if state._saved_source:
+                state.path_field.buffer = TextBuffer(state._saved_source[0])
+            state.ui.focus(None)
+            message("Rename cancelled")
+            return True
     if event[1] == "S" and event[2]:
         save()
         return True
@@ -1069,7 +1265,8 @@ def bind_actions():
                             (state.add_system_button, open_attach_system_menu),
                             (state.links_header, lambda: toggle_section("links"))):
         control.action = action
-    for control, action in ((state.path_field, open_path), (state.tags_field, commit_tags),
+    state.path_field.on_click = on_path_field_click
+    for control, action in ((state.tags_field, commit_tags),
                             (state.parent_field, commit_parent), (state.relation_field, commit_relation),
                             (state.name_field, commit_name)):
         control.on_commit = action
@@ -1316,13 +1513,18 @@ def context_actions(target):
         return actions
 
     if isinstance(target, dict) and target.get('code'):
-        actions = []
-        if state.code.system_name and 'owner' in state.code.relations:
+        cur_file = state.path_field.buffer.text.strip() or "system.py"
+        actions = [
+            dict(label=f"Save / reload ('{cur_file}')", run=lambda _: save()),
+            dict(label=f"Rename '{cur_file}'...", run=lambda _: prompt_rename_file()),
+            dict(label="Open file...", run=lambda _: open_file_menu()),
+            dict(label="+ New system script...", run=lambda _: new_source()),
+        ]
+        if state.code.components.get("system_name") and 'owner' in state.code.relations:
             owner = state.code.relations['owner']
-            sys_name = state.code.system_name
+            sys_name = state.code.components['system_name']
             actions.append(dict(label=f"Revert system '{sys_name}'", run=lambda _: open_system(owner, sys_name)))
-            actions.append(dict(label=f"Save system '{sys_name}'", run=lambda _: save_file()))
-            actions.append(None)
+        actions.append(None)
         actions.extend([
             dict(label="Select All", run=lambda _: editor_select_all()),
             dict(label="Copy", run=lambda _: editor_copy()),
