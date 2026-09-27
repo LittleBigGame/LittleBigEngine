@@ -3,18 +3,29 @@
 
 def draw():
     with graphics.view(entity.relations["camera"], entity.relations["viewport"]):
-        for child in query("x", "y", recursive=True):
-            color = child.components.get("color")
-            if color is None:
-                continue
-            w = child.components.get("w", 1.0)
-            h = child.components.get("h", 1.0)
-            layer = child.components.get("layer", 1)
-            graphics.rect(child.x, child.y, w, h,
-                          color=color, key=child.id, layer=layer)
+        def draw_tree(node, px=0.0, py=0.0):
+            x = px + node.components.get("x", 0.0)
+            y = py + node.components.get("y", 0.0)
+            color = node.components.get("color")
+            if color is not None:
+                w = node.components.get("w", 1.0)
+                h = node.components.get("h", 1.0)
+                layer = node.components.get("layer", 1)
+                graphics.rect(x, y, w, h, color=color, key=node.id, layer=layer)
+            for child in node.children:
+                draw_tree(child, x, y)
+
+        for child in entity.children:
+            draw_tree(child)
+
         selected = entity.relations.get("selection")
         if selected is not None and selected.alive and "x" in selected.components and "y" in selected.components:
-            x, y = selected.x, selected.y
+            x, y = 0.0, 0.0
+            curr = selected
+            while curr is not None and curr is not entity:
+                x += curr.components.get("x", 0.0)
+                y += curr.components.get("y", 0.0)
+                curr = curr.parent
             w = selected.components.get("w", 0.5)
             h = selected.components.get("h", 0.5)
             camera = entity.relations.get("camera")

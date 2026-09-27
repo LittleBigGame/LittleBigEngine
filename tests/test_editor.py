@@ -2118,5 +2118,14 @@ class EditorTests(unittest.TestCase):
         self.assertTrue(any("Player" in lbl and "Parent" in lbl for lbl in turret_items))
         self.send(("key", "ESCAPE", False, False))
 
+        # 7. Moving parent automatically moves child entity's rendered world position
+        player.x = 2.0
+        player.y = 3.0
+        self.runtime.step(0)
+        tx_moved, ty_moved = world_to_screen(ed.camera, ed.viewport, 2.5, 3.5)
+        # Clicking at new world position selects turret
+        self.send(("click", tx_moved, ty_moved, 1, 0))
+        self.assertIs(ed.app.relations.get("selection"), turret)
+
 
 

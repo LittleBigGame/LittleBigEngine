@@ -1607,11 +1607,36 @@ def scroll_list(control, event):
     control.scroll = max(0, control.scroll-int(event[4])*3)
 
 
+def get_game_world_pos(e):
+    x, y = 0.0, 0.0
+    curr = e
+    while curr is not None and curr is not state.game:
+        x += curr.components.get("x", 0.0)
+        y += curr.components.get("y", 0.0)
+        curr = curr.parent
+    return x, y
+
+
+def find_hit_game_entity(wx, wy):
+    for child in reversed(state.game.descendants):
+        if "x" in child.components and "y" in child.components:
+            x, y = get_game_world_pos(child)
+            w = child.components.get("w", 0.0)
+            h = child.components.get("h", 0.0)
+            l, r = min(x, x + w), max(x, x + w)
+            b, t = min(y, y + h), max(y, y + h)
+            if l <= wx <= r and b <= wy <= t:
+                return child
+    return None
+
+
 def viewport_click(control, event):
     control.drag_pos = None
     wx, wy = screen_to_world(state.camera, control, event[1], event[2])
-    hits = set(space.query(wx, wy))
-    target = next((child for child in reversed(state.game.descendants) if child in hits), None)
+    target = find_hit_game_entity(wx, wy)
+    if target is None:
+        hits = set(space.query(wx, wy))
+        target = next((child for child in reversed(state.game.descendants) if child in hits), None)
     if target:
         select(target)
 
@@ -1784,15 +1809,18 @@ def get_highlight_stack(mx, my):
     # 1. Check if mouse is inside the viewport
     if hasattr(state, "viewport") and contains(state.viewport, mx, my):
         wx, wy = screen_to_world(state.camera, state.viewport, mx, my)
-        hits = set(space.query(wx, wy))
-        hit_entity = next((child for child in reversed(state.game.descendants) if child in hits), None)
+        hit_entity = find_hit_game_entity(wx, wy)
+        if hit_entity is None:
+            hits = set(space.query(wx, wy))
+            hit_entity = next((child for child in reversed(state.game.descendants) if child in hits), None)
         if hit_entity is not None:
             curr = hit_entity
             idx = 0
             while curr is not None and curr is not state.game and hasattr(curr, "x") and hasattr(curr, "y"):
+                wx_e, wy_e = get_game_world_pos(curr)
                 bw = curr.components.get("w", 0)
                 bh = curr.components.get("h", 0)
-                sx0, sy0 = world_to_screen(state.camera, state.viewport, curr.x, curr.y + bh)
+                sx0, sy0 = world_to_screen(state.camera, state.viewport, wx_e, wy_e + bh)
                 sw = max(4, bw * state.camera.zoom)
                 sh = max(4, bh * state.camera.zoom)
                 rx = max(state.viewport.x, sx0)
@@ -1853,8 +1881,10 @@ def context_target(control, event):
         return dict(entity=control.relations['target'], relation=control.relation_key)
     if control is state.viewport:
         wx, wy = screen_to_world(state.camera, control, event[1], event[2])
-        hits = set(space.query(wx, wy))
-        tgt = next((child for child in reversed(state.game.descendants) if child in hits), state.game)
+        tgt = find_hit_game_entity(wx, wy)
+        if tgt is None:
+            hits = set(space.query(wx, wy))
+            tgt = next((child for child in reversed(state.game.descendants) if child in hits), state.game)
         select(tgt)
         return tgt
     for candidate in (control,) + control.ancestors:
