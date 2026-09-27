@@ -2037,41 +2037,61 @@ class EditorTests(unittest.TestCase):
         self.assertNotIn("Select 'CodeEditor' in hierarchy", action_labels)
         self.send(("key", "ESCAPE", False, False))
 
-        # 2. Ctrl + Right-Click deeply targets the exact clicked UI entity
-        self.send(("click", ed.run_button.x + 10, ed.run_button.y + 10, 4, 2))  # Modifier 2 = MOD_CTRL
-        menu_btn = ed.app.relations.get("context_menu")
-        self.assertIsNotNone(menu_btn)
-        self.assertIsInstance(menu_btn.context_target, dict)
-        self.assertTrue(menu_btn.context_target.get("deep"))
-        self.assertIs(menu_btn.context_target.get("entity"), ed.run_button)
-        deep_labels = [c.text for c in menu_btn.children if "text" in c.components]
-        self.assertTrue(any("Select" in lbl and "ToggleRun" in lbl for lbl in deep_labels))
-        self.send(("key", "ESCAPE", False, False))
-
-        # Deep clicking inside code editor targets the specific control entity under the cursor
-        self.send(("click", ed.code.x + 20, ed.code.y + 20, 4, 2))
-        menu_code = ed.app.relations.get("context_menu")
-        self.assertIsNotNone(menu_code)
-        target_ent = menu_code.context_target.get("entity")
-        self.assertTrue(target_ent is ed.code or target_ent.parent is ed.code)
-        self.send(("key", "ESCAPE", False, False))
-
-        # 3. Ctrl hover outline is rendered when Ctrl is held
+        # 2. Holding Ctrl immediately highlights the stack without clicking
         self.send(("key", "LCTRL", True, False))
         self.send(("motion", ed.header.x + 20, ed.header.y + 10, 2))
         self.assertTrue(ed.ui.ctrl_held)
-        # Call draw and verify outline rect keys are generated in graphics
+        # Call draw and verify outline rects for Header (leaf) and App (parent) are generated
         self.graphics.rectangles.clear()
         ed.ui.draw()
         hl_keys = [kw.get("key") for _, kw in self.graphics.rectangles if kw.get("key") and isinstance(kw["key"], tuple) and kw["key"][0] == "ctrl_hl"]
-        self.assertEqual(len(hl_keys), 4)  # top, bottom, left, right outlines
-        # Releasing Ctrl removes outline on next draw
+        self.assertEqual(len(hl_keys), 8)  # 4 for Header + 4 for App
+
+        # 3. Holding Ctrl over a game entity highlights both entity and viewport
+        player = self.runtime.create(parent=ed.game, name="Player", x=0.0, y=0.0, w=1.0, h=1.0)
+        self.runtime.step(0)
+        from lbe.space import world_to_screen
+        sx, sy = world_to_screen(ed.camera, ed.viewport, 0.0, 0.0)
+        self.send(("motion", sx, sy, 2))
+        self.graphics.rectangles.clear()
+        ed.ui.draw()
+        hl_rects = [kw for _, kw in self.graphics.rectangles if kw.get("key") and isinstance(kw["key"], tuple) and kw["key"][0] == "ctrl_hl"]
+        self.assertEqual(len(hl_rects), 12)  # 4 for Player + 4 for Viewport + 4 for App
+
+        # Releasing Ctrl removes outlines on next draw
         self.send(("key_up", "LCTRL", False, False))
         self.assertFalse(ed.ui.ctrl_held)
         self.graphics.rectangles.clear()
         ed.ui.draw()
         hl_keys_after = [kw.get("key") for _, kw in self.graphics.rectangles if kw.get("key") and isinstance(kw["key"], tuple) and kw["key"][0] == "ctrl_hl"]
         self.assertEqual(len(hl_keys_after), 0)
+
+        # 4. Ctrl + Right-Click on game entity provides color-coded stack selection
+        self.send(("click", sx, sy, 4, 2))  # Modifier 2 = MOD_CTRL
+        menu_game = ed.app.relations.get("context_menu")
+        self.assertIsNotNone(menu_game)
+        self.assertTrue(menu_game.context_target.get("deep"))
+        game_items = [c for c in menu_game.children if "text" in c.components]
+        sel_labels = [c.text for c in game_items if "Select" in c.text]
+        self.assertTrue(any("Player" in lbl and "Leaf" in lbl for lbl in sel_labels))
+        self.assertTrue(any("Viewport" in lbl and "Parent" in lbl for lbl in sel_labels))
+        self.assertTrue(any("Application" in lbl and "Root" in lbl for lbl in sel_labels))
+
+        # Clicking '> Select 'Viewport' (Parent)' selects the viewport
+        vp_btn = next(c for c in game_items if "Viewport" in c.text and "Select" in c.text)
+        self.click(vp_btn)
+        self.assertIs(ed.app.relations.get("selection"), ed.viewport)
+        self.send(("key", "ESCAPE", False, False))
+
+        # 5. Ctrl + Right-Click on RunButton deeply targets it and allows selection
+        self.send(("click", ed.run_button.x + 10, ed.run_button.y + 10, 4, 2))
+        menu_btn = ed.app.relations.get("context_menu")
+        self.assertIsNotNone(menu_btn)
+        self.assertTrue(menu_btn.context_target.get("deep"))
+        self.assertIs(menu_btn.context_target.get("entity"), ed.run_button)
+        deep_labels = [c.text for c in menu_btn.children if "text" in c.components]
+        self.assertTrue(any("Select" in lbl and "ToggleRun" in lbl for lbl in deep_labels))
+        self.send(("key", "ESCAPE", False, False))
 
 
 

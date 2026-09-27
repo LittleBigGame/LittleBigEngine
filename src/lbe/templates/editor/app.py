@@ -10,9 +10,9 @@ from uuid import UUID
 
 from lbe.ui import (UI, put, contains, parse_box, content_rect, stack, dock,
                     row, column, apply_layout, Layout, BG, PANEL, FIELD, ACCENT,
-                    INK, MUTED, PITCH, LINE)
+                    INK, MUTED, PITCH, LINE, STACK_COLORS)
 from lbe.text import TextBuffer
-from lbe.space import screen_to_world
+from lbe.space import screen_to_world, world_to_screen
 from lbe.project import save_project, load_project_data, deserialize_entities
 from lbe.menus import open_menu
 
@@ -1663,6 +1663,7 @@ def keyboard(event):
 def bind_actions():
     state.app.context_target = context_target
     state.app.context_actions = context_actions
+    state.app.highlight_provider = get_highlight_stack
     state.app.on_key = keyboard
     state.app.on_ui_error = message
     state.hierarchy.on_scroll = scroll_list
@@ -1778,15 +1779,57 @@ def editor_paste():
         buf.insert(text)
 
 
+def get_highlight_stack(mx, my):
+    stack = []
+    # 1. Check if mouse is inside the viewport
+    if hasattr(state, "viewport") and contains(state.viewport, mx, my):
+        wx, wy = screen_to_world(state.camera, state.viewport, mx, my)
+        hits = set(space.query(wx, wy))
+        hit_entity = next((child for child in reversed(state.game.children) if child in hits), None)
+        if hit_entity is not None:
+            bw = hit_entity.components.get("w", 0)
+            bh = hit_entity.components.get("h", 0)
+            sx0, sy0 = world_to_screen(state.camera, state.viewport, hit_entity.x, hit_entity.y + bh)
+            sw = max(4, bw * state.camera.zoom)
+            sh = max(4, bh * state.camera.zoom)
+            rx = max(state.viewport.x, sx0)
+            ry = max(state.viewport.y, sy0)
+            rw = max(0, min(sx0 + sw, state.viewport.x + state.viewport.w) - rx)
+            rh = max(0, min(sy0 + sh, state.viewport.y + state.viewport.h) - ry)
+            stack.append((hit_entity, (rx, ry, rw, rh), STACK_COLORS[0]))
+            vp = state.viewport
+            stack.append((vp, (vp.x, vp.y, vp.w, vp.h), STACK_COLORS[1]))
+            app = state.app
+            stack.append((app, (app.x, app.y, app.w, app.h), STACK_COLORS[2]))
+            return stack
+
+    # 2. Controls in UI
+    hits = [c for c in state.ui.controls() if state.ui.visible(c) and contains(c, mx, my)]
+    if hits:
+        hits.reverse()
+        hits.sort(key=lambda c: (c.components.get("layer", 2), c.depth), reverse=True)
+        leaf = hits[0]
+        curr = leaf
+        idx = 0
+        while curr is not None and hasattr(curr, "w"):
+            if curr.w > 0 and curr.h > 0:
+                stack.append((curr, (curr.x, curr.y, curr.w, curr.h), STACK_COLORS[idx % len(STACK_COLORS)]))
+                idx += 1
+            curr = curr.parent
+    return stack
+
+
 def context_target(control, event):
     ctrl = False
     if len(event) > 4 and isinstance(event[4], int):
         ctrl = bool(event[4] & 2)
     if not ctrl:
-        ctrl = getattr(state.ui, "ctrl_held", False)
+        ctrl = bool(getattr(state.ui.input, "ctrl", False) or getattr(state.ui, "ctrl_held", False))
 
     if ctrl:
-        return dict(deep=True, entity=control)
+        stack = get_highlight_stack(event[1], event[2])
+        leaf = stack[0][0] if stack else control
+        return dict(deep=True, stack=stack, entity=leaf)
 
     if 'preset_key' in control.components:
         return dict(preset=control.components['preset_key'], control=control)
@@ -1827,20 +1870,60 @@ def context_actions(target):
     if target is None:
         return []
     if isinstance(target, dict) and target.get('deep'):
-        ent = target['entity']
-        ent_name = str(ent.components.get('name', str(getattr(ent, 'id', 'Entity'))[:8]))
-        actions = [
-            dict(label=f"Select '{ent_name}'", run=lambda _: select(ent)),
-            dict(label=f"Inspect '{ent_name}'", run=lambda _: open_panel(target=ent)),
-            dict(label=f"Rename '{ent_name}'...", run=lambda _: context_rename(ent)),
-            None,
-            dict(label="+ Add Component...", run=lambda _: (select(ent), open_add_component_menu())),
-            dict(label="Add child entity", run=lambda _: context_add_child(ent)),
-            dict(label="Duplicate entity", run=lambda _: (select(ent), inspector_duplicate_entity())),
-        ]
-        protected = (state.app, state.background, state.viewport, state.header, state.hierarchy, state.inspector)
-        if ent not in protected:
-            actions.append(dict(label=f"Delete '{ent_name}'", run=lambda _: (select(ent), inspector_delete_entity())))
+        stack = target.get('stack', [])
+        leaf_ent = target.get('entity')
+        actions = []
+        if stack:
+            # 1. Color-coded Selection options for EVERY entity in the stack
+            for i, (ent, _, color) in enumerate(stack):
+                role = "Leaf" if i == 0 else ("Parent" if i == 1 else ("Root" if i == len(stack) - 1 else f"Depth {i}"))
+                ent_name = str(ent.components.get('name', str(getattr(ent, 'id', 'Entity'))[:8]))
+                actions.append(dict(
+                    label=f"> Select '{ent_name}' ({role})",
+                    ink=color,
+                    run=lambda _, e=ent: select(e)
+                ))
+            actions.append(None)
+
+            # 2. Detailed editing actions for the primary / leaf entity
+            leaf_name = str(leaf_ent.components.get('name', str(getattr(leaf_ent, 'id', 'Entity'))[:8]))
+            leaf_color = stack[0][2]
+            actions.extend([
+                dict(label=f"Inspect '{leaf_name}'", ink=leaf_color, run=lambda _: open_panel(target=leaf_ent)),
+                dict(label=f"Rename '{leaf_name}'...", ink=leaf_color, run=lambda _: context_rename(leaf_ent)),
+                dict(label=f"+ Add Component to '{leaf_name}'...", ink=leaf_color, run=lambda _: (select(leaf_ent), open_add_component_menu())),
+                dict(label=f"Add child to '{leaf_name}'", ink=leaf_color, run=lambda _: context_add_child(leaf_ent)),
+                dict(label=f"Duplicate '{leaf_name}'", ink=leaf_color, run=lambda _: (select(leaf_ent), inspector_duplicate_entity())),
+            ])
+            protected = (state.app, state.background, state.viewport, state.header, state.hierarchy, state.inspector)
+            if leaf_ent not in protected:
+                actions.append(dict(label=f"Delete '{leaf_name}'", ink=leaf_color, run=lambda _: (select(leaf_ent), inspector_delete_entity())))
+
+            # 3. Quick Inspect actions for intermediate ancestors and root
+            if len(stack) > 1:
+                actions.append(None)
+                for ent, _, color in stack[1:]:
+                    e_name = str(ent.components.get('name', str(getattr(ent, 'id', 'Entity'))[:8]))
+                    actions.append(dict(
+                        label=f"Inspect '{e_name}'",
+                        ink=color,
+                        run=lambda _, e=ent: open_panel(target=e)
+                    ))
+        else:
+            ent = leaf_ent
+            ent_name = str(ent.components.get('name', str(getattr(ent, 'id', 'Entity'))[:8]))
+            actions = [
+                dict(label=f"Select '{ent_name}'", run=lambda _: select(ent)),
+                dict(label=f"Inspect '{ent_name}'", run=lambda _: open_panel(target=ent)),
+                dict(label=f"Rename '{ent_name}'...", run=lambda _: context_rename(ent)),
+                None,
+                dict(label="+ Add Component...", run=lambda _: (select(ent), open_add_component_menu())),
+                dict(label="Add child entity", run=lambda _: context_add_child(ent)),
+                dict(label="Duplicate entity", run=lambda _: (select(ent), inspector_duplicate_entity())),
+            ]
+            protected = (state.app, state.background, state.viewport, state.header, state.hierarchy, state.inspector)
+            if ent not in protected:
+                actions.append(dict(label=f"Delete '{ent_name}'", run=lambda _: (select(ent), inspector_delete_entity())))
         return actions
 
     if isinstance(target, dict) and target.get('code'):

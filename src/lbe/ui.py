@@ -15,6 +15,13 @@ ACCENT = (69, 182, 199)
 INK = (220, 230, 239, 255)
 MUTED = (145, 163, 183, 255)
 ERROR = (248, 81, 73, 255)
+STACK_COLORS = [
+    (56, 189, 248, 255),   # 0: Cyan (Leaf / innermost target)
+    (52, 211, 153, 255),   # 1: Emerald Green (Direct parent)
+    (251, 191, 36, 255),   # 2: Amber (Grandparent)
+    (232, 121, 249, 255),  # 3: Fuchsia / Purple
+    (251, 113, 133, 255),  # 4: Coral / Rose
+]
 
 
 def put(entity, **values):
@@ -386,8 +393,15 @@ class UI:
         elif kind == "drag":
             if len(event) > 4 and isinstance(event[4], int):
                 self.ctrl_held = bool(event[4] & 2)
-        elif kind in ("key", "key_up"):
-            if len(event) > 2 and isinstance(event[2], bool):
+        elif kind == "key":
+            if len(event) > 1 and event[1] in ("LCTRL", "RCTRL", "CTRL"):
+                self.ctrl_held = True
+            elif len(event) > 2 and isinstance(event[2], bool):
+                self.ctrl_held = event[2]
+        elif kind == "key_up":
+            if len(event) > 1 and event[1] in ("LCTRL", "RCTRL", "CTRL"):
+                self.ctrl_held = False
+            elif len(event) > 2 and isinstance(event[2], bool):
                 self.ctrl_held = event[2]
 
         if dispatch_menu(self, event):
@@ -794,18 +808,33 @@ class UI:
                     graphics.text(str(control.text)[:width], control.x+inset, control.y+(8 if "panel" in control.tags else 4),
                                   color=control.components.get("ink", INK), key=(control.id, "text"), layer=layer+1)
 
-        if getattr(self, "ctrl_held", False) and hasattr(self, "mouse_pos") and "context_menu" not in self.root.relations:
-            mx, my = self.mouse_pos
-            hits = [c for c in self.controls() if self.visible(c) and contains(c, mx, my)]
-            if hits:
-                hits.reverse()
-                hits.sort(key=lambda c: (c.components.get("layer", 2), c.depth), reverse=True)
-                target = hits[0]
-                if target.w > 0 and target.h > 0:
-                    highlight_color = (56, 189, 248, 255)
-                    outline_w = 2
-                    graphics.rect(target.x, target.y, target.w, outline_w, highlight_color, key=("ctrl_hl", "top"), layer=8)
-                    graphics.rect(target.x, target.y + target.h - outline_w, target.w, outline_w, highlight_color, key=("ctrl_hl", "bottom"), layer=8)
-                    graphics.rect(target.x, target.y, outline_w, target.h, highlight_color, key=("ctrl_hl", "left"), layer=8)
-                    graphics.rect(target.x + target.w - outline_w, target.y, outline_w, target.h, highlight_color, key=("ctrl_hl", "right"), layer=8)
+        is_ctrl = bool(getattr(self.input, "ctrl", False) or getattr(self, "ctrl_held", False))
+        if is_ctrl:
+            mx, my = getattr(self, "mouse_pos", (getattr(self.input, "x", 0), getattr(self.input, "y", 0)))
+            provider = self.root.components.get("highlight_provider")
+            if provider:
+                stack = provider(mx, my)
+            else:
+                hits = [c for c in self.controls() if self.visible(c) and contains(c, mx, my)]
+                stack = []
+                if hits:
+                    hits.reverse()
+                    hits.sort(key=lambda c: (c.components.get("layer", 2), c.depth), reverse=True)
+                    leaf = hits[0]
+                    curr = leaf
+                    idx = 0
+                    while curr is not None and hasattr(curr, "w"):
+                        if curr.w > 0 and curr.h > 0:
+                            stack.append((curr, (curr.x, curr.y, curr.w, curr.h), STACK_COLORS[idx % len(STACK_COLORS)]))
+                            idx += 1
+                        curr = curr.parent
+
+            outline_w = 2
+            for i, (item, (rx, ry, rw, rh), color) in enumerate(reversed(stack)):
+                layer = 6 + i
+                item_key = getattr(item, "id", i)
+                graphics.rect(rx, ry, rw, outline_w, color, key=("ctrl_hl", item_key, "top"), layer=layer)
+                graphics.rect(rx, ry + rh - outline_w, rw, outline_w, color, key=("ctrl_hl", item_key, "bottom"), layer=layer)
+                graphics.rect(rx, ry, outline_w, rh, color, key=("ctrl_hl", item_key, "left"), layer=layer)
+                graphics.rect(rx + rw - outline_w, ry, outline_w, rh, color, key=("ctrl_hl", item_key, "right"), layer=layer)
 

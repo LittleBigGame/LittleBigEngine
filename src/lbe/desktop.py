@@ -12,6 +12,7 @@ class Input:
     pending: list = field(default_factory=list)
     x: float = 0
     y: float = 0
+    ctrl: bool = False
 
     def drain(self):
         pending, self.pending = self.pending, []
@@ -183,6 +184,7 @@ def launch(build, *, headless=False, frames=None, screenshot=None):
     @window.event
     def on_mouse_motion(x, y, dx, dy):
         ctrl = bool(key_handler[key.LCTRL] or key_handler[key.RCTRL])
+        input_state.ctrl = ctrl
         shift = bool(key_handler[key.LSHIFT] or key_handler[key.RSHIFT])
         alt = bool(key_handler[key.LALT] or key_handler[key.RALT])
         mods = (key.MOD_CTRL if ctrl else 0) | (key.MOD_SHIFT if shift else 0) | (key.MOD_ALT if alt else 0)
@@ -200,7 +202,8 @@ def launch(build, *, headless=False, frames=None, screenshot=None):
 
     @window.event
     def on_key_press(symbol, modifiers):
-        ctrl = bool(modifiers & key.MOD_CTRL)
+        ctrl = bool(modifiers & key.MOD_CTRL) or symbol in (key.LCTRL, key.RCTRL)
+        input_state.ctrl = ctrl
         shift = bool(modifiers & key.MOD_SHIFT)
         if symbol in (key.BACKSPACE, key.DELETE) and ctrl:
             input_state.pending.append(("key", key.symbol_string(symbol), True, shift))
@@ -209,12 +212,13 @@ def launch(build, *, headless=False, frames=None, screenshot=None):
                       key.PAGEUP, key.PAGEDOWN, key.BACKSPACE, key.DELETE):
             return pyglet.event.EVENT_HANDLED
         input_state.pending.append(("key", key.symbol_string(symbol),
-                                    bool(modifiers & key.MOD_CTRL), bool(modifiers & key.MOD_SHIFT)))
+                                    ctrl, shift))
         return pyglet.event.EVENT_HANDLED
 
     @window.event
     def on_key_release(symbol, modifiers):
-        ctrl = bool(modifiers & key.MOD_CTRL)
+        ctrl = bool(key_handler[key.LCTRL] or key_handler[key.RCTRL]) if key_handler else False
+        input_state.ctrl = ctrl
         shift = bool(modifiers & key.MOD_SHIFT)
         input_state.pending.append(("key_up", key.symbol_string(symbol), ctrl, shift))
 
@@ -250,6 +254,7 @@ def launch(build, *, headless=False, frames=None, screenshot=None):
     def tick(dt):
         nonlocal elapsed
         elapsed += dt
+        input_state.ctrl = bool(key_handler[key.LCTRL] or key_handler[key.RCTRL])
         window.invalid = True
 
     pyglet.clock.schedule_interval(tick, 1 / 60)
