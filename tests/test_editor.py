@@ -2093,5 +2093,30 @@ class EditorTests(unittest.TestCase):
         self.assertTrue(any("Select" in lbl and "ToggleRun" in lbl for lbl in deep_labels))
         self.send(("key", "ESCAPE", False, False))
 
+        # 6. Child entity under Player is drawn, highlighted in full stack, and selectable
+        turret = self.runtime.create(parent=player, name="Turret", x=0.2, y=0.2, w=0.6, h=0.6, color=(255, 100, 100))
+        self.runtime.step(0)
+        tx, ty = world_to_screen(ed.camera, ed.viewport, 0.5, 0.5)
+        ed.ui.mouse_pos = (tx, ty)
+        ed.input.ctrl = True
+        self.graphics.rectangles.clear()
+        ed.ui.draw()
+        hl_rects = [kw for _, kw in self.graphics.rectangles if kw.get("key") and isinstance(kw["key"], tuple) and kw["key"][0] == "ctrl_hl"]
+        # 4 for Turret (Leaf) + 4 for Player (Parent) + 4 for Viewport (Parent) + 4 for App (Root) = 16
+        self.assertEqual(len(hl_rects), 16)
+
+        # Viewport click directly on child entity selects the child entity
+        self.send(("click", tx, ty, 1, 0))
+        self.assertIs(ed.app.relations.get("selection"), turret)
+
+        # Ctrl + Right-Click on turret includes Turret as Leaf and Player as Parent
+        self.send(("click", tx, ty, 4, 2))
+        menu_turret = ed.app.relations.get("context_menu")
+        self.assertIsNotNone(menu_turret)
+        turret_items = [c.text for c in menu_turret.children if "text" in c.components and "Select" in c.text]
+        self.assertTrue(any("Turret" in lbl and "Leaf" in lbl for lbl in turret_items))
+        self.assertTrue(any("Player" in lbl and "Parent" in lbl for lbl in turret_items))
+        self.send(("key", "ESCAPE", False, False))
+
 
 

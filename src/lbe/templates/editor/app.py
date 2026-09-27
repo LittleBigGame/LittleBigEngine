@@ -1611,7 +1611,7 @@ def viewport_click(control, event):
     control.drag_pos = None
     wx, wy = screen_to_world(state.camera, control, event[1], event[2])
     hits = set(space.query(wx, wy))
-    target = next((child for child in reversed(state.game.children) if child in hits), None)
+    target = next((child for child in reversed(state.game.descendants) if child in hits), None)
     if target:
         select(target)
 
@@ -1785,22 +1785,29 @@ def get_highlight_stack(mx, my):
     if hasattr(state, "viewport") and contains(state.viewport, mx, my):
         wx, wy = screen_to_world(state.camera, state.viewport, mx, my)
         hits = set(space.query(wx, wy))
-        hit_entity = next((child for child in reversed(state.game.children) if child in hits), None)
+        hit_entity = next((child for child in reversed(state.game.descendants) if child in hits), None)
         if hit_entity is not None:
-            bw = hit_entity.components.get("w", 0)
-            bh = hit_entity.components.get("h", 0)
-            sx0, sy0 = world_to_screen(state.camera, state.viewport, hit_entity.x, hit_entity.y + bh)
-            sw = max(4, bw * state.camera.zoom)
-            sh = max(4, bh * state.camera.zoom)
-            rx = max(state.viewport.x, sx0)
-            ry = max(state.viewport.y, sy0)
-            rw = max(0, min(sx0 + sw, state.viewport.x + state.viewport.w) - rx)
-            rh = max(0, min(sy0 + sh, state.viewport.y + state.viewport.h) - ry)
-            stack.append((hit_entity, (rx, ry, rw, rh), STACK_COLORS[0]))
+            curr = hit_entity
+            idx = 0
+            while curr is not None and curr is not state.game and hasattr(curr, "x") and hasattr(curr, "y"):
+                bw = curr.components.get("w", 0)
+                bh = curr.components.get("h", 0)
+                sx0, sy0 = world_to_screen(state.camera, state.viewport, curr.x, curr.y + bh)
+                sw = max(4, bw * state.camera.zoom)
+                sh = max(4, bh * state.camera.zoom)
+                rx = max(state.viewport.x, sx0)
+                ry = max(state.viewport.y, sy0)
+                rw = max(0, min(sx0 + sw, state.viewport.x + state.viewport.w) - rx)
+                rh = max(0, min(sy0 + sh, state.viewport.y + state.viewport.h) - ry)
+                if rw > 0 and rh > 0:
+                    stack.append((curr, (rx, ry, rw, rh), STACK_COLORS[idx % len(STACK_COLORS)]))
+                    idx += 1
+                curr = curr.parent
             vp = state.viewport
-            stack.append((vp, (vp.x, vp.y, vp.w, vp.h), STACK_COLORS[1]))
+            stack.append((vp, (vp.x, vp.y, vp.w, vp.h), STACK_COLORS[idx % len(STACK_COLORS)]))
+            idx += 1
             app = state.app
-            stack.append((app, (app.x, app.y, app.w, app.h), STACK_COLORS[2]))
+            stack.append((app, (app.x, app.y, app.w, app.h), STACK_COLORS[idx % len(STACK_COLORS)]))
             return stack
 
     # 2. Controls in UI
@@ -1847,7 +1854,7 @@ def context_target(control, event):
     if control is state.viewport:
         wx, wy = screen_to_world(state.camera, control, event[1], event[2])
         hits = set(space.query(wx, wy))
-        tgt = next((child for child in reversed(state.game.children) if child in hits), state.game)
+        tgt = next((child for child in reversed(state.game.descendants) if child in hits), state.game)
         select(tgt)
         return tgt
     for candidate in (control,) + control.ancestors:
