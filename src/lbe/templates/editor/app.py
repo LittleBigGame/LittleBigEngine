@@ -429,11 +429,13 @@ def hierarchy_sync():
     max_scroll = max(0, len(visible) - capacity)
     put(state.hierarchy, scroll=max(0, min(state.hierarchy.scroll, max_scroll)))
     while len(state.hierarchy_rows) < capacity:
-        row = state.ui.create(state.hierarchy, f'HierarchyRow{len(state.hierarchy_rows)}', 'button', text='', indent=0)
+        row = state.ui.create(state.hierarchy, f'HierarchyRow{len(state.hierarchy_rows)}', 'button', text='', indent=0,
+                              normal_color=PANEL, hover_color=(35, 45, 58))
         row.on_click = hierarchy_click
         state.hierarchy_rows.append(row)
     has_scroll = len(visible) > capacity and capacity > 0
     row_w = state.hierarchy.w - 20 if has_scroll else state.hierarchy.w - 16
+    mouse_pos = getattr(state.ui, "mouse_pos", None)
     for index, row in enumerate(state.hierarchy_rows):
         source = index + state.hierarchy.scroll
         if index >= capacity or source >= len(visible):
@@ -447,9 +449,13 @@ def hierarchy_sync():
         is_selected = target is selected()
         indicator = '> ' if is_selected else '  '
         text = '  ' * min(depth, 8) + (marker if target.children else ' ') + ' ' + indicator + name
+        normal_col = (45, 95, 125) if is_selected else PANEL
+        hover_col = (55, 105, 135) if is_selected else (35, 45, 58)
+        is_hovered = bool(mouse_pos and contains(row, *mouse_pos))
         put(row, visible=True, x=state.hierarchy.x + 8, y=state.hierarchy.y + 32 + index * 22,
             w=row_w, h=22, text=text, indent=min(depth, 8) * 16,
-            color=(45, 95, 125) if is_selected else PANEL,
+            normal_color=normal_col, hover_color=hover_col,
+            color=hover_col if is_hovered else normal_col,
             ink=(255, 255, 255, 255) if is_selected else INK)
     if has_scroll:
         track_x = state.hierarchy.x + state.hierarchy.w - 10
@@ -653,7 +659,7 @@ def inspector_sync():
                 state.system_edit_buttons.append(e_btn)
                 state.system_detach_buttons.append(d_btn)
 
-            btn_edit_w = 40
+            btn_edit_w = 52
             s_w = max(40, ip.w - 24 - btn_edit_w - 6)
 
             for index in range(len(state.system_rows)):
@@ -1747,7 +1753,41 @@ def context_rename(target):
     message(f"Renaming '{ent_name}' (type new name and press Enter)")
 
 
+def editor_select_all():
+    buf = state.code.buffer
+    buf.anchor, buf.cursor = 0, len(buf.text)
+
+
+def editor_copy():
+    buf = state.code.buffer
+    if buf.selected_text:
+        state.window.set_clipboard_text(buf.selected_text)
+
+
+def editor_cut():
+    buf = state.code.buffer
+    if buf.selected_text:
+        state.window.set_clipboard_text(buf.selected_text)
+        buf.insert("")
+
+
+def editor_paste():
+    buf = state.code.buffer
+    text = state.window.get_clipboard_text()
+    if text:
+        buf.insert(text)
+
+
 def context_target(control, event):
+    ctrl = False
+    if len(event) > 4 and isinstance(event[4], int):
+        ctrl = bool(event[4] & 2)
+    if not ctrl:
+        ctrl = getattr(state.ui, "ctrl_held", False)
+
+    if ctrl:
+        return dict(deep=True, entity=control)
+
     if 'preset_key' in control.components:
         return dict(preset=control.components['preset_key'], control=control)
     if 'system_key' in control.components:
@@ -1764,16 +1804,61 @@ def context_target(control, event):
     if control is state.viewport:
         wx, wy = screen_to_world(state.camera, control, event[1], event[2])
         hits = set(space.query(wx, wy))
-        return next((child for child in reversed(state.game.children) if child in hits), state.game)
+        tgt = next((child for child in reversed(state.game.children) if child in hits), state.game)
+        select(tgt)
+        return tgt
     for candidate in (control,) + control.ancestors:
+        if candidate in state.hierarchy_rows and 'target' in candidate.relations:
+            tgt = candidate.relations['target']
+            select(tgt)
+            return tgt
         if 'target' in candidate.relations:
             return candidate.relations['target']
     if control is state.inspector or state.inspector in control.ancestors:
         return selected()
-    return control
+    if control is state.code or state.code in control.ancestors or control is state.code_panel or state.code_panel in control.ancestors:
+        return dict(code=True, control=state.code)
+    if control is state.hierarchy or state.hierarchy in control.ancestors:
+        return state.game
+    return None
 
 
 def context_actions(target):
+    if target is None:
+        return []
+    if isinstance(target, dict) and target.get('deep'):
+        ent = target['entity']
+        ent_name = str(ent.components.get('name', str(getattr(ent, 'id', 'Entity'))[:8]))
+        actions = [
+            dict(label=f"Select '{ent_name}'", run=lambda _: select(ent)),
+            dict(label=f"Inspect '{ent_name}'", run=lambda _: open_panel(target=ent)),
+            dict(label=f"Rename '{ent_name}'...", run=lambda _: context_rename(ent)),
+            None,
+            dict(label="+ Add Component...", run=lambda _: (select(ent), open_add_component_menu())),
+            dict(label="Add child entity", run=lambda _: context_add_child(ent)),
+            dict(label="Duplicate entity", run=lambda _: (select(ent), inspector_duplicate_entity())),
+        ]
+        protected = (state.app, state.background, state.viewport, state.header, state.hierarchy, state.inspector)
+        if ent not in protected:
+            actions.append(dict(label=f"Delete '{ent_name}'", run=lambda _: (select(ent), inspector_delete_entity())))
+        return actions
+
+    if isinstance(target, dict) and target.get('code'):
+        actions = []
+        if state.code.system_name and 'owner' in state.code.relations:
+            owner = state.code.relations['owner']
+            sys_name = state.code.system_name
+            actions.append(dict(label=f"Revert system '{sys_name}'", run=lambda _: open_system(owner, sys_name)))
+            actions.append(dict(label=f"Save system '{sys_name}'", run=lambda _: save_file()))
+            actions.append(None)
+        actions.extend([
+            dict(label="Select All", run=lambda _: editor_select_all()),
+            dict(label="Copy", run=lambda _: editor_copy()),
+            dict(label="Cut", run=lambda _: editor_cut()),
+            dict(label="Paste", run=lambda _: editor_paste()),
+        ])
+        return actions
+
     if isinstance(target, dict) and 'preset' in target:
         name = target['preset']
         return [

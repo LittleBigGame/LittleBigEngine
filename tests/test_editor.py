@@ -1971,4 +1971,107 @@ class EditorTests(unittest.TestCase):
         self.assertGreater(len(visible_comps_reexpanded), 0)
         self.assertTrue(ed.divider_components.visible)
 
+    def test_hierarchy_hover_color_and_no_flashing(self):
+        """Hierarchy row colors have matching normal/hover colors between sync and motion, preventing flashing."""
+        ed = self.editor
+        row = next(r for r in ed.hierarchy_rows if r.visible)
+        self.assertIn("normal_color", row.components)
+        self.assertIn("hover_color", row.components)
+        self.assertEqual(row.hover_color, (35, 45, 58))
+
+        # Mouse motion over row sets hover_color
+        self.send(("motion", row.x + 10, row.y + 10))
+        self.assertEqual(row.color, row.hover_color)
+
+        # Step update preserves hover_color while mouse remains on row (no flashing to normal)
+        self.runtime.step(0)
+        self.assertEqual(row.color, row.hover_color)
+
+        # Mouse motion away restores normal_color
+        self.send(("motion", ed.viewport.x + 10, ed.viewport.y + 10))
+        self.assertEqual(row.color, row.normal_color)
+
+    def test_system_edit_button_dimensions_and_visibility(self):
+        """System Edit button width is at least 52px so 'Edit' text fits without truncation to 'Edi'."""
+        ed = self.editor
+        ent = self.runtime.create(parent=ed.game, name="SysEntity")
+        self.select(ent)
+        self.runtime.step(0)
+        # Attach a system
+        from lbe.systems import SystemDefinition
+        ent.systems.attach("sample", SystemDefinition('def update(dt): pass'))
+        self.runtime.step(0)
+        edit_btn = next(b for b in ed.system_edit_buttons if b.visible)
+        self.assertEqual(edit_btn.text, "Edit")
+        self.assertGreaterEqual(edit_btn.w, 52)
+        # Pitch is 8, 4 chars * 8 = 32px; width 52 leaves 20px padding (>= 16px required)
+        self.assertGreaterEqual(edit_btn.w - 16, 4 * 8)
+
+    def test_hierarchy_right_click_selects_target(self):
+        """Right-clicking a hierarchy row immediately selects the entity in hierarchy and inspector."""
+        ed = self.editor
+        child = self.runtime.create(parent=ed.game, name="RightClickTarget")
+        self.runtime.step(0)
+        row = next(r for r in ed.hierarchy_rows if r.visible and r.relations.get("target") is child)
+        self.send(("click", row.x + 40, row.y + 10, 4, 0))
+        # Child is now selected
+        self.assertIs(ed.app.relations.get("selection"), child)
+        # Context menu is open targeting child
+        menu = ed.app.relations.get("context_menu")
+        self.assertIsNotNone(menu)
+        self.assertIs(menu.context_target, child)
+
+    def test_ctrl_right_click_deep_selection_and_highlight(self):
+        """Normal right-click uses game workflows; Ctrl+Right-Click provides deep inspect on any UI element."""
+        ed = self.editor
+
+        # 1. Normal right-click on Code Editor provides code actions, not selecting CodeEditor in hierarchy
+        self.send(("click", ed.code.x + 20, ed.code.y + 20, 4, 0))
+        menu = ed.app.relations.get("context_menu")
+        self.assertIsNotNone(menu)
+        self.assertIsInstance(menu.context_target, dict)
+        self.assertTrue(menu.context_target.get("code"))
+        action_labels = [c.text for c in menu.children if "text" in c.components]
+        self.assertIn("Select All", action_labels)
+        self.assertIn("Copy", action_labels)
+        self.assertNotIn("Select 'CodeEditor' in hierarchy", action_labels)
+        self.send(("key", "ESCAPE", False, False))
+
+        # 2. Ctrl + Right-Click deeply targets the exact clicked UI entity
+        self.send(("click", ed.run_button.x + 10, ed.run_button.y + 10, 4, 2))  # Modifier 2 = MOD_CTRL
+        menu_btn = ed.app.relations.get("context_menu")
+        self.assertIsNotNone(menu_btn)
+        self.assertIsInstance(menu_btn.context_target, dict)
+        self.assertTrue(menu_btn.context_target.get("deep"))
+        self.assertIs(menu_btn.context_target.get("entity"), ed.run_button)
+        deep_labels = [c.text for c in menu_btn.children if "text" in c.components]
+        self.assertTrue(any("Select" in lbl and "ToggleRun" in lbl for lbl in deep_labels))
+        self.send(("key", "ESCAPE", False, False))
+
+        # Deep clicking inside code editor targets the specific control entity under the cursor
+        self.send(("click", ed.code.x + 20, ed.code.y + 20, 4, 2))
+        menu_code = ed.app.relations.get("context_menu")
+        self.assertIsNotNone(menu_code)
+        target_ent = menu_code.context_target.get("entity")
+        self.assertTrue(target_ent is ed.code or target_ent.parent is ed.code)
+        self.send(("key", "ESCAPE", False, False))
+
+        # 3. Ctrl hover outline is rendered when Ctrl is held
+        self.send(("key", "LCTRL", True, False))
+        self.send(("motion", ed.header.x + 20, ed.header.y + 10, 2))
+        self.assertTrue(ed.ui.ctrl_held)
+        # Call draw and verify outline rect keys are generated in graphics
+        self.graphics.rectangles.clear()
+        ed.ui.draw()
+        hl_keys = [kw.get("key") for _, kw in self.graphics.rectangles if kw.get("key") and isinstance(kw["key"], tuple) and kw["key"][0] == "ctrl_hl"]
+        self.assertEqual(len(hl_keys), 4)  # top, bottom, left, right outlines
+        # Releasing Ctrl removes outline on next draw
+        self.send(("key_up", "LCTRL", False, False))
+        self.assertFalse(ed.ui.ctrl_held)
+        self.graphics.rectangles.clear()
+        ed.ui.draw()
+        hl_keys_after = [kw.get("key") for _, kw in self.graphics.rectangles if kw.get("key") and isinstance(kw["key"], tuple) and kw["key"][0] == "ctrl_hl"]
+        self.assertEqual(len(hl_keys_after), 0)
+
+
 

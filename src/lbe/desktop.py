@@ -141,6 +141,8 @@ def launch(build, *, headless=False, frames=None, screenshot=None):
     window = pyglet.window.Window(1440, 900, caption="LittleBigEngine", resizable=True, vsync=True,
                                   visible=not headless)
     window.set_minimum_size(1000, 700)
+    key_handler = key.KeyStateHandler()
+    window.push_handlers(key_handler)
     graphics = Graphics(window)
     input_state = Input()
     runtime = build(window, graphics, input_state)
@@ -180,8 +182,12 @@ def launch(build, *, headless=False, frames=None, screenshot=None):
 
     @window.event
     def on_mouse_motion(x, y, dx, dy):
+        ctrl = bool(key_handler[key.LCTRL] or key_handler[key.RCTRL])
+        shift = bool(key_handler[key.LSHIFT] or key_handler[key.RSHIFT])
+        alt = bool(key_handler[key.LALT] or key_handler[key.RALT])
+        mods = (key.MOD_CTRL if ctrl else 0) | (key.MOD_SHIFT if shift else 0) | (key.MOD_ALT if alt else 0)
         input_state.x, input_state.y = x, window.height - y
-        input_state.pending.append(("motion", x, window.height - y))
+        input_state.pending.append(("motion", x, window.height - y, mods))
 
     @window.event
     def on_mouse_scroll(x, y, scroll_x, scroll_y):
@@ -205,6 +211,13 @@ def launch(build, *, headless=False, frames=None, screenshot=None):
         input_state.pending.append(("key", key.symbol_string(symbol),
                                     bool(modifiers & key.MOD_CTRL), bool(modifiers & key.MOD_SHIFT)))
         return pyglet.event.EVENT_HANDLED
+
+    @window.event
+    def on_key_release(symbol, modifiers):
+        ctrl = bool(modifiers & key.MOD_CTRL)
+        shift = bool(modifiers & key.MOD_SHIFT)
+        input_state.pending.append(("key_up", key.symbol_string(symbol), ctrl, shift))
+
 
     motions = {
         key.MOTION_LEFT: "LEFT", key.MOTION_RIGHT: "RIGHT", key.MOTION_UP: "UP", key.MOTION_DOWN: "DOWN",

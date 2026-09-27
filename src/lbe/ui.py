@@ -376,9 +376,22 @@ class UI:
 
     def dispatch(self, event):
         from .menus import dispatch_menu
+        kind = event[0]
+        if kind == "motion":
+            if len(event) > 3 and isinstance(event[3], int):
+                self.ctrl_held = bool(event[3] & 2)
+        elif kind in ("click", "release"):
+            if len(event) > 4 and isinstance(event[4], int):
+                self.ctrl_held = bool(event[4] & 2)
+        elif kind == "drag":
+            if len(event) > 4 and isinstance(event[4], int):
+                self.ctrl_held = bool(event[4] & 2)
+        elif kind in ("key", "key_up"):
+            if len(event) > 2 and isinstance(event[2], bool):
+                self.ctrl_held = event[2]
+
         if dispatch_menu(self, event):
             return
-        kind = event[0]
         if kind == "motion":
             mx, my = event[1], event[2]
             self.mouse_pos = (mx, my)
@@ -386,7 +399,10 @@ class UI:
                 if ("splitter" in control.tags or "scrollbar_thumb" in control.tags or "button" in control.tags or "chip" in control.tags or "hoverable" in control.tags) and self.visible(control):
                     active = self.root.relations.get("active_drag")
                     hovered = (active is control) or (active is None and contains(control, mx, my))
-                    normal = control.components.get("normal_color", control.components.get("color", FIELD))
+                    normal = control.components.get("normal_color")
+                    if normal is None:
+                        normal = control.components.get("color", FIELD)
+                        control.components["normal_color"] = normal
                     target_color = control.components.get("hover_color", ACCENT) if hovered else normal
                     if control.color != target_color:
                         control.color = target_color
@@ -777,3 +793,19 @@ class UI:
                 else:
                     graphics.text(str(control.text)[:width], control.x+inset, control.y+(8 if "panel" in control.tags else 4),
                                   color=control.components.get("ink", INK), key=(control.id, "text"), layer=layer+1)
+
+        if getattr(self, "ctrl_held", False) and hasattr(self, "mouse_pos") and "context_menu" not in self.root.relations:
+            mx, my = self.mouse_pos
+            hits = [c for c in self.controls() if self.visible(c) and contains(c, mx, my)]
+            if hits:
+                hits.reverse()
+                hits.sort(key=lambda c: (c.components.get("layer", 2), c.depth), reverse=True)
+                target = hits[0]
+                if target.w > 0 and target.h > 0:
+                    highlight_color = (56, 189, 248, 255)
+                    outline_w = 2
+                    graphics.rect(target.x, target.y, target.w, outline_w, highlight_color, key=("ctrl_hl", "top"), layer=8)
+                    graphics.rect(target.x, target.y + target.h - outline_w, target.w, outline_w, highlight_color, key=("ctrl_hl", "bottom"), layer=8)
+                    graphics.rect(target.x, target.y, outline_w, target.h, highlight_color, key=("ctrl_hl", "left"), layer=8)
+                    graphics.rect(target.x + target.w - outline_w, target.y, outline_w, target.h, highlight_color, key=("ctrl_hl", "right"), layer=8)
+
