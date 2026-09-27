@@ -195,22 +195,28 @@ def launch(build, *, headless=False, frames=None, screenshot=None):
 
     @window.event
     def on_mouse_press(x, y, button, modifiers):
-        ctrl = check_ctrl() or bool(modifiers & key.MOD_CTRL)
-        mods = modifiers | (key.MOD_CTRL if ctrl else 0)
+        ctrl = check_ctrl() or bool(modifiers & key.MOD_CTRL) or bool({key.LCTRL, key.RCTRL} & pressed_keys)
+        shift = bool(modifiers & key.MOD_SHIFT) or bool({key.LSHIFT, key.RSHIFT} & pressed_keys)
+        alt = bool(modifiers & key.MOD_ALT) or bool({key.LALT, key.RALT} & pressed_keys)
+        mods = modifiers | (key.MOD_CTRL if ctrl else 0) | (key.MOD_SHIFT if shift else 0) | (key.MOD_ALT if alt else 0)
         input_state.ctrl = ctrl
         input_state.pending.append(("click", x, window.height - y, button, mods))
 
     @window.event
     def on_mouse_release(x, y, button, modifiers):
-        ctrl = check_ctrl() or bool(modifiers & key.MOD_CTRL)
-        mods = modifiers | (key.MOD_CTRL if ctrl else 0)
+        ctrl = check_ctrl() or bool(modifiers & key.MOD_CTRL) or bool({key.LCTRL, key.RCTRL} & pressed_keys)
+        shift = bool(modifiers & key.MOD_SHIFT) or bool({key.LSHIFT, key.RSHIFT} & pressed_keys)
+        alt = bool(modifiers & key.MOD_ALT) or bool({key.LALT, key.RALT} & pressed_keys)
+        mods = modifiers | (key.MOD_CTRL if ctrl else 0) | (key.MOD_SHIFT if shift else 0) | (key.MOD_ALT if alt else 0)
         input_state.ctrl = ctrl
         input_state.pending.append(("release", x, window.height - y, button, mods))
 
     @window.event
     def on_mouse_drag(x, y, dx, dy, buttons, modifiers):
-        ctrl = check_ctrl() or bool(modifiers & key.MOD_CTRL)
-        mods = modifiers | (key.MOD_CTRL if ctrl else 0)
+        ctrl = check_ctrl() or bool(modifiers & key.MOD_CTRL) or bool({key.LCTRL, key.RCTRL} & pressed_keys)
+        shift = bool(modifiers & key.MOD_SHIFT) or bool({key.LSHIFT, key.RSHIFT} & pressed_keys)
+        alt = bool(modifiers & key.MOD_ALT) or bool({key.LALT, key.RALT} & pressed_keys)
+        mods = modifiers | (key.MOD_CTRL if ctrl else 0) | (key.MOD_SHIFT if shift else 0) | (key.MOD_ALT if alt else 0)
         input_state.ctrl = ctrl
         input_state.pending.append(("drag", x, window.height - y, buttons, mods, dx, -dy))
 
@@ -270,12 +276,14 @@ def launch(build, *, headless=False, frames=None, screenshot=None):
     @window.event
     def on_text_motion(motion):
         if motion in motions:
-            input_state.pending.append(("key", motions[motion], False, False))
+            ctrl = check_ctrl() or bool({key.LCTRL, key.RCTRL} & pressed_keys)
+            input_state.pending.append(("key", motions[motion], ctrl, False))
 
     @window.event
     def on_text_motion_select(motion):
         if motion in motions:
-            input_state.pending.append(("key", motions[motion], False, True))
+            ctrl = check_ctrl() or bool({key.LCTRL, key.RCTRL} & pressed_keys)
+            input_state.pending.append(("key", motions[motion], ctrl, True))
 
     @window.event
     def on_close():

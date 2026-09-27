@@ -515,3 +515,93 @@ class AssetSystemTests(unittest.TestCase):
         ed.app.components["on_entity_drop"](ent_drag, drop_hier)
 
         self.assertIs(child_ent.parent, parent_ent)
+
+    def test_drop_asset_and_entity_inserts_at_mouse_position(self):
+        """Dropping an asset or entity into the code editor inserts it at the mouse position."""
+        ed = self.editor
+
+        ed.code.buffer.text = "def start():\n    x = 1\n"
+        ed.code.buffer.cursor = ed.code.buffer.anchor = 0
+        self.runtime.step(0)
+
+        # Drop asset at line 1, column 8 (after "x = ")
+        pitch = ed.code.components.get("pitch", 8)
+        line_h = ed.code.components.get("line_height", 20)
+        # line 1 y is code.y + 6 + 1 * line_h + line_h / 2
+        drop_x = ed.code.x + 48 + 8 * pitch
+        drop_y = ed.code.y + 6 + 1 * line_h + 10
+
+        reg = self.runtime.assets.registry
+        enemy_id = reg.get_id(self.enemy_script)
+        asset_drag = dict(id=str(enemy_id), name="enemy.py", type="system", path="scripts/enemy.py")
+
+        drop_event = ("release", drop_x, drop_y, 0, 0)
+        ed.app.components["on_asset_drop"](asset_drag, drop_event)
+
+        expected_token = f'asset("{enemy_id}")'
+        self.assertIn(f"x = {expected_token}1", ed.code.buffer.text)
+
+    def test_selection_highlight_visibility_and_layering(self):
+        """Selection highlights in multiline editor are on layer+1 with SELECTION color and visible."""
+        ed = self.editor
+        ed.code.buffer.text = "line one\nline two\nline three\n"
+        ed.code.buffer.cursor = ed.code.buffer.anchor = 0
+        ed.ui.focus(ed.code)
+        self.runtime.step(0)
+
+        pitch = ed.code.components.get("pitch", 8)
+        line_h = ed.code.components.get("line_height", 20)
+
+        # 1. Drag selection
+        # Click at line 0, col 5
+        click_x = ed.code.x + 48 + 5 * pitch
+        click_y = ed.code.y + 6 + line_h // 2
+        ed.ui.dispatch(("click", click_x, click_y, 1, 0))
+
+        self.assertEqual(ed.code.buffer.cursor, 5)
+        self.assertEqual(ed.code.buffer.anchor, 5)
+
+        # Drag to line 1, col 4
+        drag_x = ed.code.x + 48 + 4 * pitch
+        drag_y = ed.code.y + 6 + line_h + line_h // 2
+        ed.ui.dispatch(("drag", drag_x, drag_y, 1, 0, drag_x - click_x, drag_y - click_y))
+        ed.ui.dispatch(("release", drag_x, drag_y, 1, 0))
+
+        self.runtime.step(0)
+
+        # Verify selection is established
+        self.assertTrue(ed.code.buffer.has_selection)
+        self.assertEqual(ed.code.buffer.anchor, 5)
+        self.assertEqual(ed.code.buffer.cursor, 13)  # len("line one\n") = 9 + 4 = 13
+
+        # Verify highlight rects are visible and on layer+1
+        sel_rects = [c for c in ed.code.children if c.name.startswith("selection:") and c.components.get("visible")]
+        self.assertTrue(len(sel_rects) >= 2)
+        for r in sel_rects:
+            self.assertEqual(r.layer, ed.code.layer + 1)
+            self.assertEqual(r.color, (45, 85, 135))
+
+        # 2. Shift-click to extend selection
+        ed.code.buffer.cursor = ed.code.buffer.anchor = 0
+        self.runtime.step(0)
+
+        # Click at col 0
+        ed.ui.dispatch(("click", ed.code.x + 48, ed.code.y + 10, 1, 0))
+        self.assertEqual(ed.code.buffer.cursor, 0)
+        self.assertEqual(ed.code.buffer.anchor, 0)
+
+        # Shift-click at col 8 (modifiers has 1 for MOD_SHIFT)
+        shift_click_x = ed.code.x + 48 + 8 * pitch
+        shift_click_y = ed.code.y + 10
+        ed.ui.dispatch(("click", shift_click_x, shift_click_y, 1, 1))
+
+        self.assertEqual(ed.code.buffer.anchor, 0)
+        self.assertEqual(ed.code.buffer.cursor, 8)
+        self.assertTrue(ed.code.buffer.has_selection)
+
+        self.runtime.step(0)
+        sel_rects = [c for c in ed.code.children if c.name.startswith("selection:") and c.components.get("visible")]
+        self.assertEqual(len(sel_rects), 1)
+        self.assertEqual(sel_rects[0].layer, ed.code.layer + 1)
+        self.assertEqual(sel_rects[0].color, (45, 85, 135))
+

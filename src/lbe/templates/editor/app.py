@@ -1354,8 +1354,12 @@ def on_asset_drop(asset_drag, event):
     if (contains(state.code, mx, my) or contains(state.code_panel, mx, my)) and getattr(state.code, "visible", True):
         uid = asset_drag.get("id")
         if uid:
+            state.ui.focus(state.code)
+            idx = state.ui.text_index(state.code, mx, my)
+            state.code.buffer.cursor = state.code.buffer.anchor = idx
             token = f'asset("{uid}")'
             state.code.buffer.insert(token)
+            state.code.components.touch("buffer")
             message(f"Inserted reference to {asset_drag.get('name', 'asset')}")
             return
 
@@ -1424,8 +1428,12 @@ def on_entity_drop(entity_drag, event):
     # 1. Dropped on Code Editor
     if (contains(state.code, mx, my) or contains(state.code_panel, mx, my)) and getattr(state.code, "visible", True):
         if ent_id:
+            state.ui.focus(state.code)
+            idx = state.ui.text_index(state.code, mx, my)
+            state.code.buffer.cursor = state.code.buffer.anchor = idx
             token = f'resolve("{ent_id}")'
             state.code.buffer.insert(token)
+            state.code.components.touch("buffer")
             message(f"Inserted entity reference to {ent_name}")
             return
 

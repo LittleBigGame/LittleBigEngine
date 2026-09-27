@@ -16,6 +16,7 @@ LINE = 20
 BG = (17, 23, 31)
 PANEL = (25, 34, 45)
 FIELD = (34, 45, 59)
+SELECTION = (45, 85, 135)
 ACCENT = (69, 182, 199)
 INK = (220, 230, 239, 255)
 MUTED = (145, 163, 183, 255)
@@ -724,9 +725,9 @@ class UI:
                 children[name] = self.create(control, name, kind, part=name, **values)
             return children[name]
 
-        caret = part("cursor", "rect", color=ACCENT, layer=control.layer+2)
-        scroll_track = part("scroll_track", "scrollbar_track", color=(28, 36, 48), layer=control.layer+2)
-        scrollbar = part("scrollbar", "scrollbar_thumb", color=(55, 75, 95), hover_color=(75, 115, 155), layer=control.layer+3)
+        caret = part("cursor", "rect", color=ACCENT, layer=control.layer+3)
+        scroll_track = part("scroll_track", "scrollbar_track", color=(28, 36, 48), layer=control.layer+3)
+        scrollbar = part("scrollbar", "scrollbar_thumb", color=(55, 75, 95), hover_color=(75, 115, 155), layer=control.layer+4)
         scrollbar.tags.add("scrollbar_thumb")
         scroll_track.tags.add("scrollbar_track")
         selection_start, selection_end = buffer.selection
@@ -740,14 +741,14 @@ class UI:
             row = index+buffer.scroll
             if row >= len(lines):
                 break
-            highlight = part(f"selection:{index}", "rect", color=(44, 76, 105), layer=control.layer)
-            number = part(f"number:{index}", "label", text="", ink=MUTED, layer=control.layer)
-            line = part(f"line:{index}", "label", text="", layer=control.layer)
-            err_rect = part(f"error:{index}", "rect", color=ERROR, layer=control.layer+1)
+            highlight = part(f"selection:{index}", "rect", color=SELECTION, layer=control.layer+1)
+            number = part(f"number:{index}", "label", text="", ink=MUTED, layer=control.layer+1)
+            line = part(f"line:{index}", "label", text="", layer=control.layer+1)
+            err_rect = part(f"error:{index}", "rect", color=ERROR, layer=control.layer+2)
             used.update((highlight.part, number.part, line.part, err_rect.part))
             y = control.y+6+index*line_height
             is_error = (row == err_row)
-            put(number, visible=True, x=control.x+6, y=y, w=40, h=line_height, text=str(row+1), ink=(ERROR if is_error else MUTED))
+            put(number, visible=True, x=control.x+6, y=y, w=40, h=line_height, text=str(row+1), ink=(ERROR if is_error else MUTED), layer=control.layer+1)
             raw_line = lines[row]
             matches = list(ASSET_PATTERN.finditer(raw_line))
             display_line = raw_line
@@ -760,7 +761,7 @@ class UI:
 
             spans = slice_spans(line_spans[row], buffer.horizontal, columns) if (line_spans and row < len(line_spans)) else None
             put(line, visible=True, x=control.x+48, y=y, w=control.w-64, h=line_height,
-                text=display_line[buffer.horizontal:buffer.horizontal+columns], spans=spans)
+                text=display_line[buffer.horizontal:buffer.horizontal+columns], spans=spans, layer=control.layer+1)
 
             for m_i, m in enumerate(matches):
                 uid_str = m.group(1) or m.group(2)
@@ -803,7 +804,7 @@ class UI:
 
                 pill_part_name = f"pill:{row}:{m_i}"
                 used.add(pill_part_name)
-                pill = part(pill_part_name, "button", layer=control.layer+2)
+                pill = part(pill_part_name, "button", layer=control.layer+3)
                 pill.tags.add("asset_pill")
                 if c_vis_end > c_vis_start and (col_start >= buffer.horizontal or col_end > buffer.horizontal):
                     pill_x = line.x + c_vis_start * pitch
@@ -831,9 +832,14 @@ class UI:
                     pill.components["action"] = p_click
                     pill.components["on_click"] = p_click
 
+                    pill_selected = (selection_start < offset + col_end and selection_end > offset + col_start)
+                    pill_col = (60, 110, 165) if pill_selected else (35, 55, 75)
+                    pill_hover = (75, 130, 190) if pill_selected else (50, 80, 110)
+                    pill_ink = (255, 255, 255, 255) if pill_selected else (230, 245, 255)
+
                     put(pill, visible=True, x=pill_x, y=y + 1, w=pill_w, h=line_height - 2,
-                        text=pill_label, color=(35, 55, 75), normal_color=(35, 55, 75), hover_color=(50, 80, 110),
-                        ink=(230, 245, 255))
+                        text=pill_label, color=pill_col, normal_color=pill_col, hover_color=pill_hover,
+                        ink=pill_ink, layer=control.layer+3)
                 else:
                     put(pill, visible=False)
             if is_error:
@@ -841,7 +847,7 @@ class UI:
                 col_end = max(col_start + 1, diag.get("end_column", col_start + 1) - 1)
                 err_x = line.x + max(0, col_start - buffer.horizontal) * pitch
                 err_w = max(pitch, (col_end - col_start) * pitch)
-                put(err_rect, visible=True, x=err_x, y=y + line_height - 2, w=min(err_w, line.w), h=2)
+                put(err_rect, visible=True, x=err_x, y=y + line_height - 2, w=min(err_w, line.w), h=2, layer=control.layer+2)
             else:
                 put(err_rect, visible=False)
             start = max(selection_start-offset-buffer.horizontal, 0)
@@ -850,18 +856,18 @@ class UI:
             has_selection = (end > start and
                              selection_start < offset + len(lines[row]) + 1 and
                              selection_end > offset)
-            put(highlight, visible=has_selection, x=line.x+start*pitch, y=y, w=max(0, end-start)*pitch, h=line_height)
+            put(highlight, visible=has_selection, x=line.x+start*pitch, y=y, w=max(0, end-start)*pitch, h=line_height, layer=control.layer+1, color=SELECTION)
             offset += len(lines[row])+1
         used.update(("bracket:0", "bracket:1"))
         for b_i in range(2):
-            b_part = part(f"bracket:{b_i}", "rect", color=(88, 166, 255, 120), layer=control.layer+1)
+            b_part = part(f"bracket:{b_i}", "rect", color=(88, 166, 255, 120), layer=control.layer+2)
             if matching_brackets and b_i < len(matching_brackets):
                 b_row, b_col = matching_brackets[b_i]
                 if (buffer.scroll <= b_row < buffer.scroll + rows and
                         buffer.horizontal <= b_col <= buffer.horizontal + columns):
                     b_x = control.x + 48 + (b_col - buffer.horizontal) * pitch
                     b_y = control.y + 6 + (b_row - buffer.scroll) * line_height
-                    put(b_part, visible=True, x=b_x, y=b_y, w=pitch, h=line_height)
+                    put(b_part, visible=True, x=b_x, y=b_y, w=pitch, h=line_height, layer=control.layer+2)
                 else:
                     put(b_part, visible=False)
             else:
@@ -874,7 +880,7 @@ class UI:
                          buffer.scroll <= row < buffer.scroll+rows and
                          buffer.horizontal <= column <= buffer.horizontal+columns)
         put(caret, visible=caret_visible,
-            x=control.x+48+(column-buffer.horizontal)*pitch, y=control.y+6+(row-buffer.scroll)*line_height, w=2, h=line_height)
+            x=control.x+48+(column-buffer.horizontal)*pitch, y=control.y+6+(row-buffer.scroll)*line_height, w=2, h=line_height, layer=control.layer+3)
         has_scrollbar = len(lines) > rows
         max_scroll = max(0, len(lines) - rows)
         if has_scrollbar:
@@ -935,7 +941,7 @@ class UI:
                     start, end = max(0, start-buffer.horizontal), min(width, end-buffer.horizontal)
                     if end > start:
                         graphics.rect(control.x+6+start*pitch, control.y+3, (end-start)*pitch, control.h-6,
-                                      (44, 76, 105), key=(control.id, "selection"), layer=layer+1)
+                                      SELECTION, key=(control.id, "selection"), layer=layer+1)
                     graphics.rect(control.x, control.y+control.h-2, control.w, 2, ACCENT, key=(control.id, "focus"), layer=layer+1)
                     graphics.rect(control.x+6+(buffer.cursor-buffer.horizontal)*pitch, control.y+4, 1, control.h-8,
                                    ACCENT, key=(control.id, "caret"), layer=layer+2)
