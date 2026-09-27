@@ -1160,7 +1160,8 @@ def get_editor_layout():
 def save_editor_project():
     entities_to_save = get_project_entities()
     reg = getattr(state.runtime.assets, "registry", None)
-    save_project(state.project, entities=entities_to_save, layout=get_editor_layout(), assets=reg)
+    app_id = getattr(getattr(state, "app", None), "id", None)
+    save_project(state.project, entities=entities_to_save, layout=get_editor_layout(), assets=reg, application_id=app_id)
 
 
 def save_project_action():

@@ -793,7 +793,7 @@ class UI:
                     if resolved_ent is not None:
                         ename = resolved_ent.components.get("name") or str(resolved_ent.id)[:8]
                         pill_label = f" 🔷 Entity: {ename} "
-                    elif m.group(0).startswith("entity"):
+                    elif m.group(0).startswith(("entity", "resolve", "entity_ref")):
                         pill_label = f" 🔷 Entity: {uid_str[:8]} "
                     else:
                         pill_label = f" 📦 Asset: {uid_str[:8]} "
