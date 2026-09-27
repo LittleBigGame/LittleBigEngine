@@ -53,9 +53,25 @@ equivalent entities yourself: no required widget classes exist.
 clears it. `ui.controls()` queries descendants of that root, so separate UI roots
 do not share a widget registry or focus state.
 
-`put(entity, **values)` applies changed control properties. `stack(parent, children,
-axis="y", gap=8, padding=8)` positions ordinary entities in a vertical or horizontal
-stack without introducing transform inheritance into the entity hierarchy.
+`put(entity, **values)` applies changed scalar/control properties without redundant notifications.
+
+## Layout system
+
+LBE provides pure entity layout helpers that operate without introducing transform inheritance:
+- `parse_box(value)`: Normalizes padding or margins into `(top, right, bottom, left)` integers.
+- `content_rect(entity)`: Calculates `(x, y, w, h)` available inside padding.
+- `stack(parent, children=None, axis="y", gap=8, padding=None, align=None)`: Positions ordinary entities
+  along `x` or `y`, supporting margins, `flex` distribution for remaining space, and alignments
+  (`"start"`, `"center"`, `"end"`, `"stretch"`).
+- `row(parent, ...)` and `column(parent, ...)`: Convenience wrappers for horizontal and vertical stacks.
+- `dock(parent, children=None, padding=None)`: Arranges children against edges (`"top"`, `"bottom"`,
+  `"left"`, `"right"`, `"fill"`, or `"float"`/`"none"`).
+- `apply_layout(entity, recursive=False)`: Evaluates layout rules from an entity's `layout` component.
+- `Layout`: Attached entity system that automatically evaluates layout rules on update.
+- `ui.splitter(parent, name, axis="x", thickness=6, on_drag=...)`: Interactive draggable divider control.
+
+Holding `Ctrl` displays continuous entity hierarchy overlays via the root's `highlight_provider(mx, my)` callback,
+highlighting the hover target and each ancestor in distinct colors (`STACK_COLORS`).
 
 ## Systems and composition
 

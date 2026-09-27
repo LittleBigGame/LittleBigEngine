@@ -33,14 +33,24 @@ component values and remain implementation details.
 The editor uses the same entities, components and systems as an application.
 Hierarchy rows, inspector fields, source lines, selections, buttons and panels
 are entities. The editor is a bundled application template, loaded from the user's
-project directory. Its `app.py` owns selection, hierarchy views, inspection,
-source-file operations and system attachment decisions. Those policies are absent
-from the engine and generic UI layer.
+project directory.
+
+The editor's architecture is decomposed into modular attached systems:
+- `hierarchy.py` attached to the hierarchy panel entity drives tree traversal,
+  expansion toggles, and row recycling.
+- `inspector.py` attached to the inspector panel entity drives collapsible sections,
+  inline component renaming, quick-add preset menus, component type conversions,
+  and system/relation links.
+- `code_editor.py` attached to the code panel provides syntax highlighting, diagnostics,
+  bracket matching, and off-thread autocomplete and hover inspections.
+- `render.py` attached to the game entity renders the scene through the camera view.
+- `app.py` coordinates layout, viewport navigation, splitters, project persistence,
+  and context menu routing.
 
 The public UI API supplies control creation, focus, input routing, text editing,
-stack layout and rendering. A separate ordinary `ui.py` attachment drives those
-facilities. The same facilities power the independent counter/notes template.
-There is no engine-side Editor class or editor runtime service.
+layout engines (`stack`, `dock`, `apply_layout`), and rendering. A separate ordinary
+`ui.py` attachment drives those facilities. The same facilities power the independent
+counter/notes template. There is no engine-side Editor class or editor runtime service.
 
 The text buffer is an independent editing data structure stored as a component;
 it does not use an external code editor. New data and scripts introduce behavior
@@ -75,7 +85,11 @@ systems while retaining the entity/runtime APIs.
 Context menus use `lbe.menus` above Core. Popup panels and action rows are normal
 UI entities, with the active popup referenced by the UI root's `context_menu`
 relation. Applications resolve pointer targets and supply action providers;
-editor-specific actions remain in the editor template script.
+editor-specific actions remain in the editor template scripts.
+A unified `+ Add Component...` action operates identically across Viewport, Hierarchy,
+and Inspector. Context menus on components provide type conversions (`Change type...`)
+and contextual entity actions when referencing other entities. Continuous Ctrl-key tracking
+provides full ancestor stack highlighting and deep context inspection.
 
 Optional Python completion uses Jedi static analysis in a serialized background
 worker outside Core. Editor entities own request state and discard stale results;

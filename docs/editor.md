@@ -20,18 +20,27 @@ scroll the viewport to zoom towards the cursor.
 
 ## Live data
 
-The inspector discovers components automatically. Edit a value and press Enter.
-Use Python literals: `2.0`, `True`, `"text"`, `(255, 0, 0)`, `[1, 2]`, or `{"a": 1}`.
-Ctrl+A selects a field's current contents. Unsupported objects are shown read-only.
-Scroll the inspector to reach more components.
+The inspector discovers components, systems, tags, and relations automatically.
+The inspector is organized into three collapsible sections:
+- **COMPONENTS**: Shows each component name and value. Edit a value and press Enter to commit.
+  Components can be renamed inline by editing the component name label and pressing Enter, or via
+  the context menu. Use Python literals: `2.0`, `True`, `"text"`, `(255, 0, 0)`, `[1, 2]`, or `{"a": 1}`.
+  Ctrl+A selects a field's current contents. Unsupported objects are shown read-only.
+  To add data, click **+ Add** to choose from quick presets (`+ Transform / Pos (x, y)`, `+ Size (w, h)`,
+  `+ Velocity (vx, vy)`, `+ Color (r, g, b)`, `+ Speed`) or `+ Custom Component...`.
+  Scroll the inspector to reach more components.
+- **SYSTEMS**: Displays all systems attached to the entity, their status, errors, and an **Edit** button.
+  Click **+ Attach** to attach existing scripts or create a new system.
+- **LINKS & HIERARCHY**:
+  - The **Tags** field accepts comma-separated names.
+  - The **Parent** field accepts a unique entity name or UUID; clearing it detaches the entity.
+  - The **Link** field accepts `relation=Entity Name` or `relation=UUID`; an empty target unlinks it.
+  - Lists existing relations with quick-navigation and **Edit** buttons.
+  - Displays child entity navigation chips for instant selection.
 
-To add data, fill the component-name and value fields, then click `+`.
-The Tags field accepts comma-separated names. Parent accepts a unique entity name
-or UUID; clearing it detaches the entity. Link accepts `relation=Entity Name` or
-`relation=UUID`; an empty target removes that relation. Press Enter to apply.
-
-Right-click an editable component field to open a component view. `Inspect in panel`
-opens another view of the selected entity. Additional panels are ordinary entities.
+Right-click any component label or value to open its context menu, allowing you to inspect,
+rename, delete, change its Python type (`Change type...`), or add components. `Inspect in panel`
+opens an independent view of the selected entity. Additional panels are ordinary entities.
 
 ## Systems and source
 
@@ -94,20 +103,29 @@ The behavior comes from this script. There is no physics-specific code in the ke
   script can interrupt its UI; restore `app.py` externally if necessary.
 - Inspection panels show a compact view; larger structured objects may be truncated.
 
-## Context actions
+## Context actions and stack inspection
 
 Right-click a hierarchy row, viewport object, empty viewport area, editor panel,
 or component field to open its available actions. Use the mouse or Up/Down and
 Enter to choose; Escape or an outside click dismisses the menu. Long menus scroll
-with the mouse wheel. Component fields offer inspection; entity menus offer
-selection, inspection and component creation. Game entities also offer child
-creation and camera focus when they have position data.
+with the mouse wheel.
 
-These actions are defined by the editor project's `app.py` using the reusable
-context-menu API described in `docs/ui.md`. Existing projects retain their own
-scripts: the updated editor menu bindings are included in newly initialized
-editor projects; upgrading an existing custom editor requires porting those
-bindings into its `app.py`.
+- **Unified Add Component**: Right-clicking in the Viewport, Hierarchy, or Inspector
+  provides an identical `+ Add Component...` action that opens the component presets menu.
+- **Component Context Menu**: Right-clicking any component provides `Inspect component`,
+  `Rename '<comp>'...`, `Change type... (<current_type>)` (allowing interactive type conversion
+  between float, int, str, bool, tuple, list, dict, and NoneType), and `Delete '<comp>'`.
+  If the component's value is an `Entity`, the context menu automatically presents contextual
+  entity sub-actions (`> Select Entity`, `Inspect Entity`, `Rename Entity`, `+ Add Component to Entity`,
+  `Add child`, `Duplicate Entity`, `Delete Entity`).
+- **Continuous Ctrl Stack Highlighting**: Holding `Ctrl` at any time continuously highlights the
+  entity or UI control under the mouse and its entire ancestor stack in distinct hierarchy colors
+  (Cyan for leaf, Emerald Green for parent, Amber for grandparent, Fuchsia, Coral).
+  Right-clicking while holding `Ctrl` opens a deep inspection context menu containing color-coded
+  selection options for every entity in the stack, along with editing actions for the leaf.
+
+These actions are defined by the editor project's `app.py`, `hierarchy.py`, and `inspector.py`
+using the reusable context-menu API described in `docs/ui.md`.
 
 ## Python-aware completion and selection
 
@@ -116,16 +134,15 @@ project imports, inferred Python types and the attached owner's component names.
 It analyzes source without running the edited script. Core-only installations stay
 independent of Jedi; install `.[editor]` for analysis without the desktop backend.
 
-- Type a member access (`value.`) or at least three identifier characters, then
+- Type a member access (`value.`) or at least two identifier characters, then
   pause briefly for suggestions. Pasting and moving the caret do not open popups.
 - Ctrl+Space explicitly requests completion. Comments and strings are excluded.
-- Up/Down selects a suggestion; Tab or a mouse click accepts it. Enter always
-  inserts a newline. Escape, selection, navigation or focus changes dismiss it.
-- Analysis runs in a background worker. Results for old text or cursor positions
-  are discarded. Only six suggestions are shown; arbitrary dynamic Python values
-  may not be inferable. This is completion, not a full type checker.
+- Up/Down or PageUp/PageDown selects a suggestion; Tab or a mouse click accepts it.
+  Enter always inserts a newline. Escape, selection, navigation or focus changes dismiss it.
+- Autocomplete displays up to eight suggestions with a scrollable popup track.
+- Resting the mouse over code displays a hover tooltip with signatures and docstrings.
 - Left-drag selection remains captured by its text area until mouse release,
-  including outside its bounds. Shift-click extends the existing selection.
+  including outside its bounds with auto-scrolling. Shift-click extends the existing selection.
   Newline and empty-line selections have a visible highlight. Scrolling no longer
   jumps back to the caret unless the caret or text changes.
 
