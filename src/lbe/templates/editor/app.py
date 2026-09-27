@@ -712,6 +712,18 @@ def start_add_tag(*args, **kwargs):
         return fn(*args, **kwargs)
 
 
+def change_component_type(*args, **kwargs):
+    fn = getattr(state, "change_component_type", None)
+    if fn and fn is not change_component_type:
+        return fn(*args, **kwargs)
+
+
+def open_change_type_menu(*args, **kwargs):
+    fn = getattr(state, "open_change_type_menu", None)
+    if fn and fn is not open_change_type_menu:
+        return fn(*args, **kwargs)
+
+
 def source_path():
     name = state.path_field.buffer.text.strip()
     path = (state.project / name).resolve()
@@ -1348,13 +1360,32 @@ def context_actions(target):
     if isinstance(target, dict) and 'component' in target:
         ent = target['entity']
         comp = target['component']
-        return [
+        val = ent.components.get(comp)
+        type_name = type(val).__name__
+        actions = [
             dict(label='Inspect component', run=lambda t: open_panel(target=ent, component=comp)),
             dict(label=f"Rename '{comp}'...", run=lambda t: start_rename_component(ent, comp)),
+            dict(label=f"Change type... ({type_name})", run=lambda t: open_change_type_menu(ent, comp)),
             dict(label=f"Delete '{comp}'", run=lambda t: delete_component(comp)),
             None,
             dict(label="+ Add Component...", run=lambda t: open_add_component_menu()),
         ]
+        from lbe.core import Entity
+        if isinstance(val, Entity) and val.alive:
+            val_name = str(val.components.get('name', str(val.id)[:8]))
+            actions.extend([
+                None,
+                dict(label=f"> Select Entity '{val_name}'", run=lambda _: select(val)),
+                dict(label=f"Inspect Entity '{val_name}'", run=lambda _: open_panel(target=val)),
+                dict(label=f"Rename Entity '{val_name}'...", run=lambda _: context_rename(val)),
+                dict(label=f"+ Add Component to '{val_name}'...", run=lambda _: (select(val), open_add_component_menu())),
+                dict(label=f"Add child to '{val_name}'", run=lambda _: context_add_child(val)),
+                dict(label=f"Duplicate Entity '{val_name}'", run=lambda _: (select(val), inspector_duplicate_entity())),
+            ])
+            protected = (state.app, state.background, state.viewport, state.header, state.hierarchy, state.inspector)
+            if val not in protected:
+                actions.append(dict(label=f"Delete Entity '{val_name}'", run=lambda _: (select(val), inspector_delete_entity())))
+        return actions
     if isinstance(target, dict) and 'relation' in target:
         ent = target['entity']
         rel = target['relation']
@@ -1375,12 +1406,7 @@ def context_actions(target):
         dict(label='Rename', run=context_rename),
         dict(label='Inspect entity', run=lambda e: open_panel(target=e)),
         None,
-        dict(label='+ Add Pos (x, y)', run=lambda e: (select(e), quick_add_pos())),
-        dict(label='+ Add Size (w, h)', run=lambda e: (select(e), quick_add_size())),
-        dict(label='+ Add Velocity (vx, vy)', run=lambda e: (select(e), quick_add_vel())),
-        dict(label='+ Add Color', run=lambda e: (select(e), quick_add_color())),
-        dict(label='+ Add Speed', run=lambda e: (select(e), quick_add_speed())),
-        dict(label='+ Custom Component...', run=context_add_component),
+        dict(label="+ Add Component...", run=lambda e: (select(e), open_add_component_menu())),
     ]
 
     sel = selected()
