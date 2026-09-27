@@ -7,6 +7,7 @@ import importlib.util
 
 from lbe.desktop import Input
 from lbe.project import load_project, template_path
+from lbe.space import world_to_screen
 from test_scene import RecordingGraphics
 
 
@@ -1163,21 +1164,30 @@ class EditorTests(unittest.TestCase):
         self.select(ent)
         self.runtime.step(0)
 
-        # 1. Context menu on entity provides component presets
+        # 1. Context menu on entity provides unified + Add Component...
         self.send(("click", ed.identity_label.x + 10, ed.identity_label.y + 5, 4, 0))
         menu = ed.app.relations.get("context_menu")
         self.assertIsNotNone(menu)
 
-        speed_item = next(c for c in menu.children if c.components.get("text") == "+ Add Speed")
+        add_item = next(c for c in menu.children if "+ Add Component" in c.components.get("text", ""))
+        self.click(add_item)
+        menu = ed.app.relations.get("context_menu")
+        self.assertIsNotNone(menu)
+
+        speed_item = next(c for c in menu.children if "+ Speed" in c.components.get("text", ""))
         self.click(speed_item)
         self.assertEqual(ent.components.get("speed"), 100.0)
 
         # 2. Context menu '+ Custom Component...' focuses add_name
         self.send(("click", ed.identity_label.x + 10, ed.identity_label.y + 5, 4, 0))
         menu = ed.app.relations.get("context_menu")
-        custom_item = next(c for c in menu.children if c.components.get("text") == "+ Custom Component...")
+        add_item = next(c for c in menu.children if "+ Add Component" in c.components.get("text", ""))
+        self.click(add_item)
+        menu = ed.app.relations.get("context_menu")
+        custom_item = next(c for c in menu.children if "+ Custom Component..." in c.components.get("text", ""))
         self.click(custom_item)
-        self.assertIs(ed.ui.focused, ed.add_name)
+        custom_lbl = next(l for l, _ in ed.component_rows if l.visible and l.component_key == "custom_component")
+        self.assertIs(ed.ui.focused, custom_lbl)
 
         # 3. Dedicated '+ Component' button opens preset menu
         self.assertTrue(ed.add_comp_menu_button.visible)
@@ -2126,6 +2136,126 @@ class EditorTests(unittest.TestCase):
         # Clicking at new world position selects turret
         self.send(("click", tx_moved, ty_moved, 1, 0))
         self.assertIs(ed.app.relations.get("selection"), turret)
+
+    def test_component_context_menu_change_type(self):
+        """Issue #65: Context menu on component row provides Change type... to convert values."""
+        ed = self.editor
+        ent = self.runtime.create(parent=ed.game, name="TypeTestEntity", score=42.5)
+        self.select(ent)
+        self.runtime.step(0)
+
+        # Right-click score component
+        _, score_fld = next((lbl, fld) for (lbl, fld) in ed.component_rows if fld.visible and fld.component_key == "score")
+        self.send(("click", score_fld.x + 10, score_fld.y + 10, 4, 0))
+        menu = ed.app.relations.get("context_menu")
+        self.assertIsNotNone(menu)
+
+        # Verify Change type item exists
+        change_item = next(c for c in menu.children if "Change type" in c.components.get("text", ""))
+        self.assertIn("float", change_item.components.get("text", ""))
+
+        # Click Change type to open types submenu
+        self.click(change_item)
+        type_menu = ed.app.relations.get("context_menu")
+        self.assertIsNotNone(type_menu)
+
+        # Change to int
+        int_choice = next(c for c in type_menu.children if "int" in c.components.get("text", ""))
+        self.click(int_choice)
+        self.assertEqual(ent.components["score"], 42)
+        self.assertIsInstance(ent.components["score"], int)
+
+        # Change to bool
+        _, score_fld = next((lbl, fld) for (lbl, fld) in ed.component_rows if fld.visible and fld.component_key == "score")
+        self.send(("click", score_fld.x + 10, score_fld.y + 10, 4, 0))
+        menu = ed.app.relations.get("context_menu")
+        change_item = next(c for c in menu.children if "Change type" in c.components.get("text", ""))
+        self.click(change_item)
+        type_menu = ed.app.relations.get("context_menu")
+        bool_choice = next(c for c in type_menu.children if "bool" in c.components.get("text", ""))
+        self.click(bool_choice)
+        self.assertEqual(ent.components["score"], True)
+        self.assertIsInstance(ent.components["score"], bool)
+
+        # Change to str
+        _, score_fld = next((lbl, fld) for (lbl, fld) in ed.component_rows if fld.visible and fld.component_key == "score")
+        self.send(("click", score_fld.x + 10, score_fld.y + 10, 4, 0))
+        menu = ed.app.relations.get("context_menu")
+        change_item = next(c for c in menu.children if "Change type" in c.components.get("text", ""))
+        self.click(change_item)
+        type_menu = ed.app.relations.get("context_menu")
+        str_choice = next(c for c in type_menu.children if "str" in c.components.get("text", ""))
+        self.click(str_choice)
+        self.assertEqual(ent.components["score"], "True")
+        self.assertIsInstance(ent.components["score"], str)
+
+    def test_component_context_menu_entity_type_actions(self):
+        """Issue #65: Right-clicking an entity-typed component reveals entity-specific context actions."""
+        ed = self.editor
+        target_ent = self.runtime.create(parent=ed.game, name="BossShip", x=10.0, y=10.0)
+        hero = self.runtime.create(parent=ed.game, name="PlayerHero", target_entity=target_ent)
+        self.select(hero)
+        self.runtime.step(0)
+
+        # Right-click target_entity component row
+        _, tgt_fld = next((lbl, fld) for (lbl, fld) in ed.component_rows if fld.visible and fld.component_key == "target_entity")
+        self.send(("click", tgt_fld.x + 10, tgt_fld.y + 10, 4, 0))
+        menu = ed.app.relations.get("context_menu")
+        self.assertIsNotNone(menu)
+
+        texts = [c.components.get("text", "") for c in menu.children if "text" in c.components]
+        # Should have component actions
+        self.assertTrue(any("Inspect component" in t for t in texts))
+        self.assertTrue(any("Change type" in t for t in texts))
+        self.assertTrue(any("Delete 'target_entity'" in t for t in texts))
+
+        # Should ALSO have entity actions for BossShip
+        self.assertTrue(any("Select Entity 'BossShip'" in t for t in texts))
+        self.assertTrue(any("Inspect Entity 'BossShip'" in t for t in texts))
+        self.assertTrue(any("Rename Entity 'BossShip'" in t for t in texts))
+        self.assertTrue(any("Add Component to 'BossShip'" in t for t in texts))
+
+        # Clicking select entity selects BossShip
+        select_item = next(c for c in menu.children if "Select Entity 'BossShip'" in c.components.get("text", ""))
+        self.click(select_item)
+        self.assertIs(ed.app.relations.get("selection"), target_ent)
+
+    def test_add_component_context_menu_unification(self):
+        """Issue #65: Viewport, hierarchy, and inspector context menus all offer unified + Add Component... expanding presets."""
+        ed = self.editor
+        unit = self.runtime.create(parent=ed.game, name="UnifiedUnit", x=0.0, y=0.0, w=2.0, h=2.0)
+        self.select(unit)
+        self.runtime.step(0)
+
+        # 1. Viewport right-click on entity
+        sx, sy = world_to_screen(ed.camera, ed.viewport, 0.5, 0.5)
+        self.send(("click", sx, sy, 4, 0))
+        vp_menu = ed.app.relations.get("context_menu")
+        self.assertIsNotNone(vp_menu)
+        vp_texts = [c.components.get("text", "") for c in vp_menu.children if "text" in c.components]
+        self.assertIn("+ Add Component...", vp_texts)
+        self.assertNotIn("+ Add Pos (x, y)", vp_texts)  # Inlined items removed
+
+        # Click + Add Component... and verify presets expand
+        add_btn = next(c for c in vp_menu.children if c.components.get("text") == "+ Add Component...")
+        self.click(add_btn)
+        vp_submenu = ed.app.relations.get("context_menu")
+        self.assertIsNotNone(vp_submenu)
+        sub_texts = [c.components.get("text", "") for c in vp_submenu.children if "text" in c.components]
+        self.assertTrue(any("+ Transform / Pos" in t for t in sub_texts))
+        self.assertTrue(any("+ Velocity" in t for t in sub_texts))
+        self.assertTrue(any("+ Custom Component" in t for t in sub_texts))
+        self.send(("key", "ESCAPE", False, False))
+
+        # 2. Hierarchy right-click on row
+        row = next(r for r in ed.hierarchy_rows if r.visible and r.relations.get("target") is unit)
+        self.send(("click", row.x + 40, row.y + 10, 4, 0))
+        h_menu = ed.app.relations.get("context_menu")
+        self.assertIsNotNone(h_menu)
+        h_texts = [c.components.get("text", "") for c in h_menu.children if "text" in c.components]
+        self.assertIn("+ Add Component...", h_texts)
+        self.assertNotIn("+ Add Pos (x, y)", h_texts)
+
 
 
 

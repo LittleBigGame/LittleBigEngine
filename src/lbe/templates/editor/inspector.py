@@ -718,8 +718,17 @@ def commit_component_key(lbl):
         focus_component_value(new_key)
 
 
-def open_add_component_menu():
-    ent = selected()
+def open_add_component_menu(x=None, y=None, target=None):
+    ent = target or selected()
+    btn = getattr(state, "add_comp_menu_button", None)
+    if x is None or y is None:
+        mouse = getattr(state.ui, "mouse_pos", None)
+        if mouse and (btn is None or not contains(btn, *mouse)):
+            x, y = mouse
+        elif btn is not None:
+            x, y = btn.x, btn.y + btn.h + 2
+        else:
+            x, y = 100, 100
     actions = [
         dict(label="+ Transform / Pos (x, y)", run=lambda e: (select(ent), quick_add_pos())),
         dict(label="+ Size (w, h)", run=lambda e: (select(ent), quick_add_size())),
@@ -729,7 +738,94 @@ def open_add_component_menu():
         None,
         dict(label="+ Custom Component...", run=lambda e: (select(ent), add_custom_component())),
     ]
-    open_menu(state.ui, ent, state.add_comp_menu_button.x, state.add_comp_menu_button.y + state.add_comp_menu_button.h + 2, actions=actions)
+    open_menu(state.ui, ent, x, y, actions=actions)
+
+
+def change_component_type(ent, comp, target_type):
+    val = ent.components.get(comp)
+    new_val = None
+    try:
+        if target_type == "float":
+            if isinstance(val, (int, float, str)):
+                new_val = float(val)
+            else:
+                new_val = 0.0
+        elif target_type == "int":
+            if isinstance(val, (int, float, str)):
+                new_val = int(float(val))
+            else:
+                new_val = 0
+        elif target_type == "str":
+            new_val = str(val) if val is not None else ""
+        elif target_type == "bool":
+            new_val = bool(val)
+        elif target_type == "tuple":
+            if isinstance(val, (tuple, list)):
+                new_val = tuple(val)
+            elif val is not None:
+                new_val = (val,)
+            else:
+                new_val = (0.0, 0.0)
+        elif target_type == "list":
+            if isinstance(val, (tuple, list)):
+                new_val = list(val)
+            elif val is not None:
+                new_val = [val]
+            else:
+                new_val = [0.0, 0.0]
+        elif target_type == "dict":
+            new_val = dict(val) if isinstance(val, dict) else {}
+        elif target_type == "NoneType":
+            new_val = None
+        else:
+            new_val = val
+    except Exception:
+        defaults = {
+            "float": 0.0,
+            "int": 0,
+            "str": "",
+            "bool": False,
+            "tuple": (0.0, 0.0),
+            "list": [0.0, 0.0],
+            "dict": {},
+            "NoneType": None,
+        }
+        new_val = defaults.get(target_type, val)
+
+    ent.components[comp] = new_val
+    message(f"Changed '{comp}' type to {target_type}")
+    save_editor_project()
+    inspector_sync()
+    focus_component_value(comp)
+
+
+def open_change_type_menu(ent, comp):
+    current_val = ent.components.get(comp)
+    current_type = type(current_val).__name__
+    types = [
+        ("float", "float (e.g. 0.0)"),
+        ("int", "int (e.g. 0)"),
+        ("str", "str (text)"),
+        ("bool", "bool (True/False)"),
+        ("tuple", "tuple (e.g. (1, 2))"),
+        ("list", "list (e.g. [1, 2])"),
+        ("dict", "dict (e.g. {})"),
+        ("NoneType", "None"),
+    ]
+    actions = []
+    for t_id, label in types:
+        is_current = (current_type == t_id)
+        indicator = "> " if is_current else "   "
+        actions.append(dict(
+            label=f"{indicator}{label}",
+            run=lambda _, t=t_id: change_component_type(ent, comp, t)
+        ))
+    mouse = getattr(state.ui, "mouse_pos", None)
+    if mouse:
+        x, y = mouse
+    else:
+        x, y = state.inspector.x + 20, state.inspector.y + 40
+    open_menu(state.ui, ent, x, y, actions=actions)
 
 
 def open_attach_system_menu():
@@ -981,6 +1077,8 @@ def start():
     state.start_rename_tag = start_rename_tag
     state.remove_tag = remove_tag
     state.start_add_tag = start_add_tag
+    state.change_component_type = change_component_type
+    state.open_change_type_menu = open_change_type_menu
     state.inspector_scroll_drag = inspector_scroll_drag
     state.inspector_track_click = inspector_track_click
     state.component_click = component_click
