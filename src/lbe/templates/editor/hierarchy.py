@@ -1,6 +1,131 @@
 """Hierarchy panel entity system."""
 
+from lbe.ui import put, contains, PANEL, INK
+
+
+class StateProxy:
+    def __getattr__(self, name):
+        s = entity.root.components.get("application_state")
+        return getattr(s, name)
+
+    def __setattr__(self, name, value):
+        s = entity.root.components.get("application_state")
+        setattr(s, name, value)
+
+
+state = StateProxy()
+selected = lambda: state.selected()
+select = lambda target: state.select(target)
+message = lambda text: state.message(text)
+
+def hierarchy_sync():
+    visible = []
+    traversal_stack = [(e, 0) for e in reversed(state.runtime.entities) if e.parent is None]
+    expanded = state.hierarchy.expanded
+    while traversal_stack and len(visible) < 10000:
+        entity, depth = traversal_stack.pop()
+        visible.append((entity, depth))
+        if entity.id in expanded:
+            traversal_stack.extend(((child, depth + 1) for child in reversed(entity.children)))
+    capacity = int((state.hierarchy.h - 34) // 22)
+    state.hierarchy.visible_count = len(visible)
+    max_scroll = max(0, len(visible) - capacity)
+    put(state.hierarchy, scroll=max(0, min(state.hierarchy.scroll, max_scroll)))
+    while len(state.hierarchy_rows) < capacity:
+        row = state.ui.create(state.hierarchy, f'HierarchyRow{len(state.hierarchy_rows)}', 'button', text='', indent=0,
+                              normal_color=PANEL, hover_color=(35, 45, 58))
+        row.on_click = hierarchy_click
+        state.hierarchy_rows.append(row)
+    has_scroll = len(visible) > capacity and capacity > 0
+    row_w = state.hierarchy.w - 20 if has_scroll else state.hierarchy.w - 16
+    mouse_pos = getattr(state.ui, "mouse_pos", None)
+    for index, row in enumerate(state.hierarchy_rows):
+        source = index + state.hierarchy.scroll
+        if index >= capacity or source >= len(visible):
+            put(row, visible=False)
+            continue
+        target, depth = visible[source]
+        if row.relations.get('target') is not target:
+            row.relations['target'] = target
+        name = str(target.components.get('name', str(target.id)[:8]))
+        marker = '-' if target.id in expanded else '+'
+        is_selected = target is selected()
+        indicator = '> ' if is_selected else '  '
+        text = '  ' * min(depth, 8) + (marker if target.children else ' ') + ' ' + indicator + name
+        normal_col = (45, 95, 125) if is_selected else PANEL
+        hover_col = (55, 105, 135) if is_selected else (35, 45, 58)
+        is_hovered = bool(mouse_pos and contains(row, *mouse_pos))
+        put(row, visible=True, x=state.hierarchy.x + 8, y=state.hierarchy.y + 32 + index * 22,
+            w=row_w, h=22, text=text, indent=min(depth, 8) * 16,
+            normal_color=normal_col, hover_color=hover_col,
+            color=hover_col if is_hovered else normal_col,
+            ink=(255, 255, 255, 255) if is_selected else INK)
+    if has_scroll:
+        track_x = state.hierarchy.x + state.hierarchy.w - 10
+        track_y = state.hierarchy.y + 32
+        track_w = 6
+        track_h = capacity * 22
+        put(state.hierarchy_scroll_track, visible=True, x=track_x, y=track_y, w=track_w, h=track_h)
+        thumb_h = max(16, int(track_h * (capacity / len(visible))))
+        travel = max(1, track_h - thumb_h)
+        thumb_y = track_y + int(travel * (state.hierarchy.scroll / max_scroll)) if max_scroll > 0 else track_y
+        put(state.hierarchy_scroll_thumb, visible=True, x=track_x, y=thumb_y, w=track_w, h=thumb_h)
+    else:
+        put(state.hierarchy_scroll_track, visible=False)
+        put(state.hierarchy_scroll_thumb, visible=False)
+
+
+
+def hierarchy_scroll_drag(thumb, event):
+    visible_count = getattr(state.hierarchy, "visible_count", 0)
+    capacity = max(1, int((state.hierarchy.h - 34) // 22))
+    max_scroll = max(0, visible_count - capacity)
+    if max_scroll <= 0:
+        return True
+    track = state.hierarchy_scroll_track
+    travel = max(1, track.h - thumb.h)
+    rel_y = event[2] - track.y - thumb.h / 2
+    ratio = max(0.0, min(1.0, rel_y / travel))
+    state.hierarchy.scroll = int(round(ratio * max_scroll))
+    return True
+
+
+def hierarchy_track_click(track, event):
+    capacity = max(1, int((state.hierarchy.h - 34) // 22))
+    thumb = state.hierarchy_scroll_thumb
+    if not thumb.visible:
+        return True
+    visible_count = getattr(state.hierarchy, "visible_count", 0)
+    max_scroll = max(0, visible_count - capacity)
+    if event[2] < thumb.y:
+        state.hierarchy.scroll = max(0, state.hierarchy.scroll - capacity)
+    elif event[2] > thumb.y + thumb.h:
+        state.hierarchy.scroll = min(max_scroll, state.hierarchy.scroll + capacity)
+    return True
+
+
+
+
+def hierarchy_click(row, event):
+    target = row.relations["target"]
+    if event[1] < row.x + row.indent + 24:
+        expanded = set(state.hierarchy.expanded)
+        expanded.symmetric_difference_update({target.id})
+        state.hierarchy.expanded = expanded
+    select(target)
+
+def start():
+    state.hierarchy_sync = hierarchy_sync
+    state.hierarchy_click = hierarchy_click
+    state.hierarchy_scroll_drag = hierarchy_scroll_drag
+    state.hierarchy_track_click = hierarchy_track_click
+    if hasattr(state, "hierarchy_scroll_thumb"):
+        state.hierarchy_scroll_thumb.on_drag = hierarchy_scroll_drag
+    if hasattr(state, "hierarchy_scroll_track"):
+        state.hierarchy_scroll_track.on_click = hierarchy_track_click
+    for row in getattr(state, "hierarchy_rows", ()):
+        row.on_click = hierarchy_click
+
 
 def update(dt):
-    """Inspectable hierarchy tree synchronization and navigation behavior."""
-    pass
+    hierarchy_sync()
