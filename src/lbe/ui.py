@@ -1,16 +1,22 @@
 """General entity UI primitives shared by applications and tools."""
 
 from pathlib import Path
+import re
 from time import monotonic
 
 from .syntax import slice_spans
 from .text import TextBuffer
+
+ASSET_PATTERN = re.compile(
+    r'(?:asset|entity|resolve|entity_ref)\(\s*["\']([0-9a-fA-F-]{36})["\']\s*\)|assets\[\s*["\']([0-9a-fA-F-]{36})["\']\s*\]'
+)
 
 PITCH = 8
 LINE = 20
 BG = (17, 23, 31)
 PANEL = (25, 34, 45)
 FIELD = (34, 45, 59)
+SELECTION = (45, 85, 135)
 ACCENT = (69, 182, 199)
 INK = (220, 230, 239, 255)
 MUTED = (145, 163, 183, 255)
@@ -404,11 +410,13 @@ class UI:
             elif len(event) > 2 and isinstance(event[2], bool):
                 self.ctrl_held = event[2]
 
+        if kind in ("motion", "drag") and len(event) >= 3 and isinstance(event[1], (int, float)) and isinstance(event[2], (int, float)):
+            self.mouse_pos = (event[1], event[2])
+
         if dispatch_menu(self, event):
             return
         if kind == "motion":
             mx, my = event[1], event[2]
-            self.mouse_pos = (mx, my)
             for control in self.controls():
                 if ("splitter" in control.tags or "scrollbar_thumb" in control.tags or "button" in control.tags or "chip" in control.tags or "hoverable" in control.tags) and self.visible(control):
                     active = self.root.relations.get("active_drag")
@@ -423,6 +431,18 @@ class UI:
             return
         if kind == "release":
             self.root.relations.pop("text_drag", None)
+            entity_drag = self.root.components.pop("entity_drag", None)
+            if entity_drag is not None:
+                cb = self.root.components.get("on_entity_drop")
+                if cb:
+                    cb(entity_drag, event)
+                return
+            asset_drag = self.root.components.pop("asset_drag", None)
+            if asset_drag is not None:
+                cb = self.root.components.get("on_asset_drop")
+                if cb:
+                    cb(asset_drag, event)
+                return
             active_drag = self.root.relations.pop("active_drag", None)
             if active_drag is not None:
                 if "splitter" in active_drag.tags or "scrollbar_thumb" in active_drag.tags or "button" in active_drag.tags or "chip" in active_drag.tags:
@@ -434,6 +454,8 @@ class UI:
                     cb(active_drag, event)
             return
         if kind == "drag":
+            if self.root.components.get("asset_drag") is not None or self.root.components.get("entity_drag") is not None:
+                return
             text_drag = self.root.relations.get("text_drag")
             if text_drag is not None and self.visible(text_drag) and event[3] & 1:
                 mx, my = event[1], event[2]
@@ -568,6 +590,12 @@ class UI:
         buffer = control.buffer
         multiline = "multiline" in control.tags
         if kind == "text":
+            if multiline:
+                for m in ASSET_PATTERN.finditer(buffer.text):
+                    s, e = m.span()
+                    if s < buffer.cursor < e:
+                        buffer.cursor = buffer.anchor = e
+                        break
             buffer.insert(event[1] if multiline else event[1].replace("\r\n", " ").replace("\r", " ").replace("\n", " "))
         elif kind == "key":
             key, ctrl, shift = event[1:]
@@ -584,17 +612,52 @@ class UI:
             elif ctrl and key == "Z":
                 buffer.undo(redo=shift)
             elif key in ("LEFT", "RIGHT", "UP", "DOWN", "HOME", "END", "FILE_HOME", "FILE_END", "PAGEUP", "PAGEDOWN", "WORD_LEFT", "WORD_RIGHT"):
-                move_dir = key
-                if ctrl and key == "LEFT":
-                    move_dir = "WORD_LEFT"
-                elif ctrl and key == "RIGHT":
-                    move_dir = "WORD_RIGHT"
-                buffer.move(move_dir, select=shift)
-            elif key in ("BACKSPACE", "DELETE"):
-                if ctrl:
-                    buffer.delete_word(backward=key == "BACKSPACE")
+                if multiline and key in ("LEFT", "RIGHT") and not ctrl:
+                    jumped = False
+                    for m in ASSET_PATTERN.finditer(buffer.text):
+                        s, e = m.span()
+                        if key == "LEFT" and s < buffer.cursor <= e:
+                            buffer.cursor = s
+                            if not shift:
+                                buffer.anchor = s
+                            jumped = True
+                            break
+                        elif key == "RIGHT" and s <= buffer.cursor < e:
+                            buffer.cursor = e
+                            if not shift:
+                                buffer.anchor = e
+                            jumped = True
+                            break
+                    if not jumped:
+                        move_dir = key
+                        if ctrl and key == "LEFT":
+                            move_dir = "WORD_LEFT"
+                        elif ctrl and key == "RIGHT":
+                            move_dir = "WORD_RIGHT"
+                        buffer.move(move_dir, select=shift)
                 else:
-                    buffer.delete(backward=key == "BACKSPACE")
+                    move_dir = key
+                    if ctrl and key == "LEFT":
+                        move_dir = "WORD_LEFT"
+                    elif ctrl and key == "RIGHT":
+                        move_dir = "WORD_RIGHT"
+                    buffer.move(move_dir, select=shift)
+            elif key in ("BACKSPACE", "DELETE"):
+                deleted_pill = False
+                if multiline and buffer.anchor == buffer.cursor:
+                    for m in ASSET_PATTERN.finditer(buffer.text):
+                        s, e = m.span()
+                        if (key == "BACKSPACE" and s < buffer.cursor <= e) or (key == "DELETE" and s <= buffer.cursor < e):
+                            buffer.cursor = e
+                            buffer.anchor = s
+                            buffer.insert("")
+                            deleted_pill = True
+                            break
+                if not deleted_pill:
+                    if ctrl:
+                        buffer.delete_word(backward=key == "BACKSPACE")
+                    else:
+                        buffer.delete(backward=key == "BACKSPACE")
             elif key in ("ENTER", "RETURN", "NUM_ENTER"):
                 if multiline:
                     buffer.newline()
@@ -631,6 +694,14 @@ class UI:
         buffer = control.buffer
         row = max(0, int((y-control.y-6)//line))+buffer.scroll
         column = max(0, round((x-control.x-48)/pitch))+buffer.horizontal
+        lines = buffer.text.split("\n")
+        if row < len(lines):
+            line_str = lines[row]
+            for m in ASSET_PATTERN.finditer(line_str):
+                s, e = m.span()
+                if s < column < e:
+                    column = s if (column - s) < (e - column) else e
+                    break
         return buffer.index(row, column)
 
     def _sync_text(self, control):
@@ -654,9 +725,9 @@ class UI:
                 children[name] = self.create(control, name, kind, part=name, **values)
             return children[name]
 
-        caret = part("cursor", "rect", color=ACCENT, layer=control.layer+2)
-        scroll_track = part("scroll_track", "scrollbar_track", color=(28, 36, 48), layer=control.layer+2)
-        scrollbar = part("scrollbar", "scrollbar_thumb", color=(55, 75, 95), hover_color=(75, 115, 155), layer=control.layer+3)
+        caret = part("cursor", "rect", color=ACCENT, layer=control.layer+3)
+        scroll_track = part("scroll_track", "scrollbar_track", color=(28, 36, 48), layer=control.layer+3)
+        scrollbar = part("scrollbar", "scrollbar_thumb", color=(55, 75, 95), hover_color=(75, 115, 155), layer=control.layer+4)
         scrollbar.tags.add("scrollbar_thumb")
         scroll_track.tags.add("scrollbar_track")
         selection_start, selection_end = buffer.selection
@@ -670,23 +741,113 @@ class UI:
             row = index+buffer.scroll
             if row >= len(lines):
                 break
-            highlight = part(f"selection:{index}", "rect", color=(44, 76, 105), layer=control.layer)
-            number = part(f"number:{index}", "label", text="", ink=MUTED, layer=control.layer)
-            line = part(f"line:{index}", "label", text="", layer=control.layer)
-            err_rect = part(f"error:{index}", "rect", color=ERROR, layer=control.layer+1)
+            highlight = part(f"selection:{index}", "rect", color=SELECTION, layer=control.layer+1)
+            number = part(f"number:{index}", "label", text="", ink=MUTED, layer=control.layer+1)
+            line = part(f"line:{index}", "label", text="", layer=control.layer+1)
+            err_rect = part(f"error:{index}", "rect", color=ERROR, layer=control.layer+2)
             used.update((highlight.part, number.part, line.part, err_rect.part))
             y = control.y+6+index*line_height
             is_error = (row == err_row)
-            put(number, visible=True, x=control.x+6, y=y, w=40, h=line_height, text=str(row+1), ink=(ERROR if is_error else MUTED))
+            put(number, visible=True, x=control.x+6, y=y, w=40, h=line_height, text=str(row+1), ink=(ERROR if is_error else MUTED), layer=control.layer+1)
+            raw_line = lines[row]
+            matches = list(ASSET_PATTERN.finditer(raw_line))
+            display_line = raw_line
+            if matches:
+                line_chars = list(display_line)
+                for m in matches:
+                    cs, ce = m.span()
+                    line_chars[cs:ce] = [" "] * (ce - cs)
+                display_line = "".join(line_chars)
+
             spans = slice_spans(line_spans[row], buffer.horizontal, columns) if (line_spans and row < len(line_spans)) else None
             put(line, visible=True, x=control.x+48, y=y, w=control.w-64, h=line_height,
-                text=lines[row][buffer.horizontal:buffer.horizontal+columns], spans=spans)
+                text=display_line[buffer.horizontal:buffer.horizontal+columns], spans=spans, layer=control.layer+1)
+
+            for m_i, m in enumerate(matches):
+                uid_str = m.group(1) or m.group(2)
+                reg = getattr(self.runtime.assets, "registry", None) if hasattr(self.runtime, "assets") else None
+                entry = reg.get(uid_str) if reg else None
+                if entry:
+                    etype = entry.get("type", "asset")
+                    if etype == "system":
+                        pill_label = f" ⚡ System: {entry['name']} "
+                    elif etype == "image":
+                        pill_label = f" 🖼️ Image: {entry['name']} "
+                    elif etype == "audio":
+                        pill_label = f" 🔊 Audio: {entry['name']} "
+                    else:
+                        pill_label = f" 📄 {etype.capitalize()}: {entry['name']} "
+                else:
+                    resolved_ent = None
+                    if hasattr(self.runtime, "resolve"):
+                        try:
+                            resolved_ent = self.runtime.resolve(uid_str)
+                        except Exception:
+                            pass
+                        if resolved_ent is None:
+                            try:
+                                from uuid import UUID
+                                resolved_ent = self.runtime.resolve(UUID(uid_str))
+                            except Exception:
+                                pass
+                    if resolved_ent is not None:
+                        ename = resolved_ent.components.get("name") or str(resolved_ent.id)[:8]
+                        pill_label = f" 🔷 Entity: {ename} "
+                    elif m.group(0).startswith(("entity", "resolve", "entity_ref")):
+                        pill_label = f" 🔷 Entity: {uid_str[:8]} "
+                    else:
+                        pill_label = f" 📦 Asset: {uid_str[:8]} "
+
+                col_start, col_end = m.span()
+                c_vis_start = max(0, col_start - buffer.horizontal)
+                c_vis_end = min(columns, col_end - buffer.horizontal)
+
+                pill_part_name = f"pill:{row}:{m_i}"
+                used.add(pill_part_name)
+                pill = part(pill_part_name, "button", layer=control.layer+3)
+                pill.tags.add("asset_pill")
+                if c_vis_end > c_vis_start and (col_start >= buffer.horizontal or col_end > buffer.horizontal):
+                    pill_x = line.x + c_vis_start * pitch
+                    span_w = (c_vis_end - c_vis_start) * pitch
+                    pill_w = max(span_w, len(pill_label) * pitch + 16)
+                    pill.components["asset_id"] = uid_str
+                    pill.components["asset_token"] = m.group(0)
+                    pill.components["asset_name"] = entry["name"] if entry else pill_label.strip()
+                    pill.components["asset_row"] = row
+                    pill.components["asset_span"] = (col_start, col_end)
+                    pill.components["text_control"] = control
+
+                    def make_pill_click(p_ctrl, r_num, c_span):
+                        def on_p_click(p_inst, ev=None):
+                            t_ctrl = p_inst.components.get("text_control")
+                            if t_ctrl and "multiline" in t_ctrl.tags:
+                                self.focus(t_ctrl)
+                                mx = ev[1] if ev else p_inst.x + p_inst.w
+                                tgt_col = c_span[0] if (ev and mx < p_inst.x + p_inst.w / 2) else c_span[1]
+                                t_ctrl.buffer.cursor = t_ctrl.buffer.anchor = t_ctrl.buffer.index(r_num, tgt_col)
+                                t_ctrl.components.touch("buffer")
+                        return on_p_click
+
+                    p_click = make_pill_click(pill, row, (col_start, col_end))
+                    pill.components["action"] = p_click
+                    pill.components["on_click"] = p_click
+
+                    pill_selected = (selection_start < offset + col_end and selection_end > offset + col_start)
+                    pill_col = (60, 110, 165) if pill_selected else (35, 55, 75)
+                    pill_hover = (75, 130, 190) if pill_selected else (50, 80, 110)
+                    pill_ink = (255, 255, 255, 255) if pill_selected else (230, 245, 255)
+
+                    put(pill, visible=True, x=pill_x, y=y + 1, w=pill_w, h=line_height - 2,
+                        text=pill_label, color=pill_col, normal_color=pill_col, hover_color=pill_hover,
+                        ink=pill_ink, layer=control.layer+3)
+                else:
+                    put(pill, visible=False)
             if is_error:
                 col_start = max(0, diag.get("column", 1) - 1)
                 col_end = max(col_start + 1, diag.get("end_column", col_start + 1) - 1)
                 err_x = line.x + max(0, col_start - buffer.horizontal) * pitch
                 err_w = max(pitch, (col_end - col_start) * pitch)
-                put(err_rect, visible=True, x=err_x, y=y + line_height - 2, w=min(err_w, line.w), h=2)
+                put(err_rect, visible=True, x=err_x, y=y + line_height - 2, w=min(err_w, line.w), h=2, layer=control.layer+2)
             else:
                 put(err_rect, visible=False)
             start = max(selection_start-offset-buffer.horizontal, 0)
@@ -695,18 +856,18 @@ class UI:
             has_selection = (end > start and
                              selection_start < offset + len(lines[row]) + 1 and
                              selection_end > offset)
-            put(highlight, visible=has_selection, x=line.x+start*pitch, y=y, w=max(0, end-start)*pitch, h=line_height)
+            put(highlight, visible=has_selection, x=line.x+start*pitch, y=y, w=max(0, end-start)*pitch, h=line_height, layer=control.layer+1, color=SELECTION)
             offset += len(lines[row])+1
         used.update(("bracket:0", "bracket:1"))
         for b_i in range(2):
-            b_part = part(f"bracket:{b_i}", "rect", color=(88, 166, 255, 120), layer=control.layer+1)
+            b_part = part(f"bracket:{b_i}", "rect", color=(88, 166, 255, 120), layer=control.layer+2)
             if matching_brackets and b_i < len(matching_brackets):
                 b_row, b_col = matching_brackets[b_i]
                 if (buffer.scroll <= b_row < buffer.scroll + rows and
                         buffer.horizontal <= b_col <= buffer.horizontal + columns):
                     b_x = control.x + 48 + (b_col - buffer.horizontal) * pitch
                     b_y = control.y + 6 + (b_row - buffer.scroll) * line_height
-                    put(b_part, visible=True, x=b_x, y=b_y, w=pitch, h=line_height)
+                    put(b_part, visible=True, x=b_x, y=b_y, w=pitch, h=line_height, layer=control.layer+2)
                 else:
                     put(b_part, visible=False)
             else:
@@ -719,7 +880,7 @@ class UI:
                          buffer.scroll <= row < buffer.scroll+rows and
                          buffer.horizontal <= column <= buffer.horizontal+columns)
         put(caret, visible=caret_visible,
-            x=control.x+48+(column-buffer.horizontal)*pitch, y=control.y+6+(row-buffer.scroll)*line_height, w=2, h=line_height)
+            x=control.x+48+(column-buffer.horizontal)*pitch, y=control.y+6+(row-buffer.scroll)*line_height, w=2, h=line_height, layer=control.layer+3)
         has_scrollbar = len(lines) > rows
         max_scroll = max(0, len(lines) - rows)
         if has_scrollbar:
@@ -780,7 +941,7 @@ class UI:
                     start, end = max(0, start-buffer.horizontal), min(width, end-buffer.horizontal)
                     if end > start:
                         graphics.rect(control.x+6+start*pitch, control.y+3, (end-start)*pitch, control.h-6,
-                                      (44, 76, 105), key=(control.id, "selection"), layer=layer+1)
+                                      SELECTION, key=(control.id, "selection"), layer=layer+1)
                     graphics.rect(control.x, control.y+control.h-2, control.w, 2, ACCENT, key=(control.id, "focus"), layer=layer+1)
                     graphics.rect(control.x+6+(buffer.cursor-buffer.horizontal)*pitch, control.y+4, 1, control.h-8,
                                    ACCENT, key=(control.id, "caret"), layer=layer+2)
@@ -837,4 +998,22 @@ class UI:
                 graphics.rect(rx, ry + rh - outline_w, rw, outline_w, color, key=("ctrl_hl", item_key, "bottom"), layer=layer)
                 graphics.rect(rx, ry, outline_w, rh, color, key=("ctrl_hl", item_key, "left"), layer=layer)
                 graphics.rect(rx + rw - outline_w, ry, outline_w, rh, color, key=("ctrl_hl", item_key, "right"), layer=layer)
+
+        active_drag = self.root.components.get("entity_drag") or self.root.components.get("asset_drag")
+        if active_drag and hasattr(self, "mouse_pos"):
+            mx, my = self.mouse_pos
+            if "entity" in active_drag or active_drag.get("type") == "entity":
+                ename = active_drag.get("name", "Entity")
+                label_text = f" 🔷 Entity: {ename} "
+            else:
+                icon = active_drag.get("icon", "📦")
+                name = active_drag.get("name", "Asset")
+                etype = active_drag.get("type", "asset")
+                label_text = f" {icon} {etype.capitalize()}: {name} "
+            pitch = getattr(self, "pitch", 8)
+            chip_w = max(60, len(label_text) * pitch + 16)
+            chip_h = 24
+            graphics.rect(mx + 12, my + 12, chip_w, chip_h, (25, 45, 68, 245), key="active_drag_bg", layer=30)
+            graphics.rect(mx + 12, my + 12, chip_w, 1, (88, 166, 255, 200), key="active_drag_top", layer=31)
+            graphics.text(label_text, mx + 16, my + 16, color=(240, 248, 255, 255), key="active_drag_txt", layer=32)
 

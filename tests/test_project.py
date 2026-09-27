@@ -1,10 +1,12 @@
 import json
 from pathlib import Path
 import tempfile
+from types import SimpleNamespace
 import unittest
-from uuid import UUID, uuid4
+from uuid import UUID, uuid4, uuid5, NAMESPACE_URL
 
 from lbe.core import Entity, Runtime
+from lbe.desktop import Input
 from lbe.project import (
     CURRENT_VERSION,
     serialize_value,
@@ -15,7 +17,15 @@ from lbe.project import (
     migrate_project_data,
     save_project,
     load_project_data,
+    load_project,
+    template_path,
 )
+
+try:
+    from test_scene import RecordingGraphics
+except ImportError:
+    from tests.test_scene import RecordingGraphics
+
 
 
 class ProjectPersistenceTests(unittest.TestCase):
@@ -224,6 +234,273 @@ class ProjectPersistenceTests(unittest.TestCase):
         with self.assertRaises(TypeError):
             deserialize_value(Dummy())
 
+    def test_application_entity_id_persists_across_save_and_load(self):
+        project_dir = Path(self.directory.name)
+        app_id = uuid4()
+        save_project(project_dir, application_id=app_id)
+
+        data = load_project_data(project_dir)
+        self.assertEqual(data.get("application_id"), str(app_id))
+
+        window = SimpleNamespace(width=800, height=600)
+        graphics = RecordingGraphics()
+        input_state = Input()
+        runtime = load_project(window, graphics, input_state, project_dir, template=template_path("demo"))
+        self.addCleanup(runtime.close)
+
+        app_entity = runtime.resolve(app_id)
+        self.assertEqual(app_entity.id, app_id)
+        self.assertEqual(app_entity.components.get("name"), "Application")
+        self.assertIn("root", app_entity.tags)
+
+    def test_system_script_resolves_application_entity_by_uuid_after_reload(self):
+        project_dir = Path(self.directory.name)
+        app_id = uuid4()
+
+        script_path = project_dir / "app_resolver.py"
+        script_path.write_text(f'app = resolve("{app_id}")\n', encoding="utf-8")
+
+        runtime = Runtime()
+        self.addCleanup(runtime.close)
+        app_entity = runtime.create(identity=app_id, name="Application", tags=["root"])
+        game_entity = runtime.create(name="Game", tags=["game"], parent=app_entity)
+        sys_def = runtime.assets.system(script_path)
+        game_entity.systems.attach("app_resolver", sys_def)
+        runtime.step(0)
+
+        sys_inst = game_entity.systems["app_resolver"]
+        self.assertTrue(sys_inst.running, list(sys_inst.errors))
+        self.assertEqual(len(sys_inst.errors), 0)
+        self.assertEqual(sys_inst.namespace["app"].id, app_id)
+
+        # Save project with application_id
+        save_project(project_dir, entities=[game_entity], application_id=app_id)
+
+        # Reload project data and deserialize entities
+        data = load_project_data(project_dir)
+        self.assertEqual(data.get("application_id"), str(app_id))
+
+        runtime2 = Runtime()
+        self.addCleanup(runtime2.close)
+        app2 = runtime2.create(identity=UUID(data["application_id"]), name="Application", tags=["root"])
+        restored = deserialize_entities(data["entities"], runtime2, default_parent=app2, project_dir=project_dir)
+        runtime2.step(0)
+
+        game2 = next(e for e in restored.values() if e.components.get("name") == "Game")
+        sys_inst2 = game2.systems["app_resolver"]
+        self.assertTrue(sys_inst2.running, list(sys_inst2.errors))
+        self.assertEqual(len(sys_inst2.errors), 0)
+        self.assertEqual(sys_inst2.namespace["app"].id, app_id)
+        self.assertIs(sys_inst2.namespace["app"], app2)
+
+    def test_render_system_with_application_resolve_persists_across_reload(self):
+        project_dir = Path(self.directory.name)
+        window = SimpleNamespace(
+            width=1440,
+            height=900,
+            set_clipboard_text=lambda text: None,
+            get_clipboard_text=lambda: "",
+        )
+        graphics = RecordingGraphics()
+        input_state = Input()
+
+        runtime = load_project(window, graphics, input_state, project_dir, template=template_path("editor"))
+        runtime.step(0)
+        editor = runtime.entities[0].components["application_state"]
+        app_id = editor.app.id
+
+        render_path = project_dir / "render.py"
+        old_content = render_path.read_text(encoding="utf-8")
+        render_path.write_text(f'app = resolve("{app_id}")\n' + old_content, encoding="utf-8")
+
+        editor.app.systems["app"].namespace["save_editor_project"]()
+        runtime.close()
+
+        runtime2 = load_project(window, graphics, input_state, project_dir, template=template_path("editor"))
+        self.addCleanup(runtime2.close)
+        runtime2.step(0)
+        editor2 = runtime2.entities[0].components["application_state"]
+
+        self.assertEqual(editor2.app.id, app_id)
+
+        render_sys = editor2.game.systems["render"]
+        self.assertTrue(render_sys.running, list(render_sys.errors))
+        self.assertEqual(len(render_sys.errors), 0)
+        self.assertEqual(render_sys.namespace["app"].id, app_id)
+
+        editor2.open_specific_file(render_path)
+        runtime2.step(0)
+        pills = [e for e in runtime2.entities if "asset_pill" in e.tags]
+        app_pills = [p for p in pills if p.components.get("asset_id") == str(app_id)]
+        self.assertTrue(len(app_pills) >= 1)
+        self.assertIn("Application", app_pills[0].components.get("asset_name", ""))
+        self.assertIn("Entity", app_pills[0].components.get("asset_name", ""))
+        self.assertNotIn("Asset", app_pills[0].components.get("asset_name", ""))
+
+    def test_system_script_resolves_entity_by_name(self):
+        project_dir = Path(self.directory.name)
+        script_path = project_dir / "name_resolve_sys.py"
+        script_path.write_text(
+            'app = resolve("Application")\n'
+            'game = resolve("Game")\n',
+            encoding="utf-8",
+        )
+        window = SimpleNamespace(width=800, height=600)
+        graphics = RecordingGraphics()
+        input_state = Input()
+        runtime = load_project(window, graphics, input_state, project_dir, template=template_path("demo"))
+        self.addCleanup(runtime.close)
+
+        game = next(e for e in runtime.entities if e.components.get("name") == "Game")
+        sys_def = runtime.assets.system(script_path)
+        game.systems.attach("name_resolve_sys", sys_def)
+        runtime.step(0)
+
+        sys_inst = game.systems["name_resolve_sys"]
+        self.assertTrue(sys_inst.running, list(sys_inst.errors))
+        self.assertEqual(len(sys_inst.errors), 0)
+        self.assertEqual(sys_inst.namespace["app"].components.get("name"), "Application")
+        self.assertEqual(sys_inst.namespace["game"].components.get("name"), "Game")
+
+        with self.assertRaises(KeyError):
+            runtime.resolve("NonExistentEntityName12345")
+
+    def test_component_referencing_application_entity_persists(self):
+        project_dir = Path(self.directory.name)
+        app_id = uuid4()
+        app_entity = self.runtime.create(identity=app_id, name="Application", tags=["root"])
+        game_entity = self.runtime.create(name="Game", tags=["game"])
+        player = self.runtime.create(name="Player", app_ref=app_entity, parent=game_entity)
+
+        save_project(project_dir, entities=[game_entity, player], application_id=app_id)
+
+        data = load_project_data(project_dir)
+        runtime2 = Runtime()
+        self.addCleanup(runtime2.close)
+        app2 = runtime2.create(identity=UUID(data["application_id"]), name="Application", tags=["root"])
+        restored = deserialize_entities(data["entities"], runtime2, default_parent=app2, project_dir=project_dir)
+
+        player2 = next(e for e in restored.values() if e.components.get("name") == "Player")
+        self.assertIs(player2.components["app_ref"], app2)
+        self.assertEqual(player2.components["app_ref"].id, app_id)
+
+    def test_relation_referencing_application_entity_persists(self):
+        project_dir = Path(self.directory.name)
+        app_id = uuid4()
+        app_entity = self.runtime.create(identity=app_id, name="Application", tags=["root"])
+        game_entity = self.runtime.create(name="Game", tags=["game"])
+        game_entity.relations["app_root"] = app_entity
+
+        save_project(project_dir, entities=[game_entity], application_id=app_id)
+
+        data = load_project_data(project_dir)
+        runtime2 = Runtime()
+        self.addCleanup(runtime2.close)
+        app2 = runtime2.create(identity=UUID(data["application_id"]), name="Application", tags=["root"])
+        restored = deserialize_entities(data["entities"], runtime2, default_parent=app2, project_dir=project_dir)
+
+        game2 = next(e for e in restored.values() if e.components.get("name") == "Game")
+        self.assertIn("app_root", game2.relations)
+        self.assertIs(game2.relations["app_root"], app2)
+        self.assertEqual(game2.relations["app_root"].id, app_id)
+
+    def test_parent_hierarchy_under_application_entity_persists(self):
+        project_dir = Path(self.directory.name)
+        app_id = uuid4()
+        app_entity = self.runtime.create(identity=app_id, name="Application", tags=["root"])
+        game_entity = self.runtime.create(name="Game", tags=["game"], parent=app_entity)
+
+        save_project(project_dir, entities=[game_entity], application_id=app_id)
+
+        data = load_project_data(project_dir)
+        runtime2 = Runtime()
+        self.addCleanup(runtime2.close)
+        app2 = runtime2.create(identity=UUID(data["application_id"]), name="Application", tags=["root"])
+        restored = deserialize_entities(data["entities"], runtime2, default_parent=app2, project_dir=project_dir)
+
+        game2 = next(e for e in restored.values() if e.components.get("name") == "Game")
+        self.assertIs(game2.parent, app2)
+        self.assertEqual(game2.parent.id, app_id)
+
+    def test_load_project_deterministic_application_id_fallback(self):
+        project_dir = Path(self.directory.name)
+        window = SimpleNamespace(width=800, height=600)
+        graphics = RecordingGraphics()
+        input_state = Input()
+
+        runtime1 = load_project(window, graphics, input_state, project_dir, template=template_path("demo"))
+        app1_id = runtime1.entities[0].id
+        runtime1.close()
+
+        project_json = project_dir / "project.json"
+        if project_json.exists():
+            project_json.unlink()
+
+        runtime2 = load_project(window, graphics, input_state, project_dir, template=template_path("demo"))
+        app2_id = runtime2.entities[0].id
+        runtime2.close()
+
+        expected_id = uuid5(NAMESPACE_URL, f"lbe://{project_dir.resolve().as_posix()}/application")
+        self.assertEqual(app1_id, expected_id)
+        self.assertEqual(app2_id, expected_id)
+
+    def test_load_project_recovers_app_id_from_layout_selection_legacy(self):
+        project_dir = Path(self.directory.name)
+        legacy_app_id = uuid4()
+        data = {
+            "version": 1,
+            "entities": [
+                {
+                    "id": str(uuid4()),
+                    "tags": ["game"],
+                    "components": {"name": "Game"},
+                    "relations": {},
+                    "systems": {},
+                }
+            ],
+            "layout": {
+                "selection": str(legacy_app_id),
+            },
+        }
+        (project_dir / "project.json").write_text(json.dumps(data), encoding="utf-8")
+        (project_dir / "app.py").write_text("# dummy app\n", encoding="utf-8")
+
+        window = SimpleNamespace(width=800, height=600)
+        graphics = RecordingGraphics()
+        input_state = Input()
+        runtime = load_project(window, graphics, input_state, project_dir)
+        self.addCleanup(runtime.close)
+
+        app_entity = runtime.resolve(legacy_app_id)
+        self.assertEqual(app_entity.id, legacy_app_id)
+        self.assertEqual(app_entity.components.get("name"), "Application")
+
+    def test_unresolved_entity_token_in_editor_displays_as_entity_not_asset(self):
+        from lbe.ui import UI, TextBuffer
+        fake_runtime = Runtime()
+        self.addCleanup(fake_runtime.close)
+        root = fake_runtime.create(name="Application", tags=["root"])
+        window = SimpleNamespace(width=800, height=600)
+        graphics = RecordingGraphics()
+        input_state = Input()
+        ui = UI(root, window, graphics, input_state)
+
+        missing_id = uuid4()
+        buf = TextBuffer(f'app = resolve("{missing_id}")\ntex = asset("{missing_id}")\n')
+        control = fake_runtime.create(x=0, y=0, w=500, h=300, layer=0, buffer=buf)
+        control.tags.add("multiline")
+
+        ui._sync_text(control)
+
+        pills = [e for e in fake_runtime.entities if "asset_pill" in e.tags]
+        pill0 = next((p for p in pills if p.components.get("asset_row") == 0), None)
+        self.assertIsNotNone(pill0)
+        self.assertIn("Entity", pill0.components.get("asset_name", ""))
+        self.assertNotIn("Asset", pill0.components.get("asset_name", ""))
+
+        pill1 = next((p for p in pills if p.components.get("asset_row") == 1), None)
+        self.assertIsNotNone(pill1)
+        self.assertIn("Asset", pill1.components.get("asset_name", ""))
 
 
 if __name__ == "__main__":

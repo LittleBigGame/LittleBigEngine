@@ -350,6 +350,16 @@ class Runtime:
         return entity
 
     def resolve(self, identity):
+        if isinstance(identity, UUID):
+            return self._entities[identity]
+        if isinstance(identity, str):
+            try:
+                return self._entities[UUID(identity)]
+            except ValueError:
+                for entity in self._entities.values():
+                    if entity.components.get("name") == identity:
+                        return entity
+                raise KeyError(identity) from None
         return self._entities[UUID(str(identity))]
 
     def query(self, *components, tags=()):

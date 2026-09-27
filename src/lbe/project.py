@@ -25,6 +25,9 @@ def serialize_value(value, *, project_dir=None, on_unsupported="error"):
         return value
     if isinstance(value, UUID):
         return {"__type__": "uuid", "value": str(value)}
+    from .assets import AssetRef
+    if isinstance(value, AssetRef):
+        return {"__type__": "asset_ref", "id": str(value.id), "type": value.type, "name": value.name}
     if isinstance(value, Entity):
         return {"__type__": "entity", "id": str(value.id)}
     if isinstance(value, tuple):
@@ -57,6 +60,9 @@ def deserialize_value(data, *, runtime=None, id_map=None):
             type_tag = data["__type__"]
             if type_tag == "uuid":
                 return UUID(data["value"])
+            elif type_tag == "asset_ref":
+                from .assets import AssetRef
+                return AssetRef(UUID(data["id"]), data.get("type", "asset"), data.get("name", ""))
             elif type_tag == "entity":
                 entity_id = UUID(data["id"])
                 if id_map is not None and entity_id in id_map:
@@ -111,10 +117,12 @@ def serialize_entity(entity, *, project_dir=None, on_unsupported="error", known_
     return data
 
 
-def serialize_entities(entities, *, project_dir=None, on_unsupported="error"):
+def serialize_entities(entities, *, project_dir=None, on_unsupported="error", known_ids=None):
     """Serialize a collection of entities."""
     entities = tuple(entities)
     entity_ids = {e.id for e in entities}
+    if known_ids:
+        entity_ids.update(UUID(str(x)) if not isinstance(x, UUID) else x for x in known_ids if x is not None)
     return [serialize_entity(e, project_dir=project_dir, on_unsupported=on_unsupported, known_ids=entity_ids) for e in entities]
 
 
@@ -224,16 +232,26 @@ def migrate_project_data(data):
     return data
 
 
-def save_project(directory, *, entities=None, layout=None, filename="project.json", on_unsupported="error"):
+def save_project(directory, *, entities=None, layout=None, assets=None, application_id=None, filename="project.json", on_unsupported="error"):
     """Atomically save project entities and editor layout to a versioned project file."""
     directory = Path(directory).resolve()
     directory.mkdir(parents=True, exist_ok=True)
     project_file = directory / filename
 
+    if hasattr(assets, "to_dict"):
+        assets_data = assets.to_dict()
+    elif isinstance(assets, dict):
+        assets_data = assets
+    else:
+        assets_data = {}
+
+    known_extra = {application_id} if application_id is not None else None
     data = {
         "version": CURRENT_VERSION,
-        "entities": serialize_entities(entities, project_dir=directory, on_unsupported=on_unsupported) if entities is not None else [],
+        "application_id": str(application_id) if application_id is not None else None,
+        "entities": serialize_entities(entities, project_dir=directory, on_unsupported=on_unsupported, known_ids=known_extra) if entities is not None else [],
         "layout": serialize_value(layout, project_dir=directory, on_unsupported=on_unsupported) if layout is not None else {},
+        "assets": assets_data,
     }
 
     with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", newline="\n", dir=directory, delete=False, suffix=".tmp") as f:
@@ -273,9 +291,34 @@ def load_project(window, graphics, input_state, directory, *, template=None, ent
     if not path.is_relative_to(directory):
         raise ValueError("Entry point must be inside the project")
     runtime = Runtime()
-    runtime.services.update(window=window, graphics=graphics, input=input_state, project=directory)
+    from .assets import AssetRegistry
+    registry = AssetRegistry(directory)
+    project_data = load_project_data(directory)
+    if project_data and "assets" in project_data:
+        registry.from_dict(project_data["assets"])
+    registry.scan(directory)
+    runtime.assets.registry = registry
+    runtime.services.update(window=window, graphics=graphics, input=input_state, project=directory, assets=registry)
     runtime.services["space"] = SpatialIndex(runtime)
-    root = runtime.create(name="Application", tags=["root"])
+    app_id = None
+    if project_data:
+        if "application_id" in project_data and project_data["application_id"]:
+            try:
+                app_id = UUID(str(project_data["application_id"]))
+            except ValueError:
+                pass
+        if app_id is None:
+            known_ids = {e["id"] for e in project_data.get("entities", [])}
+            layout_sel = project_data.get("layout", {}).get("selection")
+            if layout_sel and layout_sel not in known_ids:
+                try:
+                    app_id = UUID(str(layout_sel))
+                except ValueError:
+                    pass
+    if app_id is None:
+        import uuid as _uuid
+        app_id = _uuid.uuid5(_uuid.NAMESPACE_URL, f"lbe://{directory.resolve().as_posix()}/application")
+    root = runtime.create(identity=app_id, name="Application", tags=["root"])
     try:
         instance = root.systems.attach(path.stem, runtime.assets.system(path))
         if not instance.running:

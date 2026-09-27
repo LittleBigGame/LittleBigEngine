@@ -35,6 +35,7 @@ def hierarchy_sync():
         row = state.ui.create(state.hierarchy, f'HierarchyRow{len(state.hierarchy_rows)}', 'button', text='', indent=0,
                               normal_color=PANEL, hover_color=(35, 45, 58))
         row.on_click = hierarchy_click
+        row.on_drag = hierarchy_row_drag
         state.hierarchy_rows.append(row)
     has_scroll = len(visible) > capacity and capacity > 0
     row_w = state.hierarchy.w - 20 if has_scroll else state.hierarchy.w - 16
@@ -107,16 +108,36 @@ def hierarchy_track_click(track, event):
 
 
 def hierarchy_click(row, event):
-    target = row.relations["target"]
+    target = row.relations.get("target")
+    if target is None:
+        return
     if event[1] < row.x + row.indent + 24:
         expanded = set(state.hierarchy.expanded)
         expanded.symmetric_difference_update({target.id})
         state.hierarchy.expanded = expanded
     select(target)
 
+
+def hierarchy_row_drag(row, event):
+    if state.app.components.get("entity_drag") is not None or state.app.components.get("asset_drag") is not None:
+        return True
+    target = row.relations.get("target")
+    if target is None:
+        return False
+    ent_name = str(target.components.get("name", str(target.id)[:8]))
+    state.app.components["entity_drag"] = {
+        "id": str(target.id),
+        "name": ent_name,
+        "type": "entity",
+        "entity": target,
+    }
+    return True
+
+
 def start():
     state.hierarchy_sync = hierarchy_sync
     state.hierarchy_click = hierarchy_click
+    state.hierarchy_row_drag = hierarchy_row_drag
     state.hierarchy_scroll_drag = hierarchy_scroll_drag
     state.hierarchy_track_click = hierarchy_track_click
     if hasattr(state, "hierarchy_scroll_thumb"):
@@ -125,6 +146,7 @@ def start():
         state.hierarchy_scroll_track.on_click = hierarchy_track_click
     for row in getattr(state, "hierarchy_rows", ()):
         row.on_click = hierarchy_click
+        row.on_drag = hierarchy_row_drag
 
 
 def update(dt):
