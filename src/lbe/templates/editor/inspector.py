@@ -87,8 +87,9 @@ def inspector_sync():
     put(state.selection_label, visible=False, text=ent_name or str(entity.id))
 
     # Row 2: Identity label
+    ent_display = ent_name or "Entity"
     put(state.identity_label, x=ip.x + 12, y=ip.y + 56, w=max(30, ip.w - 24), h=18,
-        text=f'id: {str(entity.id)[:8]}')
+        text=f'🔷 Entity: {ent_display}')
 
     # Hide removed action buttons and chip bar
     put(state.add_child_button, visible=False)
@@ -170,14 +171,21 @@ def inspector_sync():
             key, value = items[source]
             from lbe.assets import AssetRef, ASSET_ICONS
             is_asset = isinstance(value, AssetRef)
-            editable = type(value) in (int, float, bool, str, tuple, list, dict, type(None)) and not is_asset
+            is_entity = hasattr(value, "components") and hasattr(value, "id")
+            editable = type(value) in (int, float, bool, str, tuple, list, dict, type(None)) and not is_asset and not is_entity
             y = comp_start_y + index * 25
             lbl_w = min(110, max(50, (ip.w - 24 - 8) // 3))
             field_w = max(40, ip.w - 12 - lbl_w - 6 - sb_w - 12)
             put(label, x=ip.x + 12, y=y + 1, w=lbl_w, h=23)
             if is_asset:
                 icon = ASSET_ICONS.get(value.type, "📦")
-                display_val = f" {icon} {value.name or value.id} "
+                display_val = f" {icon} {value.type.capitalize()}: {value.name or 'Asset'} "
+                put(field, x=ip.x + 12 + lbl_w + 6, y=y, w=field_w, h=23, readonly=True,
+                    color=(35, 55, 75), normal_color=(35, 55, 75), hover_color=(50, 80, 110),
+                    ink=(220, 240, 255))
+            elif is_entity:
+                ename = value.components.get("name") or "Entity"
+                display_val = f" 🔷 Entity: {ename} "
                 put(field, x=ip.x + 12 + lbl_w + 6, y=y, w=field_w, h=23, readonly=True,
                     color=(35, 55, 75), normal_color=(35, 55, 75), hover_color=(50, 80, 110),
                     ink=(220, 240, 255))
@@ -196,7 +204,7 @@ def inspector_sync():
             label.on_commit = lambda lbl=label: commit_component_key(lbl)
             label.on_click = component_click
             state.ui.set_text(label, key)
-            state.ui.set_text(field, display_val if is_asset else safe_repr(value))
+            state.ui.set_text(field, display_val if (is_asset or is_entity) else safe_repr(value))
 
         if has_comp_scroll:
             track_x = ip.x + ip.w - 10

@@ -394,11 +394,20 @@ def layout():
 
     # Hierarchy and File Explorer panels with tab switcher in header
     is_hier = (getattr(state, "active_left_tab", "hierarchy") == "hierarchy")
+    normal_hier = (38, 55, 75) if is_hier else PANEL
+    normal_files = (38, 55, 75) if not is_hier else PANEL
+    hover_hier = (50, 75, 105) if is_hier else (45, 60, 80)
+    hover_files = (50, 75, 105) if not is_hier else (45, 60, 80)
+    mx, my = getattr(state.ui, "mouse_pos", (-1, -1))
+    hier_hover = contains(state.tab_hierarchy, mx, my)
+    files_hover = contains(state.tab_files, mx, my)
     put(state.tab_hierarchy, visible=True, x=200, y=8, w=110, h=28,
-        color=(38, 55, 75) if is_hier else PANEL,
+        normal_color=normal_hier, hover_color=hover_hier,
+        color=hover_hier if hier_hover else normal_hier,
         ink=INK if is_hier else MUTED)
     put(state.tab_files, visible=True, x=318, y=8, w=130, h=28,
-        color=(38, 55, 75) if not is_hier else PANEL,
+        normal_color=normal_files, hover_color=hover_files,
+        color=hover_files if files_hover else normal_files,
         ink=INK if not is_hier else MUTED)
 
     hm = parse_box(state.hierarchy.components.get("margin", (8, 8, 4, 8)))
@@ -1288,6 +1297,8 @@ def find_hit_game_entity(wx, wy):
 
 
 def viewport_click(control, event):
+    if state.app.components.get("asset_drag") is not None:
+        return False
     control.drag_pos = None
     wx, wy = screen_to_world(state.camera, control, event[1], event[2])
     target = find_hit_game_entity(wx, wy)
@@ -1299,6 +1310,8 @@ def viewport_click(control, event):
 
 
 def viewport_drag(control, event):
+    if state.app.components.get("asset_drag") is not None:
+        return False
     x, y = event[1], event[2]
     if len(event) >= 7:
         dx, dy = event[5], event[6]
@@ -1379,6 +1392,22 @@ def on_asset_drop(asset_drag, event):
         tgt = selected()
         if tgt:
             apply_asset_to_entity(tgt, asset_drag)
+        return
+
+    # 5. Dropped on File Explorer
+    if hasattr(state, "file_explorer") and getattr(state, "active_left_tab", "hierarchy") == "files" and contains(state.file_explorer, mx, my):
+        target_folder = None
+        for row in getattr(state, "file_explorer_rows", []):
+            if state.ui.visible(row) and contains(row, mx, my):
+                item = row.components.get("file_item")
+                if item and item.get("is_dir"):
+                    target_folder = item["path"]
+                    break
+        if target_folder is None:
+            target_folder = state.project
+        src_path = (Path(state.project) / asset_drag["path"]).resolve() if "path" in asset_drag else None
+        if src_path:
+            move_file_or_folder(src_path, target_folder)
         return
 
 
@@ -1566,6 +1595,90 @@ def delete_file_item(item):
         message(f"Deleted {item['name']}")
     except Exception as e:
         message(f"Delete failed: {e}")
+
+
+def create_new_folder(parent_dir=None):
+    pdir = Path(parent_dir) if parent_dir else Path(state.project).resolve()
+    base_name = "New Folder"
+    candidate = pdir / base_name
+    idx = 1
+    while candidate.exists():
+        candidate = pdir / f"{base_name} ({idx})"
+        idx += 1
+    try:
+        candidate.mkdir(parents=True, exist_ok=True)
+        refresh_project_files()
+        message(f"Created folder '{candidate.name}'")
+    except Exception as e:
+        message(f"Failed to create folder: {e}")
+
+
+def move_file_or_folder(src_path, dst_folder):
+    src = Path(src_path).resolve()
+    dst_dir = Path(dst_folder).resolve()
+    if not src.exists() or not dst_dir.is_dir():
+        return
+    dst = dst_dir / src.name
+    if src == dst:
+        return
+    if dst.exists():
+        message(f"Cannot move: '{dst.name}' already exists in destination")
+        return
+
+    was_open = (getattr(state, "active_file", None) and Path(state.active_file).resolve() == src)
+    try:
+        src.rename(dst)
+    except Exception as e:
+        message(f"Move failed: {e}")
+        return
+
+    reg = getattr(state.runtime.assets, "registry", None)
+    if reg:
+        aid = reg.get_id(src)
+        if aid:
+            reg.rename(aid, dst)
+
+    if was_open:
+        state.active_file = str(dst)
+        rel = str(dst.relative_to(Path(state.project).resolve())).replace("\\", "/")
+        state.path_field.buffer = TextBuffer(rel)
+        state._saved_source = (rel, state.code.buffer.text)
+
+    if dst.suffix.lower() == ".py":
+        try:
+            definition = state.runtime.assets.system(dst)
+            for ent in state.runtime.entities:
+                for name, instance in tuple(ent.systems.items()):
+                    inst_path = getattr(getattr(instance, "definition", None), "path", None)
+                    if inst_path and Path(inst_path).resolve() == src.resolve():
+                        ent.systems.reload(name, definition)
+        except Exception:
+            pass
+
+    save_editor_project()
+    refresh_project_files()
+    message(f"Moved '{src.name}' to '{dst_dir.name or 'root'}'")
+
+
+def open_move_file_menu(src_path):
+    pdir = Path(state.project).resolve()
+    dirs = [pdir]
+    for root, dirnames, _ in os.walk(pdir):
+        dirnames[:] = [d for d in dirnames if not d.startswith(".") and d not in ("__pycache__", "venv", ".venv")]
+        for d in dirnames:
+            dirs.append(Path(root) / d)
+
+    actions = []
+    for d in sorted(dirs, key=lambda p: str(p).lower()):
+        rel = "." if d == pdir else str(d.relative_to(pdir)).replace("\\", "/")
+        label = f"📁 /{rel}" if rel != "." else "📁 / (Project root)"
+        actions.append(dict(
+            label=label,
+            run=lambda _, target_dir=d: move_file_or_folder(src_path, target_dir)
+        ))
+    mouse = getattr(state.ui, "mouse_pos", None)
+    x, y = mouse if mouse else (200, 200)
+    open_menu(state.ui, state.file_explorer, x, y, actions=actions)
 
 
 def keyboard(event):
@@ -1903,7 +2016,9 @@ def context_actions(target):
         item = target['file_item']
         actions = []
         if item['is_dir']:
+            actions.append(dict(label=f"+ New folder in '{item['name']}'...", run=lambda _: create_new_folder(item['path'])))
             actions.append(dict(label=f"+ New script in '{item['name']}'...", run=lambda _: new_source_in_dir(item['path'])))
+            actions.append(dict(label="Move folder to...", run=lambda _: open_move_file_menu(item['path'])))
             actions.append(dict(label=f"Rename folder '{item['name']}'...", run=lambda _: prompt_rename_file_item(item)))
             actions.append(None)
             actions.append(dict(label=f"Delete folder '{item['name']}'", run=lambda _: delete_file_item(item)))
@@ -1919,6 +2034,7 @@ def context_actions(target):
                 if sel:
                     sel_name = str(sel.components.get('name', sel.id))
                     actions.append(dict(label=f"Assign sprite to '{sel_name}'", run=lambda _: assign_entity_sprite(sel, item)))
+            actions.append(dict(label="Move to folder...", run=lambda _: open_move_file_menu(item['path'])))
             actions.append(dict(label=f"Rename '{item['name']}'...", run=lambda _: prompt_rename_file_item(item)))
             actions.append(dict(label="Copy relative path", run=lambda _: (state.window.set_clipboard_text(item['rel_path']), message(f"Copied path '{item['rel_path']}'"))))
             if item.get('asset_id'):
@@ -1929,6 +2045,7 @@ def context_actions(target):
 
     if isinstance(target, dict) and target.get('file_explorer'):
         return [
+            dict(label="+ New folder...", run=lambda _: create_new_folder(state.project)),
             dict(label="+ New system script...", run=lambda _: new_source()),
             dict(label="Refresh project files", run=lambda _: refresh_project_files()),
         ]

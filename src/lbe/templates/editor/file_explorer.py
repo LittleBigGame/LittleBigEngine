@@ -186,6 +186,8 @@ def file_row_click(row, event):
 
 def file_row_drag(row, event):
     """Initiate drag of asset from File Explorer."""
+    if state.app.components.get("asset_drag") is not None:
+        return True
     item = row.components.get("file_item")
     if not item or item["is_dir"]:
         return False

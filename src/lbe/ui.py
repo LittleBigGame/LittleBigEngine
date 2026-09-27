@@ -7,7 +7,9 @@ from time import monotonic
 from .syntax import slice_spans
 from .text import TextBuffer
 
-ASSET_PATTERN = re.compile(r'asset\(\s*["\']([0-9a-fA-F-]{36})["\']\s*\)|assets\[\s*["\']([0-9a-fA-F-]{36})["\']\s*\]')
+ASSET_PATTERN = re.compile(
+    r'(?:asset|entity|resolve|entity_ref)\(\s*["\']([0-9a-fA-F-]{36})["\']\s*\)|assets\[\s*["\']([0-9a-fA-F-]{36})["\']\s*\]'
+)
 
 PITCH = 8
 LINE = 20
@@ -431,6 +433,7 @@ class UI:
                 cb = self.root.components.get("on_asset_drop")
                 if cb:
                     cb(asset_drag, event)
+                return
             active_drag = self.root.relations.pop("active_drag", None)
             if active_drag is not None:
                 if "splitter" in active_drag.tags or "scrollbar_thumb" in active_drag.tags or "button" in active_drag.tags or "chip" in active_drag.tags:
@@ -442,6 +445,8 @@ class UI:
                     cb(active_drag, event)
             return
         if kind == "drag":
+            if self.root.components.get("asset_drag") is not None:
+                return
             text_drag = self.root.relations.get("text_drag")
             if text_drag is not None and self.visible(text_drag) and event[3] & 1:
                 mx, my = event[1], event[2]
@@ -576,6 +581,12 @@ class UI:
         buffer = control.buffer
         multiline = "multiline" in control.tags
         if kind == "text":
+            if multiline:
+                for m in ASSET_PATTERN.finditer(buffer.text):
+                    s, e = m.span()
+                    if s < buffer.cursor < e:
+                        buffer.cursor = buffer.anchor = e
+                        break
             buffer.insert(event[1] if multiline else event[1].replace("\r\n", " ").replace("\r", " ").replace("\n", " "))
         elif kind == "key":
             key, ctrl, shift = event[1:]
@@ -592,17 +603,52 @@ class UI:
             elif ctrl and key == "Z":
                 buffer.undo(redo=shift)
             elif key in ("LEFT", "RIGHT", "UP", "DOWN", "HOME", "END", "FILE_HOME", "FILE_END", "PAGEUP", "PAGEDOWN", "WORD_LEFT", "WORD_RIGHT"):
-                move_dir = key
-                if ctrl and key == "LEFT":
-                    move_dir = "WORD_LEFT"
-                elif ctrl and key == "RIGHT":
-                    move_dir = "WORD_RIGHT"
-                buffer.move(move_dir, select=shift)
-            elif key in ("BACKSPACE", "DELETE"):
-                if ctrl:
-                    buffer.delete_word(backward=key == "BACKSPACE")
+                if multiline and key in ("LEFT", "RIGHT") and not ctrl:
+                    jumped = False
+                    for m in ASSET_PATTERN.finditer(buffer.text):
+                        s, e = m.span()
+                        if key == "LEFT" and s < buffer.cursor <= e:
+                            buffer.cursor = s
+                            if not shift:
+                                buffer.anchor = s
+                            jumped = True
+                            break
+                        elif key == "RIGHT" and s <= buffer.cursor < e:
+                            buffer.cursor = e
+                            if not shift:
+                                buffer.anchor = e
+                            jumped = True
+                            break
+                    if not jumped:
+                        move_dir = key
+                        if ctrl and key == "LEFT":
+                            move_dir = "WORD_LEFT"
+                        elif ctrl and key == "RIGHT":
+                            move_dir = "WORD_RIGHT"
+                        buffer.move(move_dir, select=shift)
                 else:
-                    buffer.delete(backward=key == "BACKSPACE")
+                    move_dir = key
+                    if ctrl and key == "LEFT":
+                        move_dir = "WORD_LEFT"
+                    elif ctrl and key == "RIGHT":
+                        move_dir = "WORD_RIGHT"
+                    buffer.move(move_dir, select=shift)
+            elif key in ("BACKSPACE", "DELETE"):
+                deleted_pill = False
+                if multiline and buffer.anchor == buffer.cursor:
+                    for m in ASSET_PATTERN.finditer(buffer.text):
+                        s, e = m.span()
+                        if (key == "BACKSPACE" and s < buffer.cursor <= e) or (key == "DELETE" and s <= buffer.cursor < e):
+                            buffer.cursor = e
+                            buffer.anchor = s
+                            buffer.insert("")
+                            deleted_pill = True
+                            break
+                if not deleted_pill:
+                    if ctrl:
+                        buffer.delete_word(backward=key == "BACKSPACE")
+                    else:
+                        buffer.delete(backward=key == "BACKSPACE")
             elif key in ("ENTER", "RETURN", "NUM_ENTER"):
                 if multiline:
                     buffer.newline()
@@ -639,6 +685,14 @@ class UI:
         buffer = control.buffer
         row = max(0, int((y-control.y-6)//line))+buffer.scroll
         column = max(0, round((x-control.x-48)/pitch))+buffer.horizontal
+        lines = buffer.text.split("\n")
+        if row < len(lines):
+            line_str = lines[row]
+            for m in ASSET_PATTERN.finditer(line_str):
+                s, e = m.span()
+                if s < column < e:
+                    column = s if (column - s) < (e - column) else e
+                    break
         return buffer.index(row, column)
 
     def _sync_text(self, control):
@@ -704,10 +758,36 @@ class UI:
                 uid_str = m.group(1) or m.group(2)
                 reg = getattr(self.runtime.assets, "registry", None) if hasattr(self.runtime, "assets") else None
                 entry = reg.get(uid_str) if reg else None
-                from .assets import ASSET_ICONS
-                icon = ASSET_ICONS.get(entry["type"], "📦") if entry else "📦"
-                display_name = entry["name"] if entry else (uid_str[:8] + "...")
-                pill_label = f" {icon} {display_name} "
+                if entry:
+                    etype = entry.get("type", "asset")
+                    if etype == "system":
+                        pill_label = f" ⚡ System: {entry['name']} "
+                    elif etype == "image":
+                        pill_label = f" 🖼️ Image: {entry['name']} "
+                    elif etype == "audio":
+                        pill_label = f" 🔊 Audio: {entry['name']} "
+                    else:
+                        pill_label = f" 📄 {etype.capitalize()}: {entry['name']} "
+                else:
+                    resolved_ent = None
+                    if hasattr(self.runtime, "resolve"):
+                        try:
+                            resolved_ent = self.runtime.resolve(uid_str)
+                        except Exception:
+                            pass
+                        if resolved_ent is None:
+                            try:
+                                from uuid import UUID
+                                resolved_ent = self.runtime.resolve(UUID(uid_str))
+                            except Exception:
+                                pass
+                    if resolved_ent is not None:
+                        ename = resolved_ent.components.get("name") or str(resolved_ent.id)[:8]
+                        pill_label = f" 🔷 Entity: {ename} "
+                    elif m.group(0).startswith("entity"):
+                        pill_label = f" 🔷 Entity: {uid_str[:8]} "
+                    else:
+                        pill_label = f" 📦 Asset: {uid_str[:8]} "
 
                 col_start, col_end = m.span()
                 c_vis_start = max(0, col_start - buffer.horizontal)
@@ -719,13 +799,30 @@ class UI:
                 pill.tags.add("asset_pill")
                 if c_vis_end > c_vis_start and (col_start >= buffer.horizontal or col_end > buffer.horizontal):
                     pill_x = line.x + c_vis_start * pitch
-                    pill_w = max(40, len(pill_label) * pitch)
+                    span_w = (c_vis_end - c_vis_start) * pitch
+                    pill_w = max(span_w, len(pill_label) * pitch + 16)
                     pill.components["asset_id"] = uid_str
                     pill.components["asset_token"] = m.group(0)
-                    pill.components["asset_name"] = display_name
+                    pill.components["asset_name"] = entry["name"] if entry else pill_label.strip()
                     pill.components["asset_row"] = row
                     pill.components["asset_span"] = (col_start, col_end)
                     pill.components["text_control"] = control
+
+                    def make_pill_click(p_ctrl, r_num, c_span):
+                        def on_p_click(p_inst, ev=None):
+                            t_ctrl = p_inst.components.get("text_control")
+                            if t_ctrl and "multiline" in t_ctrl.tags:
+                                self.focus(t_ctrl)
+                                mx = ev[1] if ev else p_inst.x + p_inst.w
+                                tgt_col = c_span[0] if (ev and mx < p_inst.x + p_inst.w / 2) else c_span[1]
+                                t_ctrl.buffer.cursor = t_ctrl.buffer.anchor = t_ctrl.buffer.index(r_num, tgt_col)
+                                t_ctrl.components.touch("buffer")
+                        return on_p_click
+
+                    p_click = make_pill_click(pill, row, (col_start, col_end))
+                    pill.components["action"] = p_click
+                    pill.components["on_click"] = p_click
+
                     put(pill, visible=True, x=pill_x, y=y + 1, w=pill_w, h=line_height - 2,
                         text=pill_label, color=(35, 55, 75), normal_color=(35, 55, 75), hover_color=(50, 80, 110),
                         ink=(230, 245, 255))

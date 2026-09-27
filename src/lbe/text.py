@@ -115,6 +115,10 @@ class TextBuffer:
         return tuple(sorted((self.anchor, self.cursor)))
 
     @property
+    def has_selection(self):
+        return self.anchor != self.cursor
+
+    @property
     def selected_text(self):
         start, end = self.selection
         return self.text[start:end]

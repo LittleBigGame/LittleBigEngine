@@ -281,3 +281,107 @@ class AssetSystemTests(unittest.TestCase):
         # 2. Inline pill automatically reflects the new name!
         updated_pill = next(c for c in ed.ui.controls() if "asset_pill" in c.tags and c.visible)
         self.assertIn("hero_warrior.png", updated_pill.text)
+
+    def test_atomic_pill_navigation_and_deletion(self):
+        """Arrow keys jump across pills atomically and Backspace/Delete remove whole pill."""
+        ed = self.editor
+        reg = self.runtime.assets.registry
+        player_id = reg.get_id(self.player_img)
+
+        # "x = asset('<id>') + 1"
+        token = f'asset("{player_id}")'
+        ed.code.buffer.text = f"x = {token} + 1"
+        ed.ui.focus(ed.code)
+        self.runtime.step(0)
+
+        # Cursor after pill (at 4 + len(token))
+        token_start = 4
+        token_end = token_start + len(token)
+        ed.code.buffer.cursor = ed.code.buffer.anchor = token_end
+
+        # Pressing LEFT jumps completely over the pill to token_start
+        self.send(("key", "LEFT", False, False))
+        self.assertEqual(ed.code.buffer.cursor, token_start)
+
+        # Pressing RIGHT jumps completely over the pill to token_end
+        self.send(("key", "RIGHT", False, False))
+        self.assertEqual(ed.code.buffer.cursor, token_end)
+
+        # Pressing BACKSPACE at token_end deletes the entire pill token in one go
+        self.send(("key", "BACKSPACE", False, False))
+        self.assertEqual(ed.code.buffer.text, "x =  + 1")
+        self.assertEqual(ed.code.buffer.cursor, token_start)
+
+        # Reset text and test DELETE from before the pill
+        ed.code.buffer.text = f"x = {token} + 1"
+        ed.code.buffer.cursor = ed.code.buffer.anchor = token_start
+        self.send(("key", "DELETE", False, False))
+        self.assertEqual(ed.code.buffer.text, "x =  + 1")
+        self.assertEqual(ed.code.buffer.cursor, token_start)
+
+    def test_drag_isolation_and_camera_freeze(self):
+        """Active asset_drag freezes viewport panning and prevents row retargeting."""
+        ed = self.editor
+        reg = self.runtime.assets.registry
+        player_id = reg.get_id(self.player_img)
+
+        cam_x_orig = ed.camera.x
+        cam_y_orig = ed.camera.y
+
+        # Initiate drag
+        drag_data = {
+            "id": player_id,
+            "name": "player.png",
+            "path": "textures/player.png",
+            "type": "image",
+            "icon": "🖼️",
+        }
+        ed.app.components["asset_drag"] = drag_data
+
+        # Dragging across viewport does not pan camera
+        vp = ed.viewport
+        self.send(("drag", vp.x + 100, vp.y + 100, 1, 0, 50, 50))
+        self.assertEqual(ed.camera.x, cam_x_orig)
+        self.assertEqual(ed.camera.y, cam_y_orig)
+
+        # Clicking viewport while dragging does not change selection
+        selected_before = ed.selected()
+        self.send(("click", vp.x + 100, vp.y + 100, 1, 0))
+        self.assertEqual(ed.selected(), selected_before)
+
+    def test_folder_creation_and_file_moving_with_stable_uuid(self):
+        """Folders can be created and files moved between folders while preserving asset UUID."""
+        app_ns = self.editor.app.systems["app"].namespace
+        create_new_folder = app_ns["create_new_folder"]
+        move_file_or_folder = app_ns["move_file_or_folder"]
+        ed = self.editor
+        reg = self.runtime.assets.registry
+        player_id = reg.get_id(self.player_img)
+
+        # Create "Game" folder
+        create_new_folder(self.project_path)
+        game_folder = self.project_path / "New Folder"
+        self.assertTrue(game_folder.exists() and game_folder.is_dir())
+
+        # Move player.png into New Folder
+        move_file_or_folder(self.player_img, game_folder)
+        moved_player = game_folder / "player.png"
+        self.assertTrue(moved_player.exists())
+        self.assertFalse(self.player_img.exists())
+
+        # UUID is still preserved and points to the new relative path
+        self.assertEqual(reg.get_id(moved_player), player_id)
+        entry = reg.get(player_id)
+        self.assertEqual(entry["path"], "New Folder/player.png")
+
+    def test_inspector_identity_hides_raw_uuid(self):
+        """Inspector identity label displays clean Entity: <name> instead of raw UUID."""
+        ed = self.editor
+        hero = self.runtime.create(parent=ed.game, name="HeroPlayer")
+        ed.select(hero)
+        self.runtime.step(0)
+
+        # Identity label displays 🔷 Entity: HeroPlayer
+        self.assertIn("HeroPlayer", ed.identity_label.text)
+        self.assertNotIn("id:", ed.identity_label.text)
+        self.assertNotIn(str(hero.id), ed.identity_label.text)
