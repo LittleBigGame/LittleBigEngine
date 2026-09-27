@@ -71,3 +71,54 @@ class SceneTests(unittest.TestCase):
         self.assertEqual(child_rect[0], parent.x + 5.0)
         self.assertEqual(child_rect[1], parent.y + 5.0)
         runtime.close()
+
+    def test_viewport_culling_skips_offscreen_entities(self):
+        window = SimpleNamespace(width=900, height=600)
+        graphics = RecordingGraphics()
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        runtime = load_project(window, graphics, None, directory.name, template=template_path("demo"))
+        runtime.step(0)
+        game = next(e for e in runtime.entities if e.components.get("name") == "Game")
+        
+        # Create an offscreen entity far away (x=500, y=500)
+        offscreen = runtime.create(parent=game, name="OffscreenEntity", x=500.0, y=500.0, w=2.0, h=2.0, color=(100, 100, 100))
+        # Create an onscreen entity near camera (x=0, y=0)
+        onscreen = runtime.create(parent=game, name="OnscreenEntity", x=0.0, y=0.0, w=1.0, h=1.0, color=(200, 200, 200))
+        
+        graphics.rectangles.clear()
+        runtime.step(0)
+        
+        drawn_keys = [kw.get("key") for _, kw in graphics.rectangles]
+        self.assertIn(onscreen.id, drawn_keys)
+        self.assertNotIn(offscreen.id, drawn_keys)
+        runtime.close()
+
+    def test_spatial_debug_grid_f3_renders_green_and_red(self):
+        window = SimpleNamespace(width=900, height=600)
+        graphics = RecordingGraphics()
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        runtime = load_project(window, graphics, None, directory.name, template=template_path("demo"))
+        game = next(e for e in runtime.entities if e.components.get("name") == "Game")
+        
+        # Enable F3 spatial debug
+        game.components["show_spatial_debug"] = True
+        
+        # Entity A is at (-3, -1) in cell (-1, -1) -> 1 entity in that cell (Green)
+        # Add another entity at (-3, -1) -> 2 entities in cell (-1, -1) -> Multiple (Red)
+        extra = runtime.create(parent=game, name="Clustered", x=-3.0, y=-1.0, w=1.0, h=1.0, color=(255, 255, 255))
+        
+        graphics.rectangles.clear()
+        runtime.step(0)
+        
+        # Check that debug rectangles were drawn for cells
+        debug_rects = [r for r in graphics.rectangles if isinstance(r[1].get("key"), tuple) and str(r[1]["key"][0]).startswith("sc_")]
+        self.assertTrue(len(debug_rects) > 0)
+        
+        # Check colors: there should be red fills for the 2-entity cell
+        red_fills = [r for r in debug_rects if r[1].get("key")[1] == "f" and r[1].get("color")[0] > 150]
+        self.assertTrue(len(red_fills) >= 1)
+        
+        runtime.close()
+

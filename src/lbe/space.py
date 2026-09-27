@@ -86,6 +86,89 @@ class SpatialIndex:
                              and self._bounds[entity][1] <= top
                              and self._bounds[entity][3] >= bottom), key=lambda e: e.id.int))
 
+    def cells(self):
+        """Return a mapping of (cell_x, cell_y) -> set of alive entities in that cell."""
+        result = {}
+        for key, members in self._cells.items():
+            alive = {e for e in members if getattr(e, "alive", True)}
+            if alive:
+                result[key] = alive
+        return result
+
+    def cell_bounds(self, key):
+        """Return the (x, y, w, h) bounding box in world units for a given cell key."""
+        cx, cy = key
+        return cx * self.cell_size, cy * self.cell_size, self.cell_size, self.cell_size
+
+    def collides(self, entity_a, entity_b):
+        """Check if two entities have overlapping bounding boxes."""
+        if entity_a is entity_b:
+            return False
+        box_a = self._bounds.get(entity_a) or bounds(entity_a)
+        box_b = self._bounds.get(entity_b) or bounds(entity_b)
+        if box_a is None or box_b is None:
+            return False
+        return (box_a[0] < box_b[2] and box_a[2] > box_b[0] and
+                box_a[1] < box_b[3] and box_a[3] > box_b[1])
+
+    def query_collisions(self, entity, tag=None):
+        """Query all entities currently colliding with the given entity (AABB intersection).
+        
+        Uses the spatial hash to narrow candidates to only nearby entities before testing overlap.
+        """
+        box = self._bounds.get(entity) or bounds(entity)
+        if box is None:
+            return ()
+        keys = self._keys(box)
+        if keys is None:
+            candidates = set(self._bounds)
+        else:
+            candidates = set(self._large)
+            for key in keys:
+                candidates.update(self._cells.get(key, ()))
+        candidates.discard(entity)
+
+        left, bottom, right, top = box
+        hits = []
+        for other in candidates:
+            if not getattr(other, "alive", True):
+                continue
+            if tag is not None and tag not in getattr(other, "tags", ()):
+                continue
+            obox = self._bounds.get(other)
+            if obox is None:
+                continue
+            if (obox[0] < right and obox[2] > left and
+                obox[1] < top and obox[3] > bottom):
+                hits.append(other)
+        return tuple(sorted(hits, key=lambda e: e.id.int))
+
+    def query_nearby(self, entity, radius=0.0):
+        """Query entities near the given entity, expanded by an optional margin/radius."""
+        box = self._bounds.get(entity) or bounds(entity)
+        if box is None:
+            return ()
+        left, bottom, right, top = box
+        return self.query(left - radius, bottom - radius, (right - left) + 2 * radius, (top - bottom) + 2 * radius)
+
+    def query_radius(self, cx, cy, radius):
+        """Query all entities whose bounding boxes overlap a circular region."""
+        candidates = self.query(cx - radius, cy - radius, 2 * radius, 2 * radius)
+        r_sq = radius * radius
+        results = []
+        for e in candidates:
+            box = self._bounds.get(e)
+            if box is None:
+                continue
+            # Distance from circle center to closest point on AABB
+            closest_x = max(box[0], min(cx, box[2]))
+            closest_y = max(box[1], min(cy, box[3]))
+            dx = cx - closest_x
+            dy = cy - closest_y
+            if dx * dx + dy * dy <= r_sq:
+                results.append(e)
+        return tuple(results)
+
     def close(self):
         self._unsubscribe()
         self._bounds.clear()

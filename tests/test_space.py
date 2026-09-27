@@ -57,3 +57,68 @@ class SpaceTests(unittest.TestCase):
                 index.query(0, bad_coord, 10, 10)
         index.close()
 
+    def test_cells_and_cell_bounds(self):
+        runtime = Runtime()
+        index = SpatialIndex(runtime, cell_size=4.0)
+        e1 = runtime.create(x=1.0, y=1.0, w=2.0, h=2.0)
+        e2 = runtime.create(x=10.0, y=10.0, w=2.0, h=2.0)
+        
+        cells = index.cells()
+        # e1 in cell (0, 0), e2 in cell (2, 2)
+        self.assertIn((0, 0), cells)
+        self.assertIn((2, 2), cells)
+        self.assertEqual(cells[(0, 0)], {e1})
+        self.assertEqual(cells[(2, 2)], {e2})
+        
+        bx, by, bw, bh = index.cell_bounds((0, 0))
+        self.assertEqual((bx, by, bw, bh), (0.0, 0.0, 4.0, 4.0))
+        
+        e1.destroy()
+        self.assertNotIn((0, 0), index.cells())
+        index.close()
+
+    def test_collides_and_query_collisions(self):
+        runtime = Runtime()
+        index = SpatialIndex(runtime, cell_size=4.0)
+        e1 = runtime.create(name="Player", x=0.0, y=0.0, w=2.0, h=2.0, tags=["player"])
+        e2 = runtime.create(name="Gem1", x=1.0, y=1.0, w=2.0, h=2.0, tags=["pickup"]) # Overlaps e1
+        e3 = runtime.create(name="Gem2", x=10.0, y=10.0, w=2.0, h=2.0, tags=["pickup"]) # Far away
+        e4 = runtime.create(name="Enemy", x=0.5, y=0.5, w=1.0, h=1.0, tags=["enemy"]) # Overlaps e1 and e2
+
+        self.assertTrue(index.collides(e1, e2))
+        self.assertTrue(index.collides(e1, e4))
+        self.assertFalse(index.collides(e1, e3))
+        self.assertFalse(index.collides(e1, e1)) # Does not collide with self
+
+        # query_collisions on e1
+        collisions = index.query_collisions(e1)
+        self.assertEqual(set(collisions), {e2, e4})
+
+        # query_collisions with tag filter
+        pickup_collisions = index.query_collisions(e1, tag="pickup")
+        self.assertEqual(set(pickup_collisions), {e2})
+
+        enemy_collisions = index.query_collisions(e1, tag="enemy")
+        self.assertEqual(set(enemy_collisions), {e4})
+
+        index.close()
+
+    def test_query_nearby_and_query_radius(self):
+        runtime = Runtime()
+        index = SpatialIndex(runtime, cell_size=4.0)
+        center = runtime.create(x=0.0, y=0.0, w=1.0, h=1.0)
+        near = runtime.create(x=2.0, y=0.0, w=1.0, h=1.0)
+        far = runtime.create(x=20.0, y=20.0, w=1.0, h=1.0)
+
+        nearby = set(index.query_nearby(center, radius=3.0))
+        self.assertIn(center, nearby)
+        self.assertIn(near, nearby)
+        self.assertNotIn(far, nearby)
+
+        radial = set(index.query_radius(0.0, 0.0, radius=3.5))
+        self.assertIn(center, radial)
+        self.assertIn(near, radial)
+        self.assertNotIn(far, radial)
+
+        index.close()
+

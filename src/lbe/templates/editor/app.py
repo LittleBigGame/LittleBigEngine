@@ -1822,6 +1822,14 @@ def keyboard(event):
         cur = getattr(state, "active_left_tab", "hierarchy")
         switch_left_tab("files" if cur == "hierarchy" else "hierarchy")
         return True
+    if event[1] == "F3":
+        cur_debug = state.app.components.get("show_spatial_debug", False)
+        new_debug = not cur_debug
+        state.app.components["show_spatial_debug"] = new_debug
+        if hasattr(state, "game") and state.game:
+            state.game.components["show_spatial_debug"] = new_debug
+        message(f"Spatial debug partition: {'ON' if new_debug else 'OFF'} (F3)")
+        return True
     return False
 
 

@@ -2358,7 +2358,21 @@ class EditorTests(unittest.TestCase):
         self.assertTrue(ed.path_field.components.get("readonly", False))
         self.assertEqual(ed.path_field.buffer.text, orig_name)
 
+    def test_f3_key_toggles_spatial_debug_grid(self):
+        ed = self.editor
+        self.runtime.step(0)
+        self.assertFalse(ed.app.components.get("show_spatial_debug", False))
 
+        # Press F3 to enable
+        self.send(("key", "F3", False, False))
+        self.runtime.step(0)
+        self.assertTrue(ed.app.components.get("show_spatial_debug", False))
+        self.assertTrue(ed.game.components.get("show_spatial_debug", False))
+        self.assertIn("Spatial debug partition: ON", ed.app.status)
 
-
-
+        # Press F3 again to disable
+        self.send(("key", "F3", False, False))
+        self.runtime.step(0)
+        self.assertFalse(ed.app.components.get("show_spatial_debug", True))
+        self.assertFalse(ed.game.components.get("show_spatial_debug", True))
+        self.assertIn("Spatial debug partition: OFF", ed.app.status)
