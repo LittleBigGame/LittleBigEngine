@@ -75,9 +75,12 @@ class AssetRegistry:
         path_obj = Path(path)
         if self.project_dir and path_obj.is_absolute():
             try:
-                rel_path = str(path_obj.relative_to(self.project_dir)).replace("\\", "/")
+                rel_path = str(path_obj.resolve().relative_to(self.project_dir)).replace("\\", "/")
             except ValueError:
-                rel_path = path_obj.name
+                try:
+                    rel_path = str(path_obj.relative_to(self.project_dir)).replace("\\", "/")
+                except ValueError:
+                    rel_path = path_obj.name
         else:
             rel_path = str(path_obj).replace("\\", "/")
 
@@ -127,9 +130,12 @@ class AssetRegistry:
         path_obj = Path(new_path)
         if self.project_dir and path_obj.is_absolute():
             try:
-                rel_path = str(path_obj.relative_to(self.project_dir)).replace("\\", "/")
+                rel_path = str(path_obj.resolve().relative_to(self.project_dir)).replace("\\", "/")
             except ValueError:
-                rel_path = path_obj.name
+                try:
+                    rel_path = str(path_obj.relative_to(self.project_dir)).replace("\\", "/")
+                except ValueError:
+                    rel_path = path_obj.name
         else:
             rel_path = str(path_obj).replace("\\", "/")
 
@@ -155,9 +161,12 @@ class AssetRegistry:
         path_obj = Path(path)
         if self.project_dir and path_obj.is_absolute():
             try:
-                rel_path = str(path_obj.relative_to(self.project_dir)).replace("\\", "/")
+                rel_path = str(path_obj.resolve().relative_to(self.project_dir)).replace("\\", "/")
             except ValueError:
-                rel_path = path_obj.name
+                try:
+                    rel_path = str(path_obj.relative_to(self.project_dir)).replace("\\", "/")
+                except ValueError:
+                    rel_path = path_obj.name
         else:
             rel_path = str(path_obj).replace("\\", "/")
         return self._path_to_id.get(rel_path.lower())

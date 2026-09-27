@@ -18,7 +18,7 @@ class AssetSystemTests(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
-        self.project_path = Path(self.directory.name)
+        self.project_path = Path(self.directory.name).resolve()
 
         # Create sample project files
         self.img_dir = self.project_path / "textures"
