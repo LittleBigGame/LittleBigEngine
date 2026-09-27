@@ -496,6 +496,18 @@ class UI:
         if kind in ("click", "scroll"):
             if kind == "click":
                 self.root.relations.pop("text_drag", None)
+                mx, my = event[1], event[2]
+                now = monotonic()
+                last_time, last_x, last_y, last_count, last_ctl = getattr(self, "_click_state", (0, 0, 0, 0, None))
+                if len(event) >= 6:
+                    click_count = event[5]
+                elif (0.05 <= now - last_time <= 0.40) and abs(mx - last_x) <= 6 and abs(my - last_y) <= 6:
+                    click_count = (last_count % 3) + 1
+                else:
+                    click_count = 1
+                self._click_state = (now, mx, my, click_count, None)
+                if len(event) < 6:
+                    event = (*event, click_count)
             self.root.relations.pop("active_drag", None)
             controls = [e for e in self.controls() if self.visible(e) and contains(e, event[1], event[2])]
             controls.sort(key=lambda e: (e.components.get("layer", 2), e.depth), reverse=True)
@@ -522,17 +534,7 @@ class UI:
                     return
                 if "multiline" in control.tags:
                     self.focus(control)
-                    now = monotonic()
-                    last_time, last_x, last_y, last_count, last_ctl = getattr(self, "_click_state", (0, 0, 0, 0, None))
-                    mx, my = event[1], event[2]
-                    if len(event) >= 6:
-                        click_count = event[5]
-                    elif last_ctl is control and (0.05 <= now - last_time <= 0.40) and abs(mx - last_x) <= 4 and abs(my - last_y) <= 4:
-                        click_count = (last_count % 3) + 1
-                    else:
-                        click_count = 1
-                    self._click_state = (now, mx, my, click_count, control)
-
+                    click_count = event[5]
                     idx = self.text_index(control, mx, my)
                     text = control.buffer.text
 

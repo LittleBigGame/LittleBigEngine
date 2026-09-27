@@ -32,16 +32,40 @@ def message(text):
     state.app.status = text
 
 
+def selected():
+    sel = state.app.relations.get('selection')
+    if sel is None or not sel.alive:
+        sel = state.game
+        state.app.relations['selection'] = sel
+    return sel
+
+
+def inspected():
+    ins = state.app.relations.get('inspected')
+    if ins is None or not ins.alive:
+        ins = selected()
+        state.app.relations['inspected'] = ins
+    return ins
+
+
 def select(entity):
     if entity is None or not entity.alive:
         entity = state.game
     state.app.relations['selection'] = entity
     state.game.relations['selection'] = entity
+    state.app.relations['inspected'] = entity
     state.inspector.scroll = 0
     if 'focus' in state.app.relations:
         del state.app.relations['focus']
     for ancestor in entity.ancestors:
         state.hierarchy.expanded.add(ancestor.id)
+    if hasattr(state, "inspector_sync"):
+        state.inspector_sync()
+
+
+def inspect_entity(entity):
+    select(entity)
+
 
 
 def format_float_clean(f):
@@ -338,7 +362,9 @@ def initialize():
         else:
             state.code.systems.attach('text_area', assets.system(project / 'text_area.py'))
     state.selected = selected
+    state.inspected = inspected
     state.select = select
+    state.inspect_entity = inspect_entity
     state.message = message
     state.open_system = open_system
     state.open_panel = open_panel
@@ -1307,7 +1333,11 @@ def viewport_click(control, event):
         hits = set(space.query(wx, wy))
         target = next((child for child in reversed(state.game.descendants) if child in hits), None)
     if target:
-        select(target)
+        click_count = event[5] if len(event) >= 6 else 1
+        if click_count >= 2:
+            inspect_entity(target)
+        else:
+            select(target)
 
 
 def viewport_drag(control, event):

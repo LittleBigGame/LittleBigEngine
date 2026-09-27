@@ -130,12 +130,16 @@ def file_explorer_sync():
             if rx <= mx <= rx + row_w and ry <= my <= ry + 20:
                 is_hovered = True
 
-        bg_color = (35, 48, 65) if is_hovered else PANEL
-        ink_color = (130, 200, 255) if item["type"] == "system" else ((255, 200, 100) if item["is_dir"] else INK)
+        selected_file = fe.components.get("selected_file")
+        is_selected = (selected_file == item["rel_path"])
+        normal_col = (45, 95, 125) if is_selected else PANEL
+        hover_col = (55, 105, 135) if is_selected else (35, 48, 65)
+        bg_color = hover_col if is_hovered else normal_col
+        ink_color = (255, 255, 255) if is_selected else ((130, 200, 255) if item["type"] == "system" else ((255, 200, 100) if item["is_dir"] else INK))
 
         put(row, visible=True, x=fe.x + 8 + indent, y=fe.y + 30 + index * 22,
             w=max(40, row_w - indent), h=20, text=label,
-            color=bg_color, normal_color=PANEL, hover_color=(35, 48, 65),
+            color=bg_color, normal_color=normal_col, hover_color=hover_col,
             ink=ink_color)
 
     # Scrollbar
@@ -174,13 +178,18 @@ def file_row_click(row, event):
         return True
 
     click_count = event[5] if len(event) >= 6 else 1
-    if item["type"] == "system":
-        # Open in code editor
-        state.open_specific_file(item["path"])
-        message(f"Opened {item['name']}")
+    fe.components["selected_file"] = item["rel_path"]
+    if click_count >= 2:
+        if item["type"] == "system":
+            # Open in code editor
+            state.open_specific_file(item["path"])
+            message(f"Opened {item['name']}")
+        else:
+            message(f"{item['type'].capitalize()}: {item['name']}")
     else:
-        message(f"{item['type'].capitalize()}: {item['name']}")
+        message(f"Selected {item['name']}")
 
+    file_explorer_sync()
     return True
 
 

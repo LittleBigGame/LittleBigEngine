@@ -605,3 +605,152 @@ class AssetSystemTests(unittest.TestCase):
         self.assertEqual(sel_rects[0].layer, ed.code.layer + 1)
         self.assertEqual(sel_rects[0].color, (45, 85, 135))
 
+    def test_file_explorer_single_click_selects_double_click_opens(self):
+        """Single click selects file in file explorer; double click opens it in code editor."""
+        ed = self.editor
+
+        # Switch to files tab
+        self.click(ed.tab_files)
+        self.assertEqual(ed.active_left_tab, "files")
+        self.runtime.step(0)
+
+        # Ensure a base file is open in editor
+        ed.code.buffer.text = "# Original file\ndef original():\n    pass\n"
+        ed.code.components["source_path"] = self.project_path / "original.py"
+        ed._saved_source = ("original.py", ed.code.buffer.text)
+        self.runtime.step(0)
+
+        # Find enemy.py row in file explorer
+        row = next(r for r in ed.file_explorer_rows if r.visible and "enemy.py" in r.components.get("text", ""))
+
+        # 1. Single click on enemy.py row
+        self.send(("click", row.x + 20, row.y + 10, 1, 0))
+        self.runtime.step(0)
+
+        # Selected file in file explorer is updated
+        self.assertEqual(ed.file_explorer.components.get("selected_file"), "enemy.py")
+        # BUT code editor buffer is NOT overwritten (original file still open!)
+        self.assertIn("def original():", ed.code.buffer.text)
+
+        # 2. Double click on enemy.py row
+        self.send(("click", row.x + 20, row.y + 10, 1, 0, 2))
+        self.runtime.step(0)
+
+        # Now enemy.py IS opened in code editor
+        self.assertIn("def update(dt):", ed.code.buffer.text)
+
+    def test_drag_system_into_open_system_without_replacing_open_file(self):
+        """Dragging a system into an open system in code editor does not replace the open system."""
+        ed = self.editor
+        reg = self.runtime.assets.registry
+        enemy_id = reg.get_id(self.enemy_script)
+
+        # Switch to files tab
+        self.click(ed.tab_files)
+        self.runtime.step(0)
+
+        # Main script open in code editor
+        ed.code.buffer.text = "def start():\n    physics_sys = None\n"
+        ed.code.buffer.cursor = ed.code.buffer.anchor = len(ed.code.buffer.text)
+        self.runtime.step(0)
+
+        # Start dragging enemy.py from File Explorer
+        row = next(r for r in ed.file_explorer_rows if r.visible and "enemy.py" in r.components.get("text", ""))
+        # Mouse press initiates drag on enemy.py
+        self.send(("drag", row.x + 20, row.y + 10, 1, 0, 10, 0))
+        self.runtime.step(0)
+
+        # Active asset_drag is set for enemy.py
+        drag_data = ed.app.components.get("asset_drag")
+        self.assertIsNotNone(drag_data)
+        self.assertEqual(drag_data["name"], "enemy.py")
+
+        # Code editor STILL has main script (not replaced!)
+        self.assertIn("def start():", ed.code.buffer.text)
+
+        # Drop onto code editor
+        drop_pos = ("release", ed.code.x + 50, ed.code.y + 50, 0, 0)
+        ed.app.components["on_asset_drop"](drag_data, drop_pos)
+        self.runtime.step(0)
+
+        # Main script now references enemy.py without having been overwritten!
+        self.assertIn("def start():", ed.code.buffer.text)
+        self.assertIn(f'asset("{enemy_id}")', ed.code.buffer.text)
+
+    def test_hierarchy_single_click_selects_double_click_inspects(self):
+        """Single click on hierarchy row selects entity without inspecting; double click inspects."""
+        ed = self.editor
+
+        # Start by inspecting Game
+        ed.select(ed.game)
+        self.runtime.step(0)
+        self.assertEqual(ed.identity_label.text, "🔷 Entity: Game")
+
+        # Create two entities
+        ent_a = self.runtime.create(parent=ed.game, name="EntityAlpha")
+        ent_b = self.runtime.create(parent=ed.game, name="EntityBeta")
+        self.runtime.step(0)
+
+        # Inspect EntityAlpha first
+        ed.select(ent_a)
+        self.runtime.step(0)
+        self.assertIn("EntityAlpha", ed.identity_label.text)
+
+        # Find row for EntityBeta
+        row_b = next(r for r in ed.hierarchy_rows if r.visible and r.relations.get("target") is ent_b)
+
+        # 1. Single click on EntityBeta row
+        self.send(("click", row_b.x + 40, row_b.y + 10, 1, 0))
+        self.runtime.step(0)
+
+        # Selection relation is updated to EntityBeta (for hierarchy/viewport highlight)
+        self.assertIs(ed.app.relations.get("selection"), ent_b)
+        # BUT Inspector STILL inspects EntityAlpha!
+        self.assertIn("EntityAlpha", ed.identity_label.text)
+
+        # 2. Double click on EntityBeta row
+        self.send(("click", row_b.x + 40, row_b.y + 10, 1, 0, 2))
+        self.runtime.step(0)
+
+        # Now Inspector inspects EntityBeta!
+        self.assertIn("EntityBeta", ed.identity_label.text)
+
+    def test_drag_entity_from_hierarchy_into_other_entity_inspector_preserves_inspected(self):
+        """Dragging entity from hierarchy into inspector adds component to inspected entity without switching inspector."""
+        ed = self.editor
+
+        # Create TargetEntity (inspected) and DraggedEntity (dragged from hierarchy)
+        target_ent = self.runtime.create(parent=ed.game, name="TargetEntity")
+        dragged_ent = self.runtime.create(parent=ed.game, name="DraggedEntity")
+        self.runtime.step(0)
+
+        # Inspect TargetEntity
+        ed.select(target_ent)
+        self.runtime.step(0)
+        self.assertIn("TargetEntity", ed.identity_label.text)
+
+        # Single-click/drag DraggedEntity from Hierarchy
+        row_drag = next(r for r in ed.hierarchy_rows if r.visible and r.relations.get("target") is dragged_ent)
+        self.send(("drag", row_drag.x + 40, row_drag.y + 10, 1, 0, 10, 0))
+        self.runtime.step(0)
+
+        # Active entity_drag is set
+        ent_drag = ed.app.components.get("entity_drag")
+        self.assertIsNotNone(ent_drag)
+        self.assertEqual(ent_drag["name"], "DraggedEntity")
+
+        # Inspector STILL inspects TargetEntity!
+        self.assertIn("TargetEntity", ed.identity_label.text)
+
+        # Drop onto TargetEntity's Inspector components section
+        drop_insp = ("release", ed.inspector.x + 50, ed.components_title.y + 15, 0, 0)
+        ed.app.components["on_entity_drop"](ent_drag, drop_insp)
+        self.runtime.step(0)
+
+        # TargetEntity has component pointing to DraggedEntity
+        self.assertIn("draggedentity", target_ent.components)
+        self.assertIs(target_ent.components["draggedentity"], dragged_ent)
+        # Inspector remains on TargetEntity showing the new component
+        self.assertIn("TargetEntity", ed.identity_label.text)
+
+

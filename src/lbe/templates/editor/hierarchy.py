@@ -115,7 +115,16 @@ def hierarchy_click(row, event):
         expanded = set(state.hierarchy.expanded)
         expanded.symmetric_difference_update({target.id})
         state.hierarchy.expanded = expanded
-    select(target)
+    click_count = event[5] if len(event) >= 6 else 1
+    # Right-click selects target for context menu
+    if len(event) > 3 and event[3] in (2, 4):
+        select(target)
+        return
+    if click_count >= 2:
+        select(target)
+    else:
+        state.app.relations['selection'] = target
+        state.game.relations['selection'] = target
 
 
 def hierarchy_row_drag(row, event):

@@ -8,7 +8,12 @@ import importlib.util
 from lbe.desktop import Input
 from lbe.project import load_project, template_path
 from lbe.space import world_to_screen
-from test_scene import RecordingGraphics
+import sys
+sys.path.insert(0, str(Path(__file__).parent))
+try:
+    from test_scene import RecordingGraphics
+except ImportError:
+    from .test_scene import RecordingGraphics
 
 
 class EditorTests(unittest.TestCase):
@@ -83,11 +88,11 @@ class EditorTests(unittest.TestCase):
                 if row is not None:
                     break
         if row is not None:
-            self.click(row)
+            self.send(("click", row.x + row.w / 2, row.y + row.h / 2, 1, 0, 2))
             self.runtime.step(0)
         else:
-            self.editor.app.relations["selection"] = target
-            self.editor.game.relations["selection"] = target
+            self.editor.select(target)
+            self.runtime.step(0)
             self.runtime.step(0)
 
     def test_live_component_editing_and_spatial_refresh(self):

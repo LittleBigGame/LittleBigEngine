@@ -22,7 +22,9 @@ class StateProxy:
 
 state = StateProxy()
 selected = lambda: state.selected()
+inspected = lambda: state.inspected() if hasattr(state, "inspected") else state.selected()
 select = lambda target: state.select(target)
+inspect_entity = lambda target: state.inspect_entity(target) if hasattr(state, "inspect_entity") else state.select(target)
 message = lambda text: state.message(text)
 open_system = lambda *args, **kwargs: state.open_system(*args, **kwargs)
 open_panel = lambda *args, **kwargs: state.open_panel(*args, **kwargs)
@@ -71,7 +73,7 @@ def parse_value(text):
         raise ValueError("Use a Python literal; put text in quotes") from None
 
 def inspector_sync():
-    entity = selected()
+    entity = inspected()
     items = tuple(entity.components.items())
     systems = tuple(entity.systems.items())
     children = tuple(entity.children)
@@ -429,7 +431,7 @@ def commit_component(field):
     inspector_sync()
 
 def add_component():
-    ent = selected()
+    ent = inspected()
     renaming_key = state.add_name.components.pop("renaming_key", None)
     saving_preset = state.add_name.components.pop("saving_preset", False)
     name = state.add_name.buffer.text.strip()
@@ -458,7 +460,7 @@ def add_component():
     inspector_sync()
 
 def commit_tags():
-    ent = selected()
+    ent = inspected()
     renaming_tag = state.tags_field.components.pop("renaming_tag", None)
     tags = {tag.strip() for tag in state.tags_field.buffer.text.split(',') if tag.strip()}
     for tag in set(ent.tags) - tags:
@@ -504,7 +506,7 @@ def resolve_name(text):
 
 def commit_parent():
     text = state.parent_field.buffer.text.strip()
-    selected().parent = resolve_name(text) if text else None
+    inspected().parent = resolve_name(text) if text else None
     message('Parent updated')
     hierarchy_sync()
     inspector_sync()
@@ -523,25 +525,25 @@ def commit_relation():
         if text:
             target = resolve_name(text)
             if editing_rel and editing_rel != name:
-                selected().relations.pop(editing_rel, None)
-            selected().relations[name] = target
+                inspected().relations.pop(editing_rel, None)
+            inspected().relations[name] = target
             tgt_name = str(target.components.get('name', str(target.id)[:8]))
             message(f"Linked '{name}' -> '{tgt_name}'")
         else:
             rel_to_remove = editing_rel or name
-            selected().relations.pop(rel_to_remove, None)
+            inspected().relations.pop(rel_to_remove, None)
             message(f"Unlinked relation '{rel_to_remove}'")
     else:
         target = resolve_name(raw)
         tgt_name = str(target.components.get('name', str(target.id)[:8]))
         name = editing_rel or tgt_name.lower().replace(" ", "_")
-        selected().relations[name] = target
+        inspected().relations[name] = target
         message(f"Linked '{name}' -> '{tgt_name}'")
     state.relation_field.buffer = TextBuffer()
     inspector_sync()
 
 def start_edit_link(name, tgt_name=None):
-    ent = selected()
+    ent = inspected()
     if tgt_name is None:
         tgt = ent.relations.get(name)
         tgt_name = str(tgt.components.get('name', str(tgt.id)[:8])) if tgt else ''
@@ -553,7 +555,7 @@ def start_edit_link(name, tgt_name=None):
     message(f"Editing link '{name}'. Press Enter or click + to save.")
 
 def quick_link_to(target):
-    source = selected()
+    source = inspected()
     if source is target:
         message("Cannot link entity to itself")
         return
@@ -571,7 +573,7 @@ def quick_link_to(target):
 
 def commit_name():
     name = state.name_field.buffer.text.strip()
-    ent = selected()
+    ent = inspected()
     if name:
         ent.components['name'] = name
         message(f"Renamed entity to '{name}'")
@@ -583,17 +585,17 @@ def commit_name():
 
 
 def inspector_add_child():
-    parent = selected()
+    parent = inspected()
     c_name = f"Child_{len(parent.children) + 1}"
     child = state.runtime.create(parent=parent, name=c_name)
-    select(child)
+    inspect_entity(child)
     message(f"Added child '{c_name}'")
     hierarchy_sync()
     inspector_sync()
 
 
 def inspector_duplicate_entity():
-    ent = selected()
+    ent = inspected()
     if ent is state.app or ent is state.game or any(ent is r for r in (state.header, state.hierarchy, state.inspector, state.code_panel, state.status, state.viewport)):
         message("Cannot duplicate engine or editor root")
         return
@@ -603,28 +605,28 @@ def inspector_duplicate_entity():
     comps = dict(ent.components)
     comps['name'] = new_name
     dup = state.runtime.create(parent=parent, tags=list(ent.tags), **comps)
-    select(dup)
+    inspect_entity(dup)
     message(f"Duplicated '{orig_name}' as '{new_name}'")
     hierarchy_sync()
     inspector_sync()
 
 
 def inspector_delete_entity():
-    ent = selected()
+    ent = inspected()
     if ent is state.app or ent is state.game or any(ent is r for r in (state.header, state.hierarchy, state.inspector, state.code_panel, state.status, state.viewport)):
         message("Cannot delete engine or editor root")
         return
     parent = ent.parent or state.game
     ent_name = str(ent.components.get('name', str(ent.id)[:8]))
     ent.destroy()
-    select(parent)
+    inspect_entity(parent)
     message(f"Deleted entity '{ent_name}'")
     hierarchy_sync()
     inspector_sync()
 
 
 def delete_component(key):
-    ent = selected()
+    ent = inspected()
     if key in ent.components:
         del ent.components[key]
         if state.ui.focused and getattr(state.ui.focused, "component_key", None) == key:
@@ -634,7 +636,7 @@ def delete_component(key):
 
 
 def unlink_relation(name):
-    ent = selected()
+    ent = inspected()
     if name in ent.relations:
         del ent.relations[name]
         if state.relation_field.components.get("editing_relation") == name:
@@ -654,7 +656,7 @@ def focus_component_value(key):
 
 
 def quick_add_pos():
-    ent = selected()
+    ent = inspected()
     ent.components.setdefault("x", 0.0)
     ent.components.setdefault("y", 0.0)
     message("Added Pos (x, y)")
@@ -664,7 +666,7 @@ def quick_add_pos():
 
 
 def quick_add_size():
-    ent = selected()
+    ent = inspected()
     ent.components.setdefault("w", 32.0)
     ent.components.setdefault("h", 32.0)
     message("Added Size (w, h)")
@@ -674,7 +676,7 @@ def quick_add_size():
 
 
 def quick_add_vel():
-    ent = selected()
+    ent = inspected()
     ent.components.setdefault("vx", 0.0)
     ent.components.setdefault("vy", 0.0)
     message("Added Vel (vx, vy)")
@@ -684,7 +686,7 @@ def quick_add_vel():
 
 
 def quick_add_color():
-    ent = selected()
+    ent = inspected()
     ent.components.setdefault("color", (200, 200, 200))
     message("Added Color")
     save_editor_project()
@@ -693,7 +695,7 @@ def quick_add_color():
 
 
 def quick_add_speed():
-    ent = selected()
+    ent = inspected()
     ent.components.setdefault("speed", 100.0)
     message("Added Speed")
     save_editor_project()
@@ -702,7 +704,7 @@ def quick_add_speed():
 
 
 def add_custom_component():
-    ent = selected()
+    ent = inspected()
     base = "custom_component"
     key = base
     i = 1
@@ -721,7 +723,7 @@ def context_add_component(target):
 
 
 def commit_component_key(lbl):
-    target = lbl.relations.get('target', selected())
+    target = lbl.relations.get('target', inspected())
     old_key = lbl.components.pop("renaming_key", getattr(lbl, "component_key", None))
     new_key = lbl.buffer.text.strip()
     if not new_key:
@@ -737,7 +739,7 @@ def commit_component_key(lbl):
 
 
 def open_add_component_menu(x=None, y=None, target=None):
-    ent = target or selected()
+    ent = target or inspected()
     btn = getattr(state, "add_comp_menu_button", None)
     if x is None or y is None:
         mouse = getattr(state.ui, "mouse_pos", None)
@@ -858,7 +860,7 @@ def open_change_type_menu(ent, comp):
 
 
 def open_attach_system_menu():
-    ent = selected()
+    ent = inspected()
     candidates = []
     # Project directory
     if state.project and state.project.exists():
@@ -944,7 +946,7 @@ def toggle_section(name):
 
 
 def open_add_chip_menu():
-    ent = selected()
+    ent = inspected()
     actions = [
         dict(label="+ Add custom component to entity...", run=lambda _: context_add_component(ent)),
         dict(label="+ Create new quick preset...", run=lambda _: prompt_add_preset()),
@@ -973,7 +975,7 @@ def pin_to_quick_bar(name, default_val):
 
 
 def apply_quick_preset(name):
-    ent = selected()
+    ent = inspected()
     for p_name, p_data in state.quick_component_presets:
         if p_name == name:
             for k, v in p_data.items():
