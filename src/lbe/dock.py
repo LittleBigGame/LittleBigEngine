@@ -123,6 +123,101 @@ class DockTree:
             node_id="split_main",
         )
 
+    def is_default(self) -> bool:
+        if not isinstance(self.root, SplitNode):
+            return False
+        r = self.root
+        if r.id != "split_main" or r.orientation != "horizontal":
+            return False
+        if not isinstance(r.first, SplitNode) or not isinstance(r.second, SplitNode):
+            return False
+        if r.first.id != "split_left" or r.second.id != "split_right":
+            return False
+        left = r.first
+        right = r.second
+        if not isinstance(left.first, TabGroupNode) or not isinstance(left.second, TabGroupNode):
+            return False
+        if not isinstance(right.first, TabGroupNode) or not isinstance(right.second, TabGroupNode):
+            return False
+        return (
+            set(left.first.panels) == {"hierarchy", "files"}
+            and left.second.panels == ["inspector"]
+            and right.first.panels == ["viewport"]
+            and right.second.panels == ["code_panel"]
+        )
+
+    def compute_default_layout(
+        self,
+        w: int,
+        h: int,
+        header_h: int = 44,
+        status_h: int = 20,
+        status_m_bottom: int = 5,
+        left_col_w: int = 370,
+        panel_h: int = 240,
+        split_y: Optional[int] = None,
+    ) -> Dict[str, Tuple[int, int, int, int]]:
+        top_y = header_h
+        status_y = h - status_m_bottom - status_h
+        if split_y is None:
+            split_y = max(330, int(h * 0.45))
+
+        hw = max(50, left_col_w - 16)
+        hh = panel_h
+        top_panel_y = top_y + 8
+
+        iy = top_panel_y + hh + 4 + 4
+        ih = max(100, status_y - iy - 6 - 5)
+
+        right_x = left_col_w + 8
+        right_w = max(100, w - left_col_w - 24)
+
+        # Store rects in the nodes so drag targeting works
+        split_main = self.find_node("split_main")
+        if split_main:
+            split_main.rect = (0, top_y, w, status_y - top_y)
+            split_main.splitter_rect = (left_col_w + 1, top_y, 6, max(0, status_y - top_y))
+
+        split_left = self.find_node("split_left")
+        if split_left:
+            split_left.rect = (0, top_y, left_col_w, status_y - top_y)
+            split_left.splitter_rect = (8, top_panel_y + hh + 1, hw, 6)
+
+        split_right = self.find_node("split_right")
+        if split_right:
+            split_right.rect = (right_x, top_y, right_w, status_y - top_y)
+            split_right.splitter_rect = (right_x, split_y - 8, right_w, 6)
+
+        tg_hf = self.find_node("tab_hierarchy_files")
+        if tg_hf:
+            tg_hf.rect = (8, top_panel_y, hw, hh)
+            tg_hf.content_rect = (8, top_panel_y, hw, hh)
+
+        tg_insp = self.find_node("tab_inspector")
+        if tg_insp:
+            tg_insp.rect = (8, iy, hw, ih)
+            tg_insp.content_rect = (8, iy, hw, ih)
+
+        tg_vp = self.find_node("tab_viewport")
+        if tg_vp:
+            vp_h = max(50, split_y - top_y - 48)
+            tg_vp.rect = (right_x, top_y + 12, right_w, vp_h + 24)
+            tg_vp.content_rect = (right_x, top_y + 36, right_w, vp_h)
+
+        tg_code = self.find_node("tab_code")
+        if tg_code:
+            code_h = max(100, status_y - split_y - 11)
+            tg_code.rect = (right_x, split_y, right_w, code_h)
+            tg_code.content_rect = (right_x, split_y, right_w, code_h)
+
+        active_hf = tg_hf.active_panel if tg_hf else "hierarchy"
+        return {
+            active_hf: (8, top_panel_y, hw, hh),
+            "inspector": (8, iy, hw, ih),
+            "viewport": (right_x, top_y + 36, right_w, max(50, split_y - top_y - 48)),
+            "code_panel": (right_x, split_y, right_w, max(100, status_y - split_y - 11)),
+        }
+
     def compute_layout(
         self,
         x: int,

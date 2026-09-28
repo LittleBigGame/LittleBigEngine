@@ -1,7 +1,7 @@
 """Tests for the editor DockTree layout engine."""
 
 import unittest
-from lbe.templates.editor.dock import DockTree, SplitNode, TabGroupNode
+from lbe.dock import DockTree, SplitNode, TabGroupNode
 
 
 class TestDockTree(unittest.TestCase):

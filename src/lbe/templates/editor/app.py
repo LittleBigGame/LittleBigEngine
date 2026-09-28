@@ -15,6 +15,7 @@ from lbe.text import TextBuffer
 from lbe.space import screen_to_world, world_to_screen
 from lbe.project import save_project, load_project_data, deserialize_entities
 from lbe.menus import open_menu
+from lbe.dock import DockTree, SplitNode, TabGroupNode
 
 state = entity.components.get("application_state")
 
@@ -128,6 +129,12 @@ def on_drag_col_splitter(control, event):
     else:
         return
     put(state.app, left_column_w=new_w)
+    if hasattr(state, "dock_tree"):
+        split_main = state.dock_tree.find_node("split_main")
+        if split_main and isinstance(split_main, SplitNode):
+            ws_x = 8
+            ws_w = max(100, w - 16)
+            split_main.ratio = max(0.1, min(0.9, (new_w - ws_x) / ws_w))
     layout()
 
 
@@ -148,6 +155,10 @@ def on_drag_hierarchy_splitter(control, event):
     else:
         return
     put(state.hierarchy, panel_h=new_h)
+    if hasattr(state, "dock_tree"):
+        split_left = state.dock_tree.find_node("split_left")
+        if split_left and isinstance(split_left, SplitNode):
+            split_left.ratio = max(0.1, min(0.9, new_h / max(1, available_h)))
     layout()
 
 
@@ -156,6 +167,7 @@ def on_drag_code_splitter(control, event):
     status_m = parse_box(state.status.components.get("margin", (0, 16, 5, 16)))
     status_h = state.status.components.get("h", 20)
     status_y = state.window.height - status_m[2] - status_h
+    available_h = status_y - top_y
     min_y = top_y + 80
     max_y = max(min_y, status_y - 120)
     cur_split = state.code_panel.components.get("split_y", max(330, int(state.window.height * 0.45)))
@@ -166,7 +178,117 @@ def on_drag_code_splitter(control, event):
     else:
         return
     put(state.code_panel, split_y=new_split)
+    if hasattr(state, "dock_tree"):
+        split_right = state.dock_tree.find_node("split_right")
+        if split_right and isinstance(split_right, SplitNode):
+            split_right.ratio = max(0.1, min(0.9, (new_split - top_y) / max(1, available_h)))
     layout()
+
+
+def contains_box(box, x, y):
+    bx, by, bw, bh = box
+    return bx <= x < bx + bw and by <= y < by + bh
+
+
+def start_panel_dock_drag(panel_name, event):
+    if len(event) < 3:
+        return
+    mx, my = event[1], event[2]
+    state.app.components["dock_drag"] = {
+        "panel": panel_name,
+        "start_pos": (mx, my),
+        "mouse_pos": (mx, my),
+        "target_group": None,
+        "target_rect": None,
+        "drop_zones": None,
+        "zone": None,
+        "preview_rect": None,
+    }
+
+
+def on_dock_drag(dock_drag, event):
+    if len(event) < 3 or not hasattr(state, "dock_tree"):
+        return
+    mx, my = event[1], event[2]
+    dock_drag["mouse_pos"] = (mx, my)
+    dragged = dock_drag.get("panel")
+
+    best_group = None
+    for group in state.dock_tree.all_tab_groups():
+        if group.panels == [dragged]:
+            continue
+        gx, gy, gw, gh = group.rect
+        if gx <= mx < gx + gw and gy <= my < gy + gh:
+            best_group = group
+            break
+
+    if best_group is not None:
+        target_rect = best_group.content_rect
+        zones = DockTree.get_dock_drop_zones(target_rect)
+        active_zone = None
+        if contains_box(zones["center"], mx, my):
+            active_zone = "center"
+        elif contains_box(zones["left"], mx, my):
+            active_zone = "left"
+        elif contains_box(zones["right"], mx, my):
+            active_zone = "right"
+        elif contains_box(zones["top"], mx, my):
+            active_zone = "top"
+        elif contains_box(zones["bottom"], mx, my):
+            active_zone = "bottom"
+        else:
+            tx, ty, tw, th = target_rect
+            rel_x = (mx - tx) / max(1, tw)
+            rel_y = (my - ty) / max(1, th)
+            if 0.25 <= rel_x <= 0.75 and 0.25 <= rel_y <= 0.75:
+                active_zone = "center"
+            elif rel_x < 0.25:
+                active_zone = "left"
+            elif rel_x > 0.75:
+                active_zone = "right"
+            elif rel_y < 0.25:
+                active_zone = "top"
+            else:
+                active_zone = "bottom"
+
+        dock_drag["target_group"] = best_group
+        dock_drag["target_rect"] = target_rect
+        dock_drag["drop_zones"] = zones
+        dock_drag["zone"] = active_zone
+        dock_drag["preview_rect"] = DockTree.get_dock_preview_rect(target_rect, active_zone) if active_zone else None
+    else:
+        dock_drag["target_group"] = None
+        dock_drag["target_rect"] = None
+        dock_drag["drop_zones"] = None
+        dock_drag["zone"] = None
+        dock_drag["preview_rect"] = None
+
+
+def on_dock_drop(dock_drag, event):
+    dragged = dock_drag.get("panel")
+    target_group = dock_drag.get("target_group")
+    zone = dock_drag.get("zone")
+
+    if dragged and target_group and zone and hasattr(state, "dock_tree"):
+        success = state.dock_tree.dock_panel(dragged, target_group, zone)
+        if success:
+            display_name = dragged.replace("_", " ").title()
+            message(f"Docked {display_name} ({zone})")
+            save_editor_project()
+    layout()
+    sync_all_editor_panels()
+
+
+def sync_all_editor_panels():
+    fn_h = getattr(state, "hierarchy_sync", None)
+    if fn_h and fn_h is not hierarchy_sync:
+        fn_h()
+    fn_f = getattr(state, "file_explorer_sync", None)
+    if fn_f:
+        fn_f()
+    fn_i = getattr(state, "inspector_sync", None)
+    if fn_i and fn_i is not inspector_sync:
+        fn_i()
 
 
 def initialize():
@@ -231,6 +353,18 @@ def initialize():
 
     state.app.components["left_column_w"] = layout_data.get("left_column_w", 370)
     state.header = state.ui.create(state.app, 'Header', 'panel', text='LBE  /  LittleBigEngine', color=BG, dock='top', h=44, padding=(8, 16, 8, 16))
+
+    dock_data = layout_data.get("dock_tree")
+    if dock_data:
+        try:
+            state.dock_tree = DockTree.from_dict(dock_data)
+        except Exception:
+            state.dock_tree = DockTree()
+    else:
+        state.dock_tree = DockTree()
+
+    state.app.components["on_dock_drag"] = on_dock_drag
+    state.app.components["on_dock_drop"] = on_dock_drop
 
     state.active_left_tab = "hierarchy"
     state.tab_hierarchy = state.ui.button(state.app, 'TabHierarchy', 'HIERARCHY', lambda: switch_left_tab('hierarchy'),
@@ -351,6 +485,13 @@ def initialize():
     state.col_splitter = state.ui.splitter(state.app, 'ColumnSplitter', axis='x', on_drag=on_drag_col_splitter)
     state.hierarchy_splitter = state.ui.splitter(state.app, 'HierarchySplitter', axis='y', on_drag=on_drag_hierarchy_splitter)
     state.code_splitter = state.ui.splitter(state.app, 'CodeSplitter', axis='y', on_drag=on_drag_code_splitter)
+    state.tab_hierarchy.on_drag = lambda c, ev: start_panel_dock_drag("hierarchy", ev)
+    state.tab_files.on_drag = lambda c, ev: start_panel_dock_drag("files", ev)
+    state.hierarchy.on_drag = lambda c, ev: start_panel_dock_drag("hierarchy", ev) if len(ev) > 2 and ev[2] <= c.y + 30 else None
+    state.file_explorer.on_drag = lambda c, ev: start_panel_dock_drag("files", ev) if len(ev) > 2 and ev[2] <= c.y + 30 else None
+    state.inspector.on_drag = lambda c, ev: start_panel_dock_drag("inspector", ev) if len(ev) > 2 and ev[2] <= c.y + 30 else None
+    state.code_panel.on_drag = lambda c, ev: start_panel_dock_drag("code_panel", ev) if len(ev) > 2 and ev[2] <= c.y + 30 else None
+    state.zoom_label.on_drag = lambda c, ev: start_panel_dock_drag("viewport", ev)
     if (project / 'code_editor.py').exists():
         if 'code_editor' not in state.code_panel.systems:
             state.code_panel.systems.attach('code_editor', assets.system(project / 'code_editor.py'))
@@ -396,7 +537,6 @@ def layout():
     # Header layout (docked top with padding)
     header_h = state.header.components.get("h", 44)
     put(state.header, x=0, y=0, w=w, h=header_h)
-    # Header action buttons: aligned along right edge with margins
     btn_gap = 10
     rx = w - 16
     is_paused = bool(state.game.components.get("paused", False))
@@ -414,12 +554,63 @@ def layout():
     status_y = h - status_m[2] - status_h
     put(state.status, x=status_m[3], y=status_y, w=max(0, w - status_m[3] - status_m[1]), h=status_h, text=state.app.status)
 
-    # Workspace columns between header and status
-    left_col_w = state.app.components.get("left_column_w", 370)
     top_y = state.header.y + state.header.h
+    ws_x = 8
+    ws_y = top_y + 4
+    ws_w = max(100, w - 16)
+    ws_h = max(100, status_y - ws_y - 4)
 
-    # Hierarchy and File Explorer panels with tab switcher in header
     is_hier = (getattr(state, "active_left_tab", "hierarchy") == "hierarchy")
+
+    if hasattr(state, "dock_tree") and state.dock_tree.is_default():
+        left_col_w = state.app.components.get("left_column_w", 370)
+        panel_h = state.hierarchy.components.get("panel_h", 240)
+        split_y = state.code_panel.components.get("split_y", max(330, int(h * 0.45)))
+        group_hf = state.dock_tree.find_tab_group_with_panel("hierarchy")
+        if group_hf and "files" in group_hf.panels and group_hf.active_panel in ("hierarchy", "files"):
+            group_hf.active = group_hf.panels.index("hierarchy" if is_hier else "files")
+        panel_rects = state.dock_tree.compute_default_layout(
+            w=w,
+            h=h,
+            header_h=header_h,
+            status_h=status_h,
+            status_m_bottom=status_m[2],
+            left_col_w=left_col_w,
+            panel_h=panel_h,
+            split_y=split_y,
+        )
+        split_main = state.dock_tree.find_node("split_main")
+        split_left = state.dock_tree.find_node("split_left")
+        split_right = state.dock_tree.find_node("split_right")
+    else:
+        split_main = state.dock_tree.find_node("split_main") if hasattr(state, "dock_tree") else None
+        if split_main and isinstance(split_main, SplitNode):
+            cur_w = state.app.components.get("left_column_w")
+            if cur_w is not None:
+                split_main.ratio = max(0.1, min(0.9, (cur_w - ws_x) / ws_w))
+
+        split_left = state.dock_tree.find_node("split_left") if hasattr(state, "dock_tree") else None
+        if split_left and isinstance(split_left, SplitNode):
+            cur_h = state.hierarchy.components.get("panel_h")
+            if cur_h is not None:
+                split_left.ratio = max(0.1, min(0.9, cur_h / ws_h))
+
+        split_right = state.dock_tree.find_node("split_right") if hasattr(state, "dock_tree") else None
+        if split_right and isinstance(split_right, SplitNode):
+            cur_split = state.code_panel.components.get("split_y")
+            if cur_split is not None:
+                split_right.ratio = max(0.1, min(0.9, (cur_split - ws_y) / ws_h))
+
+        if hasattr(state, "dock_tree"):
+            group_hf = state.dock_tree.find_tab_group_with_panel("hierarchy")
+            if group_hf and "files" in group_hf.panels and group_hf.active_panel in ("hierarchy", "files"):
+                group_hf.active = group_hf.panels.index("hierarchy" if is_hier else "files")
+
+        panel_rects = state.dock_tree.compute_layout(ws_x, ws_y, ws_w, ws_h) if hasattr(state, "dock_tree") else {}
+
+    # Tab buttons in header
+    group_hf = state.dock_tree.find_tab_group_with_panel("hierarchy") if hasattr(state, "dock_tree") else None
+    has_hf_tabs = group_hf is not None and "files" in group_hf.panels
     normal_hier = (38, 55, 75) if is_hier else PANEL
     normal_files = (38, 55, 75) if not is_hier else PANEL
     hover_hier = (50, 75, 105) if is_hier else (45, 60, 80)
@@ -427,94 +618,93 @@ def layout():
     mx, my = getattr(state.ui, "mouse_pos", (-1, -1))
     hier_hover = contains(state.tab_hierarchy, mx, my)
     files_hover = contains(state.tab_files, mx, my)
-    put(state.tab_hierarchy, visible=True, x=200, y=8, w=110, h=28,
+    put(state.tab_hierarchy, visible=has_hf_tabs, x=200, y=8, w=110, h=28,
         normal_color=normal_hier, hover_color=hover_hier,
         color=hover_hier if hier_hover else normal_hier,
         ink=INK if is_hier else MUTED)
-    put(state.tab_files, visible=True, x=318, y=8, w=130, h=28,
+    put(state.tab_files, visible=has_hf_tabs, x=318, y=8, w=130, h=28,
         normal_color=normal_files, hover_color=hover_files,
         color=hover_files if files_hover else normal_files,
         ink=INK if not is_hier else MUTED)
 
-    hm = parse_box(state.hierarchy.components.get("margin", (8, 8, 4, 8)))
-    hw = state.hierarchy.components.get("panel_w", left_col_w - hm[3] - hm[1])
-    hh = state.hierarchy.components.get("panel_h", 240)
-    top_panel_y = top_y + hm[0]
-    top_panel_h = hh
-
+    # Panels layout
     if state.hierarchy.components.get("dock") == "float":
         put(state.hierarchy, visible=is_hier)
+    elif "hierarchy" in panel_rects:
+        hx, hy, hw, hh = panel_rects["hierarchy"]
+        put(state.hierarchy, visible=is_hier, x=hx, y=hy, w=hw, h=hh)
     else:
-        put(state.hierarchy, visible=is_hier, x=hm[3], y=top_panel_y, w=hw, h=top_panel_h)
+        put(state.hierarchy, visible=False)
 
     if hasattr(state, "file_explorer"):
         if state.file_explorer.components.get("dock") == "float":
             put(state.file_explorer, visible=not is_hier)
+        elif "files" in panel_rects:
+            fx, fy, fw, fh = panel_rects["files"]
+            put(state.file_explorer, visible=not is_hier, x=fx, y=fy, w=fw, h=fh)
         else:
-            put(state.file_explorer, visible=not is_hier, x=hm[3], y=top_panel_y, w=hw, h=top_panel_h)
+            put(state.file_explorer, visible=False)
 
-    active_top_panel = state.hierarchy if is_hier else getattr(state, "file_explorer", state.hierarchy)
-
-    # Inspector panel (left bottom, fills remaining height below active panel or custom float)
     if state.inspector.components.get("dock") == "float":
         pass
+    elif "inspector" in panel_rects:
+        ix, iy, iw, ih = panel_rects["inspector"]
+        put(state.inspector, visible=True, x=ix, y=iy, w=iw, h=ih)
     else:
-        im = parse_box(state.inspector.components.get("margin", (4, 8, 6, 8)))
-        iw = state.inspector.components.get("panel_w", left_col_w - im[3] - im[1])
-        iy = active_top_panel.y + active_top_panel.h + hm[2] + im[0] if active_top_panel.components.get("dock") != "float" else top_y + im[0]
-        ih = max(100, status_y - iy - im[2] - 5)
-        put(state.inspector, x=im[3], y=iy, w=iw, h=ih)
+        put(state.inspector, visible=False)
 
-    # Column splitter between left and right columns
-    put(state.col_splitter, x=left_col_w + 1, y=top_y, w=6, h=max(0, status_y - top_y))
+    if state.viewport.components.get("dock") == "float":
+        pass
+    elif "viewport" in panel_rects:
+        vx, vy, vw, vh = panel_rects["viewport"]
+        zoom_y = top_y + 12 if (hasattr(state, "dock_tree") and state.dock_tree.is_default()) else vy + 6
+        put(state.zoom_label, visible=True, x=vx + 4, y=zoom_y, w=max(0, vw - 8), h=20,
+            text=f'WORLD  /  {state.camera.zoom:.0f} px per metre  /  drag to pan  /  scroll to zoom')
+        put(state.viewport, visible=True, x=vx, y=vy, w=vw, h=vh)
+    else:
+        put(state.zoom_label, visible=False)
+        put(state.viewport, visible=False)
 
-    # Hierarchy splitter between hierarchy and inspector
-    if active_top_panel.components.get("dock") != "float" and state.inspector.components.get("dock") != "float":
-        put(state.hierarchy_splitter, visible=True, x=hm[3], y=active_top_panel.y + active_top_panel.h + 1,
-            w=max(0, left_col_w - hm[3] - hm[1]), h=6)
+    if state.code_panel.components.get("dock") == "float":
+        pass
+    elif "code_panel" in panel_rects:
+        cx, cy, cw, ch = panel_rects["code_panel"]
+        put(state.code_panel, visible=True, x=cx, y=cy, w=cw, h=ch)
+        cp = state.code_panel
+        c_pad = parse_box(cp.components.get("padding", (8, 12, 8, 12)))
+        tb_y = cy + 32
+        if state.ui.focused is not state.path_field and not state.path_field.components.get("readonly", True):
+            state.path_field.components["readonly"] = True
+            state.path_field.components["ink"] = (160, 180, 205)
+            state.path_field.on_commit = None
+            if state._saved_source:
+                state.path_field.buffer = TextBuffer(state._saved_source[0])
+        put(state.path_field, x=cx + c_pad[3], y=tb_y, w=max(130, cw - c_pad[3] - c_pad[1]), h=28)
+        for button in (state.new_button, state.open_button, state.save_button, state.attach_button):
+            put(button, visible=False)
+        put(state.code, x=cx + c_pad[3], y=cy + 68, w=max(0, cw - c_pad[3] - c_pad[1]), h=max(0, ch - 100))
+        put(state.code_info, x=cx + c_pad[3], y=cy + ch - 25, w=max(0, cw - c_pad[3] - c_pad[1]), h=20)
+    else:
+        put(state.code_panel, visible=False)
+
+    # Splitters layout
+    if split_main and split_main.splitter_rect[2] > 0:
+        sx, sy, sw, sh = split_main.splitter_rect
+        put(state.col_splitter, visible=True, x=sx, y=sy, w=sw, h=sh)
+    else:
+        put(state.col_splitter, visible=False)
+
+    if split_left and split_left.splitter_rect[3] > 0:
+        sx, sy, sw, sh = split_left.splitter_rect
+        put(state.hierarchy_splitter, visible=True, x=sx, y=sy, w=sw, h=sh)
     else:
         put(state.hierarchy_splitter, visible=False)
 
-    # Right column (Viewport and Code editor panels)
-    right_x = left_col_w + 8
-    right_w = max(100, w - left_col_w - 24)
-    split_y = state.code_panel.components.get("split_y", max(330, int(h * 0.45)))
-
-    # Code splitter between viewport and code panel
-    if state.viewport.components.get("dock") != "float" and state.code_panel.components.get("dock") != "float":
-        put(state.code_splitter, visible=True, x=right_x, y=split_y - 8, w=right_w, h=6)
+    if split_right and split_right.splitter_rect[3] > 0:
+        sx, sy, sw, sh = split_right.splitter_rect
+        put(state.code_splitter, visible=True, x=sx, y=sy, w=sw, h=sh)
     else:
         put(state.code_splitter, visible=False)
-
-    # Viewport panel (right top)
-    if state.viewport.components.get("dock") == "float":
-        pass
-    else:
-        put(state.zoom_label, x=right_x + 4, y=top_y + 12, w=500, h=20,
-            text=f'WORLD  /  {state.camera.zoom:.0f} px per metre  /  drag to pan  /  scroll to zoom')
-        put(state.viewport, x=right_x, y=top_y + 36, w=right_w, h=max(50, split_y - top_y - 48))
-
-    # Code editor panel (right bottom)
-    if state.code_panel.components.get("dock") == "float":
-        pass
-    else:
-        put(state.code_panel, x=right_x, y=split_y, w=right_w, h=max(100, status_y - split_y - 11))
-
-    # Internal code panel layout:
-    cp = state.code_panel
-    c_pad = parse_box(cp.components.get("padding", (8, 12, 8, 12)))
-    tb_y = cp.y + 32
-    if state.ui.focused is not state.path_field and not state.path_field.components.get("readonly", True):
-        state.path_field.components["readonly"] = True
-        state.path_field.components["ink"] = (160, 180, 205)
-        state.path_field.on_commit = None
-        if state._saved_source:
-            state.path_field.buffer = TextBuffer(state._saved_source[0])
-    put(state.path_field, x=cp.x + c_pad[3], y=tb_y, w=max(130, cp.w - c_pad[3] - c_pad[1]), h=28)
-    for button in (state.new_button, state.open_button, state.save_button, state.attach_button):
-        put(button, visible=False)
-    put(state.code, x=cp.x + c_pad[3], y=cp.y + 68, w=max(0, cp.w - c_pad[3] - c_pad[1]), h=max(0, cp.h - 100))
-    put(state.code_info, x=cp.x + c_pad[3], y=cp.y + cp.h - 25, w=max(0, cp.w - c_pad[3] - c_pad[1]), h=20)
 
 def hierarchy_sync():
     fn = getattr(state, "hierarchy_sync", None)
@@ -1180,6 +1370,7 @@ def get_editor_layout():
             "zoom": state.camera.zoom,
         },
         "selection": str(sel.id) if sel is not None and sel.alive else None,
+        "dock_tree": state.dock_tree.to_dict() if hasattr(state, "dock_tree") else None,
     }
 
 

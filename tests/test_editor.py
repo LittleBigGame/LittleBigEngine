@@ -2376,3 +2376,73 @@ class EditorTests(unittest.TestCase):
         self.assertFalse(ed.app.components.get("show_spatial_debug", True))
         self.assertFalse(ed.game.components.get("show_spatial_debug", True))
         self.assertIn("Spatial debug partition: OFF", ed.app.status)
+
+    def test_interactive_panel_docking_and_drop_overlay(self):
+        ed = self.editor
+        self.runtime.step(0)
+
+        # 1. Initiating drag on Inspector panel header
+        insp_x = ed.inspector.x + 20
+        insp_y = ed.inspector.y + 10
+        self.send(("drag", insp_x, insp_y, 1, 0, 5, 5))
+        dock_drag = ed.app.components.get("dock_drag")
+        self.assertIsNotNone(dock_drag)
+        self.assertEqual(dock_drag.get("panel"), "inspector")
+
+        # 2. Moving drag over the Viewport panel center
+        vp_cx = ed.viewport.x + ed.viewport.w // 2
+        vp_cy = ed.viewport.y + ed.viewport.h // 2
+        self.send(("drag", vp_cx, vp_cy, 1, 0, 0, 0))
+        dock_drag = ed.app.components.get("dock_drag")
+        self.assertIsNotNone(dock_drag.get("target_group"))
+        self.assertEqual(dock_drag.get("zone"), "center")
+        self.assertIsNotNone(dock_drag.get("preview_rect"))
+
+        # 3. Drawing while dock_drag is active renders preview rect and guide boxes
+        self.graphics.rectangles.clear()
+        ed.ui.draw()
+        guide_rects = [kw for _, kw in self.graphics.rectangles if kw.get("key") and isinstance(kw["key"], tuple) and kw["key"][0] == "dock_gbg"]
+        self.assertEqual(len(guide_rects), 5)  # center, left, right, top, bottom guide boxes
+
+        # 4. Moving drag to right side of viewport
+        vp_rx = ed.viewport.x + ed.viewport.w - 15
+        self.send(("drag", vp_rx, vp_cy, 1, 0, 0, 0))
+        dock_drag = ed.app.components.get("dock_drag")
+        self.assertEqual(dock_drag.get("zone"), "right")
+
+        # 5. Releasing mouse drops inspector into right side of viewport
+        self.send(("release", vp_rx, vp_cy, 1, 0))
+        self.assertIsNone(ed.app.components.get("dock_drag"))
+
+        # Verify layout reflowed: Inspector and Viewport are now docked side by side
+        self.runtime.step(0)
+        self.assertLess(ed.viewport.x, ed.inspector.x)
+        self.assertAlmostEqual(ed.viewport.y, ed.inspector.y, delta=40)
+        self.assertIn("Docked Inspector (right)", ed.app.status)
+
+    def test_interactive_panel_docking_as_tab_center(self):
+        ed = self.editor
+        self.runtime.step(0)
+
+        # Drag Inspector panel header onto Hierarchy center
+        insp_x = ed.inspector.x + 20
+        insp_y = ed.inspector.y + 10
+        self.send(("drag", insp_x, insp_y, 1, 0, 5, 5))
+
+        hier_cx = ed.hierarchy.x + ed.hierarchy.w // 2
+        hier_cy = ed.hierarchy.y + ed.hierarchy.h // 2
+        self.send(("drag", hier_cx, hier_cy, 1, 0, 0, 0))
+
+        dock_drag = ed.app.components.get("dock_drag")
+        self.assertIsNotNone(dock_drag)
+        self.assertEqual(dock_drag.get("zone"), "center")
+
+        # Drop into center to create tab
+        self.send(("release", hier_cx, hier_cy, 1, 0))
+        self.assertIsNone(ed.app.components.get("dock_drag"))
+
+        # Verify Inspector is now in the tab group with hierarchy
+        group = ed.dock_tree.find_tab_group_with_panel("hierarchy")
+        self.assertIn("inspector", group.panels)
+        self.assertEqual(group.active_panel, "inspector")
+        self.assertIn("Docked Inspector (center)", ed.app.status)

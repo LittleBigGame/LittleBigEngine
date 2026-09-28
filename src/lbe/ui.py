@@ -443,6 +443,12 @@ class UI:
                 if cb:
                     cb(asset_drag, event)
                 return
+            dock_drag = self.root.components.pop("dock_drag", None)
+            if dock_drag is not None:
+                cb = self.root.components.get("on_dock_drop")
+                if cb:
+                    cb(dock_drag, event)
+                return
             active_drag = self.root.relations.pop("active_drag", None)
             if active_drag is not None:
                 if "splitter" in active_drag.tags or "scrollbar_thumb" in active_drag.tags or "button" in active_drag.tags or "chip" in active_drag.tags:
@@ -455,6 +461,12 @@ class UI:
             return
         if kind == "drag":
             if self.root.components.get("asset_drag") is not None or self.root.components.get("entity_drag") is not None:
+                return
+            dock_drag = self.root.components.get("dock_drag")
+            if dock_drag is not None:
+                cb = self.root.components.get("on_dock_drag")
+                if cb:
+                    cb(dock_drag, event)
                 return
             text_drag = self.root.relations.get("text_drag")
             if text_drag is not None and self.visible(text_drag) and event[3] & 1:
@@ -1018,4 +1030,53 @@ class UI:
             graphics.rect(mx + 12, my + 12, chip_w, chip_h, (25, 45, 68, 245), key="active_drag_bg", layer=30)
             graphics.rect(mx + 12, my + 12, chip_w, 1, (88, 166, 255, 200), key="active_drag_top", layer=31)
             graphics.text(label_text, mx + 16, my + 16, color=(240, 248, 255, 255), key="active_drag_txt", layer=32)
+
+        dock_drag = self.root.components.get("dock_drag")
+        if dock_drag and hasattr(self, "mouse_pos"):
+            mx, my = self.mouse_pos
+            target_rect = dock_drag.get("target_rect")
+            drop_zones = dock_drag.get("drop_zones")
+            active_zone = dock_drag.get("zone")
+            preview_rect = dock_drag.get("preview_rect")
+
+            if preview_rect:
+                px, py, pw, ph = preview_rect
+                graphics.rect(px, py, pw, ph, (69, 182, 199, 50), key="dock_prev_fill", layer=24)
+                graphics.rect(px, py, pw, 2, ACCENT, key="dock_prev_t", layer=25)
+                graphics.rect(px, py + ph - 2, pw, 2, ACCENT, key="dock_prev_b", layer=25)
+                graphics.rect(px, py, 2, ph, ACCENT, key="dock_prev_l", layer=25)
+                graphics.rect(px + pw - 2, py, 2, ph, ACCENT, key="dock_prev_r", layer=25)
+
+            if target_rect and drop_zones:
+                tx, ty, tw, th = target_rect
+                cx, cy = tx + tw // 2, ty + th // 2
+                box_sz = 32
+                guide_boxes = {
+                    "center": (cx - box_sz // 2, cy - box_sz // 2, "Tab", "+"),
+                    "left": (tx + 12, cy - box_sz // 2, "Left", "<"),
+                    "right": (tx + tw - box_sz - 12, cy - box_sz // 2, "Right", ">"),
+                    "top": (cx - box_sz // 2, ty + 12, "Top", "^"),
+                    "bottom": (cx - box_sz // 2, ty + th - box_sz - 12, "Bottom", "v"),
+                }
+                for z_name, (gx, gy, z_label, z_icon) in guide_boxes.items():
+                    is_active = (active_zone == z_name)
+                    bg_col = (45, 95, 145, 240) if is_active else (25, 35, 48, 210)
+                    border_col = ACCENT if is_active else (65, 85, 115, 220)
+                    text_col = (255, 255, 255, 255) if is_active else (180, 200, 220, 240)
+
+                    graphics.rect(gx, gy, box_sz, box_sz, bg_col, key=("dock_gbg", z_name), layer=26)
+                    graphics.rect(gx, gy, box_sz, 1, border_col, key=("dock_gbt", z_name), layer=27)
+                    graphics.rect(gx, gy + box_sz - 1, box_sz, 1, border_col, key=("dock_gbb", z_name), layer=27)
+                    graphics.rect(gx, gy, 1, box_sz, border_col, key=("dock_gbl", z_name), layer=27)
+                    graphics.rect(gx + box_sz - 1, gy, 1, box_sz, border_col, key=("dock_gbr", z_name), layer=27)
+                    graphics.text(z_icon, gx + box_sz // 2 - 4, gy + box_sz // 2 - 8, color=text_col, key=("dock_gic", z_name), layer=28)
+
+            panel_title = dock_drag.get("panel", "Panel").replace("_", " ").title()
+            chip_text = f" Dock: {panel_title} "
+            pitch = getattr(self, "pitch", 8)
+            cw = max(70, len(chip_text) * pitch + 16)
+            graphics.rect(mx + 14, my + 14, cw, 24, (20, 36, 54, 240), key="dock_chip_bg", layer=30)
+            graphics.rect(mx + 14, my + 14, cw, 1, ACCENT, key="dock_chip_top", layer=31)
+            graphics.text(chip_text, mx + 18, my + 18, color=(240, 248, 255, 255), key="dock_chip_txt", layer=32)
+
 
