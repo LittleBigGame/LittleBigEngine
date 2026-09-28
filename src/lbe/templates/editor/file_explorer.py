@@ -84,13 +84,21 @@ def build_file_tree(project_dir, expanded_folders):
 def file_explorer_sync():
     fe = getattr(state, "file_explorer", None)
     if fe is None or not fe.components.get("visible", True):
+        for row in getattr(state, "file_explorer_rows", []):
+            put(row, visible=False)
+        track = getattr(state, "file_scroll_track", None)
+        thumb = getattr(state, "file_scroll_thumb", None)
+        if track is not None:
+            put(track, visible=False)
+        if thumb is not None:
+            put(thumb, visible=False)
         return
 
     expanded = fe.components.setdefault("expanded", set())
     visible_items = build_file_tree(state.project, expanded)
     fe.components["visible_items"] = visible_items
 
-    capacity = int((fe.h - 34) // 22)
+    capacity = int(max(0, (fe.h - 34)) // 22)
     max_scroll = max(0, len(visible_items) - capacity)
     fe.scroll = max(0, min(fe.components.get("scroll", 0), max_scroll))
 
@@ -109,10 +117,12 @@ def file_explorer_sync():
     has_scroll = len(visible_items) > capacity and capacity > 0
     row_w = fe.w - 20 if has_scroll else fe.w - 16
     mouse_pos = getattr(state.ui, "mouse_pos", None)
+    max_bottom = fe.y + fe.h - 6
 
     for index, row in enumerate(rows):
         source = index + fe.scroll
-        if index >= capacity or source >= len(visible_items):
+        row_y = fe.y + 30 + index * 22
+        if index >= capacity or source >= len(visible_items) or row_y + 20 > max_bottom:
             put(row, visible=False)
             continue
 
@@ -137,7 +147,7 @@ def file_explorer_sync():
         bg_color = hover_col if is_hovered else normal_col
         ink_color = (255, 255, 255) if is_selected else ((130, 200, 255) if item["type"] == "system" else ((255, 200, 100) if item["is_dir"] else INK))
 
-        put(row, visible=True, x=fe.x + 8 + indent, y=fe.y + 30 + index * 22,
+        put(row, visible=True, x=fe.x + 8 + indent, y=row_y,
             w=max(40, row_w - indent), h=20, text=label,
             color=bg_color, normal_color=normal_col, hover_color=hover_col,
             ink=ink_color)
@@ -146,8 +156,8 @@ def file_explorer_sync():
     track = getattr(state, "file_scroll_track", None)
     thumb = getattr(state, "file_scroll_thumb", None)
     if track is not None and thumb is not None:
-        if has_scroll:
-            avail_h = fe.h - 38
+        if has_scroll and capacity > 0:
+            avail_h = max(10, min(fe.h - 38, max_bottom - (fe.y + 32)))
             thumb_h = max(18, int(avail_h * capacity / max(1, len(visible_items))))
             thumb_y = fe.y + 32 + int((avail_h - thumb_h) * fe.scroll / max(1, max_scroll))
             put(track, visible=True, x=fe.x + fe.w - 12, y=fe.y + 32, w=8, h=avail_h)

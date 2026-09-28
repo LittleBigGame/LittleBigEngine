@@ -192,23 +192,67 @@ class DockTree:
         if tg_hf:
             tg_hf.rect = (8, top_panel_y, hw, hh)
             tg_hf.content_rect = (8, top_panel_y, hw, hh)
+            tg_hf.tab_bar_rect = (8, top_panel_y, hw, 26)
+            avail_w = max(40, hw - 24)
+            if len(tg_hf.panels) == 1:
+                tg_hf.tab_rects = [(tg_hf.panels[0], (8, top_panel_y, avail_w, 26))]
+            else:
+                tw = max(40, min(140, (avail_w - (len(tg_hf.panels) - 1) * 2) // len(tg_hf.panels)))
+                tab_x = 8
+                tg_hf.tab_rects = []
+                for p in tg_hf.panels:
+                    tg_hf.tab_rects.append((p, (tab_x, top_panel_y, tw, 26)))
+                    tab_x += tw + 2
 
         tg_insp = self.find_node("tab_inspector")
         if tg_insp:
             tg_insp.rect = (8, iy, hw, ih)
             tg_insp.content_rect = (8, iy, hw, ih)
+            tg_insp.tab_bar_rect = (8, iy, hw, 26)
+            avail_w = max(40, hw - 24)
+            if len(tg_insp.panels) == 1:
+                tg_insp.tab_rects = [(tg_insp.panels[0], (8, iy, avail_w, 26))]
+            else:
+                tw = max(40, min(140, (avail_w - (len(tg_insp.panels) - 1) * 2) // len(tg_insp.panels)))
+                tab_x = 8
+                tg_insp.tab_rects = []
+                for p in tg_insp.panels:
+                    tg_insp.tab_rects.append((p, (tab_x, iy, tw, 26)))
+                    tab_x += tw + 2
 
         tg_vp = self.find_node("tab_viewport")
         if tg_vp:
             vp_h = max(50, split_y - top_y - 48)
             tg_vp.rect = (right_x, top_y + 12, right_w, vp_h + 24)
             tg_vp.content_rect = (right_x, top_y + 36, right_w, vp_h)
+            tg_vp.tab_bar_rect = (right_x, top_y + 12, right_w, 24)
+            avail_w = max(40, right_w - 24)
+            if len(tg_vp.panels) == 1:
+                tg_vp.tab_rects = [(tg_vp.panels[0], (right_x, top_y + 12, avail_w, 24))]
+            else:
+                tw = max(40, min(140, (avail_w - (len(tg_vp.panels) - 1) * 2) // len(tg_vp.panels)))
+                tab_x = right_x
+                tg_vp.tab_rects = []
+                for p in tg_vp.panels:
+                    tg_vp.tab_rects.append((p, (tab_x, top_y + 12, tw, 24)))
+                    tab_x += tw + 2
 
         tg_code = self.find_node("tab_code")
         if tg_code:
             code_h = max(100, status_y - split_y - 11)
             tg_code.rect = (right_x, split_y, right_w, code_h)
             tg_code.content_rect = (right_x, split_y, right_w, code_h)
+            tg_code.tab_bar_rect = (right_x, split_y, right_w, 26)
+            avail_w = max(40, right_w - 24)
+            if len(tg_code.panels) == 1:
+                tg_code.tab_rects = [(tg_code.panels[0], (right_x, split_y, avail_w, 26))]
+            else:
+                tw = max(40, min(140, (avail_w - (len(tg_code.panels) - 1) * 2) // len(tg_code.panels)))
+                tab_x = right_x
+                tg_code.tab_rects = []
+                for p in tg_code.panels:
+                    tg_code.tab_rects.append((p, (tab_x, split_y, tw, 26)))
+                    tab_x += tw + 2
 
         active_hf = tg_hf.active_panel if tg_hf else "hierarchy"
         return {
@@ -225,8 +269,9 @@ class DockTree:
         w: int,
         h: int,
         splitter_thickness: int = 6,
-        tab_bar_height: int = 28,
+        tab_bar_height: int = 26,
         min_panel_size: int = 60,
+        gap: int = 2,
     ) -> Dict[str, Tuple[int, int, int, int]]:
         """Compute all panel, tab bar, and splitter bounding boxes recursively.
 
@@ -238,20 +283,23 @@ class DockTree:
             node.rect = (nx, ny, nw, nh)
 
             if isinstance(node, TabGroupNode):
-                # When multiple tabs exist, allocate tab bar height for the tab strip
-                tb_h = tab_bar_height if len(node.panels) > 1 else 0
+                tb_h = tab_bar_height
                 node.tab_bar_rect = (nx, ny, nw, tb_h)
-                node.content_rect = (nx, ny + tb_h, nw, max(0, nh - tb_h))
+                node.content_rect = (nx, ny, nw, nh)
 
                 # Compute individual tab button rects
                 node.tab_rects = []
-                if len(node.panels) > 1:
+                avail_w = max(40, nw - 24)
+                if len(node.panels) == 1:
+                    # Single panel: tab spans title bar width
+                    node.tab_rects.append((node.panels[0], (nx, ny, avail_w, tb_h)))
+                elif len(node.panels) > 1:
+                    pad = 2
+                    tw = max(40, min(140, (avail_w - (len(node.panels) - 1) * pad) // len(node.panels)))
                     tab_x = nx
-                    tab_pad = 2
-                    tw = max(80, min(140, (nw - len(node.panels) * tab_pad) // max(1, len(node.panels))))
                     for p in node.panels:
                         node.tab_rects.append((p, (tab_x, ny, tw, tb_h)))
-                        tab_x += tw + tab_pad
+                        tab_x += tw + pad
 
                 # The active panel gets the content rect
                 if node.active_panel:
@@ -259,29 +307,30 @@ class DockTree:
 
             elif isinstance(node, SplitNode):
                 st = splitter_thickness
+                sep = st + gap * 2
                 if node.orientation == "horizontal":
-                    # Left / Right split
-                    available_w = max(0, nw - st)
+                    # Left / Right split: vertical separator bar
+                    available_w = max(0, nw - sep)
                     first_w = max(min_panel_size, min(available_w - min_panel_size, int(available_w * node.ratio)))
                     if available_w < min_panel_size * 2:
                         first_w = available_w // 2
                     second_w = max(0, available_w - first_w)
 
-                    node.splitter_rect = (nx + first_w, ny, st, nh)
+                    node.splitter_rect = (nx + first_w + gap, ny, st, nh)
                     _layout_node(node.first, nx, ny, first_w, nh)
-                    _layout_node(node.second, nx + first_w + st, ny, second_w, nh)
+                    _layout_node(node.second, nx + first_w + sep, ny, second_w, nh)
 
                 else:
-                    # Top / Bottom split
-                    available_h = max(0, nh - st)
+                    # Top / Bottom split: horizontal separator bar
+                    available_h = max(0, nh - sep)
                     first_h = max(min_panel_size, min(available_h - min_panel_size, int(available_h * node.ratio)))
                     if available_h < min_panel_size * 2:
                         first_h = available_h // 2
                     second_h = max(0, available_h - first_h)
 
-                    node.splitter_rect = (nx, ny + first_h, nw, st)
+                    node.splitter_rect = (nx, ny + first_h + gap, nw, st)
                     _layout_node(node.first, nx, ny, nw, first_h)
-                    _layout_node(node.second, nx, ny + first_h + st, nw, second_h)
+                    _layout_node(node.second, nx, ny + first_h + sep, nw, second_h)
 
         _layout_node(self.root, x, y, w, h)
         return panel_rects

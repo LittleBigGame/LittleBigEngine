@@ -73,24 +73,80 @@ def parse_value(text):
         raise ValueError("Use a Python literal; put text in quotes") from None
 
 def inspector_sync():
+    ip = state.inspector
+    if not ip.components.get("visible", True):
+        put(state.name_label, visible=False)
+        put(state.name_field, visible=False)
+        put(state.selection_label, visible=False)
+        put(state.identity_label, visible=False)
+        put(state.add_child_button, visible=False)
+        put(state.duplicate_button, visible=False)
+        put(state.delete_button, visible=False)
+        for chip in state.quick_preset_chips:
+            put(chip, visible=False)
+        put(state.quick_add_chip_btn, visible=False)
+        put(state.divider_identity, visible=False)
+        put(state.components_title, visible=False)
+        put(state.add_comp_menu_button, visible=False)
+        for lbl, fld in state.component_rows:
+            put(lbl, visible=False)
+            put(fld, visible=False)
+        for btn in state.component_delete_buttons:
+            put(btn, visible=False)
+        put(state.inspector_scroll_track, visible=False)
+        put(state.inspector_scroll_thumb, visible=False)
+        put(state.add_name, visible=False)
+        put(state.add_value, visible=False)
+        put(state.add_button, visible=False)
+        put(state.divider_components, visible=False)
+        put(state.system_label, visible=False)
+        put(state.add_system_button, visible=False)
+        put(state.no_systems_label, visible=False)
+        for b in state.system_rows:
+            put(b, visible=False)
+        for b in state.system_edit_buttons:
+            put(b, visible=False)
+        for b in state.system_detach_buttons:
+            put(b, visible=False)
+        put(state.divider_systems, visible=False)
+        put(state.links_header, visible=False)
+        put(state.tags_label, visible=False)
+        put(state.tags_field, visible=False)
+        put(state.parent_label, visible=False)
+        put(state.parent_field, visible=False)
+        put(state.relations_label, visible=False)
+        put(state.relation_field, visible=False)
+        put(state.link_add_button, visible=False)
+        put(state.metadata, visible=False)
+        for r_btn, u_btn in state.relation_rows:
+            put(r_btn, visible=False)
+            put(u_btn, visible=False)
+        for edit_btn in state.relation_edit_buttons:
+            put(edit_btn, visible=False)
+        for button in state.child_rows:
+            put(button, visible=False)
+        return
+
     entity = inspected()
     items = tuple(entity.components.items())
     systems = tuple(entity.systems.items())
     children = tuple(entity.children)
     relations = tuple(entity.relations.items())
-    ip = state.inspector
     i_pad = parse_box(ip.components.get("padding", (8, 12, 8, 12)))
+    max_bottom = ip.y + ip.h - 6
 
     # Header: Name field
     ent_name = str(entity.components.get('name', ''))
-    put(state.name_label, x=ip.x + 12, y=ip.y + 32, w=38, h=22, text='Name')
-    put(state.name_field, x=ip.x + 54, y=ip.y + 30, w=max(30, ip.w - 66), h=24)
+    show_header = (ip.y + 54 <= max_bottom)
+    put(state.name_label, visible=show_header, x=ip.x + 12, y=ip.y + 32, w=38, h=22, text='Name')
+    put(state.name_field, visible=show_header, x=ip.x + 54, y=ip.y + 30, w=max(30, ip.w - 66), h=24)
     state.ui.set_text(state.name_field, ent_name)
     put(state.selection_label, visible=False, text=ent_name or str(entity.id))
 
     # Row 2: Identity label
     ent_display = ent_name or "Entity"
-    put(state.identity_label, x=ip.x + 12, y=ip.y + 56, w=max(30, ip.w - 24), h=18,
+    show_id = (ip.y + 74 <= max_bottom)
+    put(state.identity_label, visible=show_id, x=ip.x + 12, y=ip.y + 56, w=max(30, ip.w - 24), h=18,
         text=f'🔷 Entity: {ent_display}')
 
     # Hide removed action buttons and chip bar
@@ -102,16 +158,17 @@ def inspector_sync():
     put(state.quick_add_chip_btn, visible=False)
 
     # Divider 1: between Identity and Components
-    put(state.divider_identity, visible=True, x=ip.x + 12, y=ip.y + 78, w=max(0, ip.w - 24), h=1)
+    put(state.divider_identity, visible=(ip.y + 79 <= max_bottom), x=ip.x + 12, y=ip.y + 78, w=max(0, ip.w - 24), h=1)
 
     cur_y = ip.y + 86
 
     # SECTION 1: COMPONENTS (Collapsible)
     comp_collapsed = "components" in state.collapsed_sections
-    put(state.components_title, visible=True, x=ip.x + 12, y=cur_y, w=max(80, ip.w - 24 - 80), h=22,
+    show_comp_title = (cur_y + 22 <= max_bottom)
+    put(state.components_title, visible=show_comp_title, x=ip.x + 12, y=cur_y, w=max(80, ip.w - 24 - 80), h=22,
         text=f"{'▶' if comp_collapsed else '▼'} COMPONENTS ({len(items)})")
     comp_btn_w = 70
-    put(state.add_comp_menu_button, visible=True, x=ip.x + ip.w - 12 - comp_btn_w, y=cur_y, w=comp_btn_w, h=22, text='+ Add')
+    put(state.add_comp_menu_button, visible=show_comp_title, x=ip.x + ip.w - 12 - comp_btn_w, y=cur_y, w=comp_btn_w, h=22, text='+ Add')
     cur_y += 26
 
     sys_collapsed = "systems" in state.collapsed_sections
@@ -230,14 +287,15 @@ def inspector_sync():
         put(state.add_button, visible=False)
 
         # Divider 2: between Components and Systems
-        put(state.divider_components, visible=True, x=ip.x + 12, y=cur_y, w=max(0, ip.w - 24), h=1)
+        put(state.divider_components, visible=(cur_y + 1 <= max_bottom), x=ip.x + 12, y=cur_y, w=max(0, ip.w - 24), h=1)
         cur_y += 6
 
     # SECTION 2: SYSTEMS (Collapsible)
-    put(state.system_label, visible=True, x=ip.x + 12, y=cur_y, w=max(80, ip.w - 24 - 80), h=22,
+    show_sys_title = (cur_y + 22 <= max_bottom)
+    put(state.system_label, visible=show_sys_title, x=ip.x + 12, y=cur_y, w=max(80, ip.w - 24 - 80), h=22,
         text=f"{'▶' if sys_collapsed else '▼'} SYSTEMS ({len(systems)})")
     sys_btn_w = 70
-    put(state.add_system_button, visible=True, x=ip.x + ip.w - 12 - sys_btn_w, y=cur_y, w=sys_btn_w, h=22, text='+ Attach')
+    put(state.add_system_button, visible=show_sys_title, x=ip.x + ip.w - 12 - sys_btn_w, y=cur_y, w=sys_btn_w, h=22, text='+ Attach')
     cur_y += 26
 
     if sys_collapsed:
@@ -251,7 +309,8 @@ def inspector_sync():
         put(state.divider_systems, visible=False)
     else:
         if not systems:
-            put(state.no_systems_label, visible=True, x=ip.x + 12, y=cur_y, w=max(30, ip.w - 24), h=20, text='No systems attached')
+            show_no_sys = (cur_y + 20 <= max_bottom)
+            put(state.no_systems_label, visible=show_no_sys, x=ip.x + 12, y=cur_y, w=max(30, ip.w - 24), h=20, text='No systems attached')
             cur_y += 22
             for b in state.system_rows:
                 put(b, visible=False)
@@ -286,7 +345,7 @@ def inspector_sync():
                 e_btn = state.system_edit_buttons[index]
                 d_btn = state.system_detach_buttons[index]
                 put(d_btn, visible=False)
-                shown = index < max_sys
+                shown = (index < max_sys) and (cur_y + 24 <= max_bottom)
                 put(s_btn, visible=shown)
                 put(e_btn, visible=shown)
                 if shown:
@@ -302,15 +361,16 @@ def inspector_sync():
             cur_y += 4
 
         # Divider 3: between Systems and Links
-        put(state.divider_systems, visible=True, x=ip.x + 12, y=cur_y, w=max(0, ip.w - 24), h=1)
+        put(state.divider_systems, visible=(cur_y + 1 <= max_bottom), x=ip.x + 12, y=cur_y, w=max(0, ip.w - 24), h=1)
         cur_y += 6
 
     # SECTION 3: LINKS & HIERARCHY (Collapsible)
-    put(state.links_header, visible=True, x=ip.x + 12, y=cur_y, w=max(100, ip.w - 24), h=22,
+    show_links_title = (cur_y + 22 <= max_bottom)
+    put(state.links_header, visible=show_links_title, x=ip.x + 12, y=cur_y, w=max(100, ip.w - 24), h=22,
         text=f"{'▶' if links_collapsed else '▼'} LINKS & HIERARCHY")
     cur_y += 26
 
-    if links_collapsed:
+    if links_collapsed or not show_links_title:
         put(state.tags_label, visible=False)
         put(state.tags_field, visible=False)
         put(state.parent_label, visible=False)
@@ -328,22 +388,28 @@ def inspector_sync():
             put(button, visible=False)
     else:
         # Tags row
-        put(state.tags_label, visible=True, x=ip.x + 12, y=cur_y + 4, w=60, h=22)
-        put(state.tags_field, visible=True, x=ip.x + 76, y=cur_y, w=max(30, ip.w - 88), h=26)
-        state.ui.set_text(state.tags_field, ', '.join(entity.tags))
-        cur_y += 30
+        show_tags = (cur_y + 26 <= max_bottom)
+        put(state.tags_label, visible=show_tags, x=ip.x + 12, y=cur_y + 4, w=60, h=22)
+        put(state.tags_field, visible=show_tags, x=ip.x + 76, y=cur_y, w=max(30, ip.w - 88), h=26)
+        if show_tags:
+            state.ui.set_text(state.tags_field, ', '.join(entity.tags))
+            cur_y += 30
 
         # Parent row
-        put(state.parent_label, visible=True, x=ip.x + 12, y=cur_y + 4, w=60, h=22)
-        put(state.parent_field, visible=True, x=ip.x + 76, y=cur_y, w=max(30, ip.w - 88), h=26)
-        state.ui.set_text(state.parent_field, str(entity.parent.components.get('name', entity.parent.id)) if entity.parent else '')
-        cur_y += 30
+        show_parent = (cur_y + 26 <= max_bottom)
+        put(state.parent_label, visible=show_parent, x=ip.x + 12, y=cur_y + 4, w=60, h=22)
+        put(state.parent_field, visible=show_parent, x=ip.x + 76, y=cur_y, w=max(30, ip.w - 88), h=26)
+        if show_parent:
+            state.ui.set_text(state.parent_field, str(entity.parent.components.get('name', entity.parent.id)) if entity.parent else '')
+            cur_y += 30
 
         # Link row
-        put(state.relations_label, visible=True, x=ip.x + 12, y=cur_y + 4, w=60, h=22)
-        put(state.relation_field, visible=True, x=ip.x + 76, y=cur_y, w=max(30, ip.w - 88 - 36), h=26)
-        put(state.link_add_button, visible=True, x=ip.x + ip.w - 42, y=cur_y, w=30, h=26, text='+')
-        cur_y += 30
+        show_link_row = (cur_y + 26 <= max_bottom)
+        put(state.relations_label, visible=show_link_row, x=ip.x + 12, y=cur_y + 4, w=60, h=22)
+        put(state.relation_field, visible=show_link_row, x=ip.x + 76, y=cur_y, w=max(30, ip.w - 88 - 36), h=26)
+        put(state.link_add_button, visible=show_link_row, x=ip.x + ip.w - 42, y=cur_y, w=30, h=26, text='+')
+        if show_link_row:
+            cur_y += 30
 
         # Existing relations list
         while len(state.relation_rows) < num_rel_rows:
@@ -360,7 +426,7 @@ def inspector_sync():
             state.relation_edit_buttons.append(edit_btn)
 
         for index, (r_btn, u_btn) in enumerate(state.relation_rows):
-            shown = index < num_rel_rows
+            shown = (index < num_rel_rows) and (cur_y + 22 <= max_bottom)
             put(r_btn, visible=shown)
             put(u_btn, visible=False)
             edit_btn = state.relation_edit_buttons[index]
@@ -388,12 +454,14 @@ def inspector_sync():
             cur_y += 4
 
         # Metadata
-        put(state.metadata, visible=True, x=ip.x + 12, y=cur_y, w=max(0, ip.w - 24), h=18,
+        show_meta = (cur_y + 18 <= max_bottom)
+        put(state.metadata, visible=show_meta, x=ip.x + 12, y=cur_y, w=max(0, ip.w - 24), h=18,
             text=f'{len(children)} children | {len(relations)} relations')
-        cur_y += 22
+        if show_meta:
+            cur_y += 22
 
         # Children chips
-        if children:
+        if children and cur_y + 22 <= max_bottom:
             max_children = min(len(children), 9)
             while len(state.child_rows) < max_children:
                 idx = len(state.child_rows)
@@ -401,13 +469,13 @@ def inspector_sync():
                 state.child_rows.append(btn)
             btn_w = max(60, (ip.w - 24 - 12) // 3)
             for index, button in enumerate(state.child_rows):
-                shown = index < max_children
+                row_idx = index // 3
+                shown = (index < max_children) and (cur_y + (row_idx + 1) * 24 <= max_bottom)
                 put(button, visible=shown)
                 if shown:
                     child = children[index]
                     c_name = str(child.components.get('name', str(child.id)[:8]))
                     col = index % 3
-                    row_idx = index // 3
                     put(button, x=ip.x + 12 + col * (btn_w + 6),
                         y=cur_y + row_idx * 24,
                         w=btn_w, h=22, text=c_name)

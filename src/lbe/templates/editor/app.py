@@ -677,15 +677,13 @@ def layout():
     ws_w = max(100, w - 16)
     ws_h = max(100, status_y - ws_y - 4)
 
-    is_hier = (getattr(state, "active_left_tab", "hierarchy") == "hierarchy")
+
 
     if hasattr(state, "dock_tree") and state.dock_tree.is_default():
         left_col_w = state.app.components.get("left_column_w", 370)
         panel_h = state.hierarchy.components.get("panel_h", 240)
         split_y = state.code_panel.components.get("split_y", max(330, int(h * 0.45)))
         group_hf = state.dock_tree.find_tab_group_with_panel("hierarchy")
-        if group_hf and "files" in group_hf.panels and group_hf.active_panel in ("hierarchy", "files"):
-            group_hf.active = group_hf.panels.index("hierarchy" if is_hier else "files")
         panel_rects = state.dock_tree.compute_default_layout(
             w=w,
             h=h,
@@ -718,31 +716,11 @@ def layout():
             if cur_split is not None:
                 split_right.ratio = max(0.1, min(0.9, (cur_split - ws_y) / ws_h))
 
-        if hasattr(state, "dock_tree"):
-            group_hf = state.dock_tree.find_tab_group_with_panel("hierarchy")
-            if group_hf and "files" in group_hf.panels and group_hf.active_panel in ("hierarchy", "files"):
-                group_hf.active = group_hf.panels.index("hierarchy" if is_hier else "files")
-
         panel_rects = state.dock_tree.compute_layout(ws_x, ws_y, ws_w, ws_h) if hasattr(state, "dock_tree") else {}
 
-    # Tab buttons in header
-    group_hf = state.dock_tree.find_tab_group_with_panel("hierarchy") if hasattr(state, "dock_tree") else None
-    has_hf_tabs = group_hf is not None and "files" in group_hf.panels and state.dock_tree.is_default()
-    normal_hier = (38, 55, 75) if is_hier else PANEL
-    normal_files = (38, 55, 75) if not is_hier else PANEL
-    hover_hier = (50, 75, 105) if is_hier else (45, 60, 80)
-    hover_files = (50, 75, 105) if not is_hier else (45, 60, 80)
-    mx, my = getattr(state.ui, "mouse_pos", (-1, -1))
-    hier_hover = contains(state.tab_hierarchy, mx, my)
-    files_hover = contains(state.tab_files, mx, my)
-    put(state.tab_hierarchy, visible=has_hf_tabs, x=232, y=8, w=110, h=28,
-        normal_color=normal_hier, hover_color=hover_hier,
-        color=hover_hier if hier_hover else normal_hier,
-        ink=INK if is_hier else MUTED)
-    put(state.tab_files, visible=has_hf_tabs, x=346, y=8, w=130, h=28,
-        normal_color=normal_files, hover_color=hover_files,
-        color=hover_files if files_hover else normal_files,
-        ink=INK if not is_hier else MUTED)
+    # Legacy header tab buttons hidden — dynamic tab buttons on each group replace them
+    put(state.tab_hierarchy, visible=False)
+    put(state.tab_files, visible=False)
 
     # Panels layout
     if state.hierarchy.components.get("dock") == "float":
@@ -840,45 +818,50 @@ def layout():
         else:
             put(state.close_code_btn, visible=False)
 
-    # Dynamic Tab Buttons for Multi-Panel Groups
+    # Dynamic Tab Buttons for all panel groups (title bars + tab selectors)
     tab_btn_idx = 0
     if hasattr(state, "dock_tree") and hasattr(state, "dock_tab_buttons"):
         for group in state.dock_tree.all_tab_groups():
-            if len(group.panels) > 1 and group.tab_rects:
-                if state.dock_tree.is_default() and group.id == "tab_hierarchy_files":
-                    continue
-                for p_idx, (p_name, (tx, ty, tw, th)) in enumerate(group.tab_rects):
-                    if tab_btn_idx >= len(state.dock_tab_buttons):
-                        btn = state.ui.button(state.app, f"DockTab_{tab_btn_idx}", "", lambda: None)
-                        state.dock_tab_buttons.append(btn)
-                    btn = state.dock_tab_buttons[tab_btn_idx]
-                    tab_btn_idx += 1
+            if not group.tab_rects:
+                continue
+            for p_idx, (p_name, (tx, ty, tw, th)) in enumerate(group.tab_rects):
+                if tab_btn_idx >= len(state.dock_tab_buttons):
+                    btn = state.ui.button(state.app, f"DockTab_{tab_btn_idx}", "", lambda: None)
+                    state.dock_tab_buttons.append(btn)
+                btn = state.dock_tab_buttons[tab_btn_idx]
+                tab_btn_idx += 1
 
-                    is_active = (p_idx == group.active)
-                    p_display = p_name.replace("_", " ").upper()
-                    if p_name == "code_panel":
-                        p_display = "SYSTEM SOURCE"
-                    elif p_name == "files":
-                        p_display = "PROJECT FILES"
+                is_active = (p_idx == group.active)
+                p_display = p_name.replace("_", " ").upper()
+                if p_name == "code_panel":
+                    p_display = "SYSTEM SOURCE"
+                elif p_name == "files":
+                    p_display = "PROJECT FILES"
 
-                    def _make_click(grp, idx, name):
-                        return lambda: select_dock_tab(grp, idx, name)
+                def _make_click(grp, idx, name):
+                    return lambda: select_dock_tab(grp, idx, name)
 
-                    def _make_drag(name):
-                        return lambda c, ev: start_panel_dock_drag(name, ev)
+                def _make_drag(name):
+                    return lambda c, ev: start_panel_dock_drag(name, ev)
 
-                    act = _make_click(group, p_idx, p_name)
-                    btn.action = act
-                    btn.components["action"] = act
-                    btn.on_click = lambda c, ev, a=act: a()
-                    btn.on_drag = _make_drag(p_name)
+                act = _make_click(group, p_idx, p_name)
+                btn.action = act
+                btn.components["action"] = act
+                btn.on_click = lambda c, ev, a=act: a()
+                btn.on_drag = _make_drag(p_name)
 
+                if len(group.panels) == 1:
+                    tab_bg = (30, 42, 58)
+                    tab_hover = (42, 58, 78)
+                    tab_ink = INK
+                else:
                     tab_bg = (38, 55, 75) if is_active else PANEL
                     tab_hover = (50, 75, 105) if is_active else (45, 60, 80)
                     tab_ink = INK if is_active else MUTED
 
-                    put(btn, visible=True, x=tx, y=ty, w=tw, h=th, text=p_display,
-                        color=tab_bg, normal_color=tab_bg, hover_color=tab_hover, ink=tab_ink, layer=4)
+                # Don't set 'color' — let normal_color/hover_color drive it to avoid flashing
+                put(btn, visible=True, x=tx, y=ty, w=tw, h=th, text=p_display,
+                    normal_color=tab_bg, hover_color=tab_hover, ink=tab_ink, layer=4)
 
         for i in range(tab_btn_idx, len(state.dock_tab_buttons)):
             put(state.dock_tab_buttons[i], visible=False)
@@ -947,7 +930,7 @@ def layout():
             es = state.extra_splitters[extra_idx]
             extra_idx += 1
 
-            axis = "x" if orientation == "vertical" else "y"
+            axis = "x" if orientation == "horizontal" else "y"
             es.axis = axis
 
             def _make_drag(snode):
@@ -955,7 +938,7 @@ def layout():
                     if len(ev) < 3:
                         return
                     nx, ny, nw, nh = snode.rect
-                    if snode.orientation == "vertical":
+                    if snode.orientation == "horizontal":
                         snode.ratio = max(0.05, min(0.95, (ev[1] - nx) / max(1, nw)))
                     else:
                         snode.ratio = max(0.05, min(0.95, (ev[2] - ny) / max(1, nh)))
@@ -1016,6 +999,11 @@ def inspector_track_click(track, event):
 
 def switch_left_tab(tab_name):
     state.active_left_tab = tab_name
+    # Sync dock tree active index
+    if hasattr(state, "dock_tree"):
+        group = state.dock_tree.find_tab_group_with_panel(tab_name)
+        if group and tab_name in group.panels:
+            group.active = group.panels.index(tab_name)
     layout()
     if tab_name == "files":
         fn = getattr(state, "file_explorer_sync", None)
