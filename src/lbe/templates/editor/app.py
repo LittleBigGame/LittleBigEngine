@@ -291,6 +291,92 @@ def sync_all_editor_panels():
         fn_i()
 
 
+def close_panel(panel_name):
+    if hasattr(state, "dock_tree"):
+        state.dock_tree.remove_panel(panel_name)
+    display_name = panel_name.replace("_", " ").title()
+    message(f"Closed {display_name} (restore from View menu)")
+    layout()
+    sync_all_editor_panels()
+    save_editor_project()
+
+
+def toggle_panel_view(panel_name):
+    if not hasattr(state, "dock_tree"):
+        return
+    group = state.dock_tree.find_tab_group_with_panel(panel_name)
+    if group:
+        close_panel(panel_name)
+    else:
+        state.dock_tree.restore_panel_default(panel_name)
+        display_name = panel_name.replace("_", " ").title()
+        message(f"Restored {display_name}")
+        layout()
+        sync_all_editor_panels()
+        save_editor_project()
+
+
+def reset_default_layout():
+    state.dock_tree = DockTree()
+    state.app.components["left_column_w"] = 370
+    state.hierarchy.components["panel_h"] = 240
+    state.code_panel.components["split_y"] = max(330, int(state.window.height * 0.45))
+    message("Reset editor layout to default")
+    layout()
+    sync_all_editor_panels()
+    save_editor_project()
+
+
+def open_file_menu_dropdown(button):
+    actions = [
+        {"label": "Save Project (Ctrl+S)", "run": lambda _: save_project_action()},
+        {"label": "New System...", "run": lambda _: new_source()},
+        {"label": "Open System...", "run": lambda _: open_path()},
+    ]
+    open_menu(state.ui, button, button.x, button.y + button.h + 2, actions=actions)
+
+
+def open_edit_menu_dropdown(button):
+    actions = [
+        {"label": "Run / Pause (F5)", "run": lambda _: toggle_game_running()},
+        {"label": "Inspect Selection", "run": lambda _: open_panel()},
+        None,
+        {"label": "Reset Default Layout", "run": lambda _: reset_default_layout()},
+    ]
+    open_menu(state.ui, button, button.x, button.y + button.h + 2, actions=actions)
+
+
+def open_view_menu_dropdown(button):
+    dt = getattr(state, "dock_tree", None)
+    panels_open = {
+        "hierarchy": bool(dt and dt.find_tab_group_with_panel("hierarchy")),
+        "files": bool(dt and dt.find_tab_group_with_panel("files")),
+        "inspector": bool(dt and dt.find_tab_group_with_panel("inspector")),
+        "viewport": bool(dt and dt.find_tab_group_with_panel("viewport")),
+        "code_panel": bool(dt and dt.find_tab_group_with_panel("code_panel")),
+    }
+    actions = [
+        {"label": f"{'[x]' if panels_open['hierarchy'] else '[  ]'} Hierarchy", "run": lambda _: toggle_panel_view("hierarchy")},
+        {"label": f"{'[x]' if panels_open['files'] else '[  ]'} Project Files", "run": lambda _: toggle_panel_view("files")},
+        {"label": f"{'[x]' if panels_open['inspector'] else '[  ]'} Inspector", "run": lambda _: toggle_panel_view("inspector")},
+        {"label": f"{'[x]' if panels_open['viewport'] else '[  ]'} Viewport", "run": lambda _: toggle_panel_view("viewport")},
+        {"label": f"{'[x]' if panels_open['code_panel'] else '[  ]'} System Source", "run": lambda _: toggle_panel_view("code_panel")},
+        None,
+        {"label": "Reset Default Layout", "run": lambda _: reset_default_layout()},
+    ]
+    open_menu(state.ui, button, button.x, button.y + button.h + 2, actions=actions)
+
+
+def select_dock_tab(group, index, panel_name):
+    group.active = index
+    if panel_name == "hierarchy":
+        state.active_left_tab = "hierarchy"
+    elif panel_name == "files":
+        state.active_left_tab = "files"
+    layout()
+    sync_all_editor_panels()
+
+
 def initialize():
     global state
     state = SimpleNamespace(runtime=entity.runtime, project=project, window=window,
@@ -352,7 +438,30 @@ def initialize():
     state.game.relations['selection'] = initial_sel
 
     state.app.components["left_column_w"] = layout_data.get("left_column_w", 370)
-    state.header = state.ui.create(state.app, 'Header', 'panel', text='LBE  /  LittleBigEngine', color=BG, dock='top', h=44, padding=(8, 16, 8, 16))
+    state.header = state.ui.create(state.app, 'Header', 'panel', text='LBE', color=BG, dock='top', h=44, padding=(8, 16, 8, 16))
+
+    # Top menu bar buttons (File, Edit, View)
+    state.menu_file_btn = state.ui.button(state.header, 'MenuFile', 'File', lambda: open_file_menu_dropdown(state.menu_file_btn),
+                                          color=BG, normal_color=BG, hover_color=(38, 55, 75), ink=INK)
+    state.menu_edit_btn = state.ui.button(state.header, 'MenuEdit', 'Edit', lambda: open_edit_menu_dropdown(state.menu_edit_btn),
+                                          color=BG, normal_color=BG, hover_color=(38, 55, 75), ink=INK)
+    state.menu_view_btn = state.ui.button(state.header, 'MenuView', 'View', lambda: open_view_menu_dropdown(state.menu_view_btn),
+                                          color=BG, normal_color=BG, hover_color=(38, 55, 75), ink=INK)
+
+    # Panel close buttons (X)
+    state.close_hierarchy_btn = state.ui.button(state.app, 'CloseHierarchy', 'X', lambda: close_panel('hierarchy'),
+                                                color=PANEL, normal_color=PANEL, hover_color=(80, 35, 40), ink=MUTED, layer=5)
+    state.close_files_btn = state.ui.button(state.app, 'CloseFiles', 'X', lambda: close_panel('files'),
+                                            color=PANEL, normal_color=PANEL, hover_color=(80, 35, 40), ink=MUTED, layer=5)
+    state.close_inspector_btn = state.ui.button(state.app, 'CloseInspector', 'X', lambda: close_panel('inspector'),
+                                                color=PANEL, normal_color=PANEL, hover_color=(80, 35, 40), ink=MUTED, layer=5)
+    state.close_viewport_btn = state.ui.button(state.app, 'CloseViewport', 'X', lambda: close_panel('viewport'),
+                                               color=PANEL, normal_color=PANEL, hover_color=(80, 35, 40), ink=MUTED, layer=5)
+    state.close_code_btn = state.ui.button(state.app, 'CloseCode', 'X', lambda: close_panel('code_panel'),
+                                           color=PANEL, normal_color=PANEL, hover_color=(80, 35, 40), ink=MUTED, layer=5)
+
+    state.dock_tab_buttons = []
+    state.extra_splitters = []
 
     dock_data = layout_data.get("dock_tree")
     if dock_data:
@@ -548,6 +657,14 @@ def layout():
         put(btn, x=rx, y=8, w=width, h=28)
         rx -= btn_gap
 
+    # Top menu bar buttons layout
+    if hasattr(state, "menu_file_btn"):
+        put(state.menu_file_btn, x=64, y=8, w=48, h=28)
+    if hasattr(state, "menu_edit_btn"):
+        put(state.menu_edit_btn, x=116, y=8, w=48, h=28)
+    if hasattr(state, "menu_view_btn"):
+        put(state.menu_view_btn, x=168, y=8, w=54, h=28)
+
     # Status bar layout (docked bottom with margin)
     status_m = parse_box(state.status.components.get("margin", (0, 16, 5, 16)))
     status_h = state.status.components.get("h", 20)
@@ -610,7 +727,7 @@ def layout():
 
     # Tab buttons in header
     group_hf = state.dock_tree.find_tab_group_with_panel("hierarchy") if hasattr(state, "dock_tree") else None
-    has_hf_tabs = group_hf is not None and "files" in group_hf.panels
+    has_hf_tabs = group_hf is not None and "files" in group_hf.panels and state.dock_tree.is_default()
     normal_hier = (38, 55, 75) if is_hier else PANEL
     normal_files = (38, 55, 75) if not is_hier else PANEL
     hover_hier = (50, 75, 105) if is_hier else (45, 60, 80)
@@ -618,30 +735,30 @@ def layout():
     mx, my = getattr(state.ui, "mouse_pos", (-1, -1))
     hier_hover = contains(state.tab_hierarchy, mx, my)
     files_hover = contains(state.tab_files, mx, my)
-    put(state.tab_hierarchy, visible=has_hf_tabs, x=200, y=8, w=110, h=28,
+    put(state.tab_hierarchy, visible=has_hf_tabs, x=232, y=8, w=110, h=28,
         normal_color=normal_hier, hover_color=hover_hier,
         color=hover_hier if hier_hover else normal_hier,
         ink=INK if is_hier else MUTED)
-    put(state.tab_files, visible=has_hf_tabs, x=318, y=8, w=130, h=28,
+    put(state.tab_files, visible=has_hf_tabs, x=346, y=8, w=130, h=28,
         normal_color=normal_files, hover_color=hover_files,
         color=hover_files if files_hover else normal_files,
         ink=INK if not is_hier else MUTED)
 
     # Panels layout
     if state.hierarchy.components.get("dock") == "float":
-        put(state.hierarchy, visible=is_hier)
+        put(state.hierarchy, visible=True)
     elif "hierarchy" in panel_rects:
         hx, hy, hw, hh = panel_rects["hierarchy"]
-        put(state.hierarchy, visible=is_hier, x=hx, y=hy, w=hw, h=hh)
+        put(state.hierarchy, visible=True, x=hx, y=hy, w=hw, h=hh)
     else:
         put(state.hierarchy, visible=False)
 
     if hasattr(state, "file_explorer"):
         if state.file_explorer.components.get("dock") == "float":
-            put(state.file_explorer, visible=not is_hier)
+            put(state.file_explorer, visible=True)
         elif "files" in panel_rects:
             fx, fy, fw, fh = panel_rects["files"]
-            put(state.file_explorer, visible=not is_hier, x=fx, y=fy, w=fw, h=fh)
+            put(state.file_explorer, visible=True, x=fx, y=fy, w=fw, h=fh)
         else:
             put(state.file_explorer, visible=False)
 
@@ -687,24 +804,169 @@ def layout():
     else:
         put(state.code_panel, visible=False)
 
+    # Panel close buttons (X)
+    if hasattr(state, "close_hierarchy_btn"):
+        if "hierarchy" in panel_rects and state.hierarchy.components.get("visible", True):
+            hx, hy, hw, hh = panel_rects["hierarchy"]
+            put(state.close_hierarchy_btn, visible=True, x=hx + hw - 24, y=hy + 4, w=18, h=18)
+        else:
+            put(state.close_hierarchy_btn, visible=False)
+
+    if hasattr(state, "close_files_btn"):
+        if "files" in panel_rects and state.file_explorer.components.get("visible", True):
+            fx, fy, fw, fh = panel_rects["files"]
+            put(state.close_files_btn, visible=True, x=fx + fw - 24, y=fy + 4, w=18, h=18)
+        else:
+            put(state.close_files_btn, visible=False)
+
+    if hasattr(state, "close_inspector_btn"):
+        if "inspector" in panel_rects and state.inspector.components.get("visible", True):
+            ix, iy, iw, ih = panel_rects["inspector"]
+            put(state.close_inspector_btn, visible=True, x=ix + iw - 24, y=iy + 4, w=18, h=18)
+        else:
+            put(state.close_inspector_btn, visible=False)
+
+    if hasattr(state, "close_viewport_btn"):
+        if "viewport" in panel_rects and state.viewport.components.get("visible", True):
+            vx, vy, vw, vh = panel_rects["viewport"]
+            put(state.close_viewport_btn, visible=True, x=vx + vw - 24, y=vy + 4, w=18, h=18)
+        else:
+            put(state.close_viewport_btn, visible=False)
+
+    if hasattr(state, "close_code_btn"):
+        if "code_panel" in panel_rects and state.code_panel.components.get("visible", True):
+            cx, cy, cw, ch = panel_rects["code_panel"]
+            put(state.close_code_btn, visible=True, x=cx + cw - 24, y=cy + 4, w=18, h=18)
+        else:
+            put(state.close_code_btn, visible=False)
+
+    # Dynamic Tab Buttons for Multi-Panel Groups
+    tab_btn_idx = 0
+    if hasattr(state, "dock_tree") and hasattr(state, "dock_tab_buttons"):
+        for group in state.dock_tree.all_tab_groups():
+            if len(group.panels) > 1 and group.tab_rects:
+                if state.dock_tree.is_default() and group.id == "tab_hierarchy_files":
+                    continue
+                for p_idx, (p_name, (tx, ty, tw, th)) in enumerate(group.tab_rects):
+                    if tab_btn_idx >= len(state.dock_tab_buttons):
+                        btn = state.ui.button(state.app, f"DockTab_{tab_btn_idx}", "", lambda: None)
+                        state.dock_tab_buttons.append(btn)
+                    btn = state.dock_tab_buttons[tab_btn_idx]
+                    tab_btn_idx += 1
+
+                    is_active = (p_idx == group.active)
+                    p_display = p_name.replace("_", " ").upper()
+                    if p_name == "code_panel":
+                        p_display = "SYSTEM SOURCE"
+                    elif p_name == "files":
+                        p_display = "PROJECT FILES"
+
+                    def _make_click(grp, idx, name):
+                        return lambda: select_dock_tab(grp, idx, name)
+
+                    def _make_drag(name):
+                        return lambda c, ev: start_panel_dock_drag(name, ev)
+
+                    act = _make_click(group, p_idx, p_name)
+                    btn.action = act
+                    btn.components["action"] = act
+                    btn.on_click = lambda c, ev, a=act: a()
+                    btn.on_drag = _make_drag(p_name)
+
+                    tab_bg = (38, 55, 75) if is_active else PANEL
+                    tab_hover = (50, 75, 105) if is_active else (45, 60, 80)
+                    tab_ink = INK if is_active else MUTED
+
+                    put(btn, visible=True, x=tx, y=ty, w=tw, h=th, text=p_display,
+                        color=tab_bg, normal_color=tab_bg, hover_color=tab_hover, ink=tab_ink, layer=4)
+
+        for i in range(tab_btn_idx, len(state.dock_tab_buttons)):
+            put(state.dock_tab_buttons[i], visible=False)
+
     # Splitters layout
-    if split_main and split_main.splitter_rect[2] > 0:
+    active_splitters = state.dock_tree.all_splitters() if hasattr(state, "dock_tree") else []
+    active_node_ids = {node.id for (node, _, _) in active_splitters}
+
+    if not split_left:
+        for node, _, ori in active_splitters:
+            if ori == "vertical" and node.id != getattr(split_right, "id", None):
+                leaf_panels = []
+                def _collect(n):
+                    if isinstance(n, TabGroupNode): leaf_panels.extend(n.panels)
+                    elif isinstance(n, SplitNode): _collect(n.first); _collect(n.second)
+                _collect(node)
+                if any(p in ("hierarchy", "files", "inspector") for p in leaf_panels) and not any(p in ("viewport", "code_panel") for p in leaf_panels):
+                    split_left = node
+                    break
+
+    if not split_right:
+        for node, _, ori in active_splitters:
+            if ori == "vertical" and node is not split_left:
+                leaf_panels = []
+                def _collect(n):
+                    if isinstance(n, TabGroupNode): leaf_panels.extend(n.panels)
+                    elif isinstance(n, SplitNode): _collect(n.first); _collect(n.second)
+                _collect(node)
+                if any(p in ("viewport", "code_panel") for p in leaf_panels) and not any(p in ("hierarchy", "files", "inspector") for p in leaf_panels):
+                    split_right = node
+                    break
+
+    claimed_ids = set()
+    if split_main and split_main.id in active_node_ids and split_main.splitter_rect[2] > 0:
         sx, sy, sw, sh = split_main.splitter_rect
         put(state.col_splitter, visible=True, x=sx, y=sy, w=sw, h=sh)
+        claimed_ids.add(split_main.id)
     else:
         put(state.col_splitter, visible=False)
 
-    if split_left and split_left.splitter_rect[3] > 0:
+    if split_left and split_left.id in active_node_ids and split_left.splitter_rect[3] > 0:
         sx, sy, sw, sh = split_left.splitter_rect
         put(state.hierarchy_splitter, visible=True, x=sx, y=sy, w=sw, h=sh)
+        claimed_ids.add(split_left.id)
     else:
         put(state.hierarchy_splitter, visible=False)
 
-    if split_right and split_right.splitter_rect[3] > 0:
+    if split_right and split_right.id in active_node_ids and split_right.splitter_rect[3] > 0:
         sx, sy, sw, sh = split_right.splitter_rect
         put(state.code_splitter, visible=True, x=sx, y=sy, w=sw, h=sh)
+        claimed_ids.add(split_right.id)
     else:
         put(state.code_splitter, visible=False)
+
+    # Any additional dynamic splitters
+    extra_idx = 0
+    if hasattr(state, "extra_splitters"):
+        for node, s_rect, orientation in active_splitters:
+            if node.id in claimed_ids:
+                continue
+            if s_rect[2] <= 0 or s_rect[3] <= 0:
+                continue
+            if extra_idx >= len(state.extra_splitters):
+                es = state.ui.splitter(state.app, f"ExtraSplitter_{extra_idx}", axis="x")
+                state.extra_splitters.append(es)
+            es = state.extra_splitters[extra_idx]
+            extra_idx += 1
+
+            axis = "x" if orientation == "vertical" else "y"
+            es.axis = axis
+
+            def _make_drag(snode):
+                def _on_drag(ctl, ev):
+                    if len(ev) < 3:
+                        return
+                    nx, ny, nw, nh = snode.rect
+                    if snode.orientation == "vertical":
+                        snode.ratio = max(0.05, min(0.95, (ev[1] - nx) / max(1, nw)))
+                    else:
+                        snode.ratio = max(0.05, min(0.95, (ev[2] - ny) / max(1, nh)))
+                    layout()
+                return _on_drag
+
+            es.on_drag = _make_drag(node)
+            put(es, visible=True, x=s_rect[0], y=s_rect[1], w=s_rect[2], h=s_rect[3])
+
+        for i in range(extra_idx, len(state.extra_splitters)):
+            put(state.extra_splitters[i], visible=False)
 
 def hierarchy_sync():
     fn = getattr(state, "hierarchy_sync", None)
@@ -1307,6 +1569,18 @@ def get_project_entities():
         if s is not None:
             editor_roots.append(s)
     editor_roots.extend(getattr(state, "extra_panels", []))
+    editor_roots.extend(getattr(state, "dock_tab_buttons", []))
+    editor_roots.extend(getattr(state, "extra_splitters", []))
+    for mb in (getattr(state, "menu_file_btn", None), getattr(state, "menu_edit_btn", None), getattr(state, "menu_view_btn", None)):
+        if mb is not None:
+            editor_roots.append(mb)
+    for cb in (getattr(state, "close_hierarchy_btn", None),
+               getattr(state, "close_files_btn", None),
+               getattr(state, "close_inspector_btn", None),
+               getattr(state, "close_viewport_btn", None),
+               getattr(state, "close_code_btn", None)):
+        if cb is not None:
+            editor_roots.append(cb)
 
     def is_editor_entity(e):
         return e is state.app or any(e is r or r in e.ancestors for r in editor_roots)

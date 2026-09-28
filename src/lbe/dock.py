@@ -238,21 +238,20 @@ class DockTree:
             node.rect = (nx, ny, nw, nh)
 
             if isinstance(node, TabGroupNode):
-                # Always show tab bar when multiple tabs exist or when node has tab_bar_height
-                # If only 1 panel, tab bar can still serve as panel title / dock drag handle
-                tb_h = tab_bar_height
+                # When multiple tabs exist, allocate tab bar height for the tab strip
+                tb_h = tab_bar_height if len(node.panels) > 1 else 0
                 node.tab_bar_rect = (nx, ny, nw, tb_h)
                 node.content_rect = (nx, ny + tb_h, nw, max(0, nh - tb_h))
 
                 # Compute individual tab button rects
                 node.tab_rects = []
-                tab_x = nx
-                tab_pad = 2
-                for p in node.panels:
-                    # Tab button width: proportional or fixed min
+                if len(node.panels) > 1:
+                    tab_x = nx
+                    tab_pad = 2
                     tw = max(80, min(140, (nw - len(node.panels) * tab_pad) // max(1, len(node.panels))))
-                    node.tab_rects.append((p, (tab_x, ny, tw, tb_h)))
-                    tab_x += tw + tab_pad
+                    for p in node.panels:
+                        node.tab_rects.append((p, (tab_x, ny, tw, tb_h)))
+                        tab_x += tw + tab_pad
 
                 # The active panel gets the content rect
                 if node.active_panel:
@@ -394,6 +393,7 @@ class DockTree:
         panel_name: str,
         target_group: Union[TabGroupNode, str],
         position: str,
+        split_id: Optional[str] = None,
     ) -> bool:
         """Dock a panel into a target group or split relative to it.
 
@@ -437,6 +437,7 @@ class DockTree:
             ratio=0.5,
             first=first,
             second=second,
+            node_id=split_id or uuid.uuid4().hex[:8],
         )
 
         parent, child_idx = self.find_parent(target_group)
@@ -449,6 +450,40 @@ class DockTree:
             else:
                 parent.second = new_split
 
+        return True
+
+    def restore_panel_default(self, panel_name: str) -> bool:
+        """Restore a closed/minimized panel to its default companion or quadrant."""
+        if self.find_tab_group_with_panel(panel_name):
+            return True  # Already open
+
+        defaults = {
+            "hierarchy": [("inspector", "top"), ("files", "center"), ("viewport", "left"), ("code_panel", "left")],
+            "files": [("hierarchy", "center"), ("inspector", "top"), ("viewport", "left")],
+            "inspector": [("hierarchy", "bottom"), ("files", "bottom"), ("code_panel", "left"), ("viewport", "left")],
+            "viewport": [("code_panel", "top"), ("hierarchy", "right"), ("inspector", "right")],
+            "code_panel": [("viewport", "bottom"), ("inspector", "right"), ("hierarchy", "right")],
+        }
+
+        for target_name, pos in defaults.get(panel_name, []):
+            tg = self.find_tab_group_with_panel(target_name)
+            if tg:
+                split_id = None
+                if {panel_name, target_name}.issubset({"hierarchy", "files", "inspector"}) and pos in ("top", "bottom"):
+                    split_id = "split_left"
+                elif {panel_name, target_name}.issubset({"viewport", "code_panel"}) and pos in ("top", "bottom"):
+                    split_id = "split_right"
+                elif pos in ("left", "right") and not self.find_node("split_main"):
+                    split_id = "split_main"
+                return self.dock_panel(panel_name, tg, pos, split_id=split_id)
+
+        # Fallback: dock relative to first available group
+        all_groups = self.all_tab_groups()
+        if all_groups:
+            return self.dock_panel(panel_name, all_groups[0], "bottom")
+
+        # Root was empty
+        self.root = TabGroupNode(panels=[panel_name], active=0)
         return True
 
     @staticmethod

@@ -2446,3 +2446,80 @@ class EditorTests(unittest.TestCase):
         self.assertIn("inspector", group.panels)
         self.assertEqual(group.active_panel, "inspector")
         self.assertIn("Docked Inspector (center)", ed.app.status)
+
+    def test_tab_strip_renders_for_multi_panel_group(self):
+        """Req 1: Verify tabs are clearly visible and switchable when panels are grouped into one spot."""
+        ed = self.editor
+
+        # Tab Inspector into Viewport
+        success = ed.dock_tree.dock_panel("inspector", "viewport", "center")
+        self.assertTrue(success)
+        ed.app.systems["app"].namespace["layout"]()
+
+        # Check tab buttons rendered for the group
+        visible_tabs = [b for b in ed.dock_tab_buttons if b.components.get("visible", False)]
+        self.assertGreaterEqual(len(visible_tabs), 2)
+        tab_texts = [b.text for b in visible_tabs]
+        self.assertIn("VIEWPORT", tab_texts)
+        self.assertIn("INSPECTOR", tab_texts)
+
+        # Inspector was just docked so it is active
+        self.assertTrue(ed.inspector.components.get("visible", False))
+        self.assertFalse(ed.viewport.components.get("visible", False))
+
+        # Click the Viewport tab button
+        vp_tab = next(b for b in visible_tabs if b.text == "VIEWPORT")
+        vp_tab.action()
+
+        # Now Viewport is active and Inspector is inactive
+        self.assertTrue(ed.viewport.components.get("visible", False))
+        self.assertFalse(ed.inspector.components.get("visible", False))
+
+    def test_close_panel_removes_panel_and_expands_sibling(self):
+        """Req 2: Closing a panel expands remaining panels and removes the splitter."""
+        ed = self.editor
+        orig_code_h = ed.code_panel.h
+
+        # Click close button on Viewport
+        self.assertTrue(ed.close_viewport_btn.components.get("visible", False))
+        ed.close_viewport_btn.action()
+
+        # Viewport is now closed and not in layout
+        self.assertFalse(ed.viewport.components.get("visible", False))
+        self.assertIsNone(ed.dock_tree.find_tab_group_with_panel("viewport"))
+
+        # code_panel expanded into the space left by viewport
+        self.assertGreater(ed.code_panel.h, orig_code_h + 100)
+
+        # Splitter between viewport and code_panel was pruned and is hidden
+        self.assertFalse(ed.code_splitter.components.get("visible", False))
+
+    def test_view_menu_toggles_and_restores_panels(self):
+        """Req 3: Classic top menu buttons exist, close minimizes, and View menu restores to default."""
+        ed = self.editor
+
+        # Top menu buttons exist and are visible
+        self.assertTrue(ed.menu_file_btn.components.get("visible", False))
+        self.assertTrue(ed.menu_edit_btn.components.get("visible", False))
+        self.assertTrue(ed.menu_view_btn.components.get("visible", False))
+
+        # Close Inspector via close button
+        orig_hier_h = ed.hierarchy.h
+        ed.close_inspector_btn.action()
+        self.assertFalse(ed.inspector.components.get("visible", False))
+        self.assertFalse(ed.close_inspector_btn.components.get("visible", False))
+
+        # Hierarchy expanded to fill left column and splitter is hidden
+        self.assertGreater(ed.hierarchy.h, orig_hier_h + 100)
+        self.assertFalse(ed.hierarchy_splitter.components.get("visible", False))
+
+        # Restore Inspector from View menu
+        ed.app.systems["app"].namespace["toggle_panel_view"]("inspector")
+
+        # Inspector is restored and visible
+        self.assertTrue(ed.inspector.components.get("visible", False))
+        self.assertTrue(ed.close_inspector_btn.components.get("visible", False))
+        self.assertTrue(ed.hierarchy_splitter.components.get("visible", False))
+        # Hierarchy returned to its upper half and inspector is below it
+        self.assertLess(ed.hierarchy.h, orig_hier_h + 50)
+        self.assertGreater(ed.inspector.y, ed.hierarchy.y)
