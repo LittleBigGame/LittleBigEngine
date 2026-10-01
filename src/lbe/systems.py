@@ -41,6 +41,9 @@ class Assets:
             self._systems[path] = previous
         return previous
 
+    def invalidate(self, path):
+        self._systems.pop(Path(path).resolve(), None)
+
     def resolve(self, key):
         """Resolve a path, UUID, or AssetRef to an asset object or resolved Path."""
         from uuid import UUID
@@ -58,10 +61,13 @@ class Assets:
                     uid = None
             if uid is not None and self.registry:
                 p = self.registry.get_path(uid)
-                if p is not None:
-                    if p.suffix.lower() == ".py":
-                        return self.system(p)
-                    return p
+                if p is None:
+                    raise KeyError(uid)
+                if not p.exists():
+                    raise FileNotFoundError(p)
+                return self.system(p) if p.suffix.lower() == ".py" else p
+            if uid is not None:
+                raise KeyError(uid)
         p = Path(key)
         if p.suffix.lower() == ".py" and p.exists():
             return self.system(p)
@@ -70,7 +76,7 @@ class Assets:
     def get(self, key, default=None):
         try:
             return self.resolve(key)
-        except Exception:
+        except (KeyError, FileNotFoundError):
             return default
 
     def __getitem__(self, key):
@@ -116,6 +122,7 @@ class SystemInstance:
             "__name__": f"lbe_script_{self.entity.id.hex}_{self.name}",
             "__file__": self.definition.path,
             "entity": self.entity,
+            "runtime": runtime,
             "system": self,
             "systems": self.entity.systems,
             "create": runtime.create,
@@ -267,3 +274,17 @@ class Systems(MutableMapping):
         items.insert(index, pair)
         self._values = dict(items)
         self._entity._changed("system.reorder", name)
+
+    def relocate(self, name, path, *, new_name=None):
+        """Change source identity without restarting behavior or reordering attachments."""
+        instance = self[name]
+        new_name = new_name or name
+        if new_name != name and new_name in self._values:
+            raise ValueError(f"System {new_name!r} is already attached")
+        definition = SystemDefinition(instance.definition.source, str(path))
+        self._values = {new_name if key == name else key: value for key, value in self._values.items()}
+        instance.name = new_name
+        instance.definition = definition
+        instance.namespace["__file__"] = str(path)
+        self._entity._changed("system.relocate", new_name)
+        return instance

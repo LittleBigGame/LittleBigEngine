@@ -1,19 +1,9 @@
 """Hierarchy panel entity system."""
 
-from lbe.ui import put, contains, PANEL, INK
+from lbe.ui import bind_callbacks, put, contains, PANEL, INK
 
 
-class StateProxy:
-    def __getattr__(self, name):
-        s = entity.root.components.get("application_state")
-        return getattr(s, name)
-
-    def __setattr__(self, name, value):
-        s = entity.root.components.get("application_state")
-        setattr(s, name, value)
-
-
-state = StateProxy()
+state = entity.inherit("application_state")
 selected = lambda: state.selected()
 select = lambda target: state.select(target)
 message = lambda text: state.message(text)
@@ -43,8 +33,8 @@ def hierarchy_sync():
     while len(state.hierarchy_rows) < capacity:
         row = state.ui.create(state.hierarchy, f'HierarchyRow{len(state.hierarchy_rows)}', 'button', text='', indent=0,
                               normal_color=PANEL, hover_color=(35, 45, 58))
-        row.on_click = hierarchy_click
-        row.on_drag = hierarchy_row_drag
+        row.on_click = state.hierarchy_click
+        row.on_drag = state.hierarchy_row_drag
         state.hierarchy_rows.append(row)
     has_scroll = len(visible) > capacity and capacity > 0
     row_w = state.hierarchy.w - 20 if has_scroll else state.hierarchy.w - 16
@@ -155,19 +145,28 @@ def hierarchy_row_drag(row, event):
 
 
 def start():
-    state.hierarchy_sync = hierarchy_sync
-    state.hierarchy_click = hierarchy_click
-    state.hierarchy_row_drag = hierarchy_row_drag
-    state.hierarchy_scroll_drag = hierarchy_scroll_drag
-    state.hierarchy_track_click = hierarchy_track_click
+    global _release
+    _release = bind_callbacks(system, state, {
+        "hierarchy_sync": hierarchy_sync,
+        "hierarchy_click": hierarchy_click,
+        "hierarchy_row_drag": hierarchy_row_drag,
+        "hierarchy_scroll_drag": hierarchy_scroll_drag,
+        "hierarchy_track_click": hierarchy_track_click,
+    })
     if hasattr(state, "hierarchy_scroll_thumb"):
-        state.hierarchy_scroll_thumb.on_drag = hierarchy_scroll_drag
+        state.hierarchy_scroll_thumb.on_drag = state.hierarchy_scroll_drag
     if hasattr(state, "hierarchy_scroll_track"):
-        state.hierarchy_scroll_track.on_click = hierarchy_track_click
+        state.hierarchy_scroll_track.on_click = state.hierarchy_track_click
     for row in getattr(state, "hierarchy_rows", ()):
-        row.on_click = hierarchy_click
-        row.on_drag = hierarchy_row_drag
+        row.on_click = state.hierarchy_click
+        row.on_drag = state.hierarchy_row_drag
 
 
 def update(dt):
     hierarchy_sync()
+
+
+def stop():
+    release = globals().get("_release")
+    if release:
+        release()

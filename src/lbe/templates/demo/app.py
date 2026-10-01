@@ -2,8 +2,10 @@
 
 import math
 import random
+from lbe.space import world_bounds
 
 game = create(parent=entity, name="Game", tags=["root"])
+space.configure(scope=game, bounds_fn=world_bounds)
 camera = create(parent=entity, name="Camera", x=0.0, y=0.0, zoom=48.0)
 viewport = create(parent=entity, name="Viewport", x=0, y=0, w=window.width, h=window.height)
 game.relations["camera"] = camera
@@ -46,6 +48,9 @@ def spawn_spark(x, y):
 
 def update(dt):
     viewport.w, viewport.h = window.width, window.height
+    for event in input.drain() if input is not None else ():
+        if event[0] == "key":
+            on_key(event)
     if dt <= 0:
         return
 
@@ -53,7 +58,7 @@ def update(dt):
     speed = 6.0
     vx = 0.0
     vy = 0.0
-    if hasattr(input, "is_key_down"):
+    if input is not None:
         if input.is_key_down("LEFT") or input.is_key_down("A"):
             vx -= speed
         if input.is_key_down("RIGHT") or input.is_key_down("D"):

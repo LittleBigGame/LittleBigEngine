@@ -67,8 +67,8 @@ def draw():
                 w = node.components.get("w", 1.0)
                 h = node.components.get("h", 1.0)
                 # Only draw if on-screen (viewport culling)
-                if (x + w >= view_min_x and x <= view_max_x and
-                    y + h >= view_min_y and y <= view_max_y):
+                if (max(x, x + w) >= view_min_x and min(x, x + w) <= view_max_x and
+                    max(y, y + h) >= view_min_y and min(y, y + h) <= view_max_y):
                     layer = node.components.get("layer", 1)
                     graphics.rect(x, y, w, h, color=color, key=node.id, layer=layer)
             for child in node.children:

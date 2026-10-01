@@ -45,7 +45,9 @@ def build_prelude(context=()):
         "from lbe.desktop import Graphics as _Graphics, Input as _Input\n"
         "from lbe.space import SpatialIndex as _Space\n"
         "from pathlib import Path as _Path\n"
-        "from uuid import UUID as _UUID\n\n"
+        "from uuid import UUID as _UUID\n"
+        "from lbe.systems import Assets as _Assets, Systems as _Systems\n\n"
+        "from typing import Iterable as _Iterable\n\n"
     )
 
     if not isinstance(context, dict):
@@ -75,10 +77,9 @@ def build_prelude(context=()):
 
     owner_info = context.get('owner', {})
     owner_comps = owner_info.get('components', {})
-    entities_info = context.get('entities', {})
     all_comps = context.get('all_components', {})
 
-    # 1. _GameEntity representing query child results with all known game components
+    # Query results expose known project components for static suggestions.
     prelude += "class _GameEntity(_Entity):\n    pass\n"
     for name, type_name in sorted(all_comps.items()):
         if name.isidentifier() and not keyword.iskeyword(name):
@@ -86,36 +87,7 @@ def build_prelude(context=()):
             prelude += f"    {name}: {type_str}\n"
     prelude += "\n"
 
-    # 2. Specific classes for each named live game entity
-    entity_class_names = {}
-    for ent_name, ent_data in sorted(entities_info.items()):
-        if ent_name.isidentifier() and not keyword.iskeyword(ent_name):
-            cls_name = f"_Entity_{ent_name}"
-            entity_class_names[ent_name] = cls_name
-            prelude += f"class {cls_name}(_Entity):\n    pass\n"
-            for c_name, c_type in sorted(ent_data.get('components', {}).items()):
-                if c_name.isidentifier() and not keyword.iskeyword(c_name):
-                    type_str = TYPE_MAP.get(c_type, 'object')
-                    prelude += f"    {c_name}: {type_str}\n"
-            prelude += "\n"
-
-    # 3. Direct entity symbols and entities namespace container
-    namespace_fields = []
-    for ent_name, cls_name in entity_class_names.items():
-        prelude += f"{ent_name}: {cls_name}\n"
-        lower_name = ent_name.lower()
-        if lower_name != ent_name and lower_name.isidentifier() and not keyword.iskeyword(lower_name):
-            prelude += f"{lower_name}: {cls_name}\n"
-        namespace_fields.append((ent_name, cls_name))
-        if lower_name != ent_name and lower_name.isidentifier() and not keyword.iskeyword(lower_name):
-            namespace_fields.append((lower_name, cls_name))
-
-    prelude += "class _EntitiesNamespace:\n    pass\n"
-    for f_name, cls_name in namespace_fields:
-        prelude += f"    {f_name}: {cls_name}\n"
-    prelude += "entities: _EntitiesNamespace\n\n"
-
-    # 4. _OwnerEntity representing the owner/attached entity
+    # The attached owner has its own component schema.
     prelude += "class _OwnerEntity(_Entity):\n    pass\n"
     for name, type_name in sorted(owner_comps.items()):
         if name.isidentifier() and not keyword.iskeyword(name):
@@ -123,17 +95,20 @@ def build_prelude(context=()):
             prelude += f"    {name}: {type_str}\n"
     prelude += "entity: _OwnerEntity\n\n"
 
-    # 5. Injected services, functions, and standard update dt
+    # Runtime resolution yields an entity; known project components refine its static view.
     prelude += (
-        "def query(*components: str) -> list[_GameEntity]: pass\n"
-        "def resolve(name_or_uuid: str) -> _Entity: pass\n"
-        "def create(parent: _Entity = None, tags: tuple = (), **components) -> _Entity: pass\n"
-        "def destroy(entity: _Entity) -> None: pass\n"
+        "def resolve(name_or_uuid: str | _UUID) -> _GameEntity: pass\n"
+        "def query(*components: str, tags=()) -> _Iterable[_GameEntity]: pass\n"
+    )
+    prelude += (
         "runtime: _Runtime\n"
-        "systems: dict\n"
-        "events: object\n"
-        "changes: object\n"
-        "assets: object\n"
+        "systems: _Systems\n"
+        "create = runtime.create\n"
+        "destroy = runtime.destroy\n"
+        "events = runtime.events\n"
+        "changes = runtime.changes\n"
+        "assets: _Assets\n"
+        "asset = assets.resolve\n"
         "graphics: _Graphics\n"
         "input: _Input\n"
         "space: _Space\n"
@@ -267,4 +242,3 @@ def hover_info(source, line, column, path, context=()):
 def request_hover(source, line, column, path, context=()):
     """Serialize hover analysis off the render thread."""
     return _worker.submit(hover_info, source, line, column, path, context)
-

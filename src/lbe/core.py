@@ -101,12 +101,28 @@ class Relations(MutableMapping):
         if not isinstance(key, str) or not key:
             raise ValueError("Relation names must be nonempty strings")
         self._entity.runtime._validate(target)
+        if target._destroying:
+            raise RuntimeError("Cannot link to an entity during destruction")
+        runtime = self._entity.runtime
+        previous = self._values.get(key)
+        if previous is not None:
+            incoming = runtime._incoming.get(previous)
+            if incoming is not None:
+                incoming.discard((self._entity, key))
+                if not incoming:
+                    runtime._incoming.pop(previous, None)
         self._values[key] = target
+        runtime._incoming.setdefault(target, set()).add((self._entity, key))
         self._entity._changed("relation.set", key)
 
     def __delitem__(self, key):
         self._entity._check()
-        del self._values[key]
+        target = self._values.pop(key)
+        incoming = self._entity.runtime._incoming.get(target)
+        if incoming is not None:
+            incoming.discard((self._entity, key))
+            if not incoming:
+                self._entity.runtime._incoming.pop(target, None)
         self._entity._changed("relation.remove", key)
 
     def __iter__(self):
@@ -177,6 +193,10 @@ class Entity:
 
     def __repr__(self):
         return f"Entity({self.id}, alive={self.alive})"
+
+    def __deepcopy__(self, memo):
+        # An identity handle must never clone its owning runtime.
+        return self
 
     @property
     def parent(self):
@@ -306,6 +326,7 @@ class Runtime:
         from .systems import Assets
 
         self._entities = {}
+        self._incoming = {}
         self.changes = Changes()
         self.events = Events()
         self.assets = Assets()
@@ -376,10 +397,10 @@ class Runtime:
             if not node.alive:
                 continue
             node.systems.clear()
-            for other in self.entities:
-                for key, target in tuple(other.relations.items()):
-                    if target is node:
-                        del other.relations[key]
+            for other, key in tuple(self._incoming.pop(node, ())):
+                if other.alive and other.relations.get(key) is node:
+                    del other.relations[key]
+            node.relations.clear()
             if node._parent is not None:
                 node._parent._children.remove(node)
             object.__setattr__(node, "_parent", None)
