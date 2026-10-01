@@ -460,6 +460,18 @@ class UI:
             self.mouse_pos = (event[1], event[2])
 
         if dispatch_menu(self, event):
+            if kind == 'release':
+                self.root.relations.pop('text_drag', None)
+                for name in ('entity_drag', 'asset_drag', 'dock_drag'):
+                    self.root.components.pop(name, None)
+                active_drag = self.root.relations.pop('active_drag', None)
+                if active_drag is not None:
+                    if any(tag in active_drag.tags for tag in ('splitter', 'scrollbar_thumb', 'button', 'chip')):
+                        normal = active_drag.components.get('normal_color', active_drag.components.get('color', FIELD))
+                        put(active_drag, color=normal)
+                    callback = active_drag.components.get('on_release')
+                    if callback:
+                        callback(active_drag, event)
             return
         if kind == "motion":
             mx, my = event[1], event[2]

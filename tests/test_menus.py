@@ -140,3 +140,22 @@ class MenuTests(unittest.TestCase):
         self.assertEqual(len(records), 2)
         self.assertIn('append', records[0].detail)
         self.assertFalse(self.runtime.events.errors)
+
+    def test_popup_release_cancels_underlying_drags_without_dropping(self):
+        released, dropped = [], []
+        handle = self.ui.splitter(self.root, 'Handle', x=10,y=10,w=10,h=100)
+        handle.on_release = lambda control,event: released.append(control)
+        self.root.relations['active_drag'] = handle
+        self.root.relations['text_drag'] = handle
+        for name in ('entity', 'asset', 'dock'):
+            self.root.components[name+'_drag'] = {'value': name}
+            self.root.components['on_'+name+'_drop'] = lambda data,event: dropped.append(data)
+        menu = open_menu(self.ui, object(), 100,100, [dict(label='Run',run=lambda target:None)])
+        self.ui.dispatch(('release',110,110,1,0))
+        self.assertNotIn('active_drag', self.root.relations)
+        self.assertNotIn('text_drag', self.root.relations)
+        self.assertEqual(released, [handle])
+        self.assertEqual(dropped, [])
+        for name in ('entity_drag','asset_drag','dock_drag'):
+            self.assertNotIn(name, self.root.components)
+        self.assertTrue(menu.alive)
