@@ -4,6 +4,22 @@ from lbe.activity import ActivityLog
 
 
 class ActivityTests(unittest.TestCase):
+    def test_editor_errors_remain_visible_with_editor_noise_disabled(self):
+        runtime = Runtime()
+        self.addCleanup(runtime.close)
+        log = ActivityLog(runtime)
+        owner = runtime.create(tags=['ui'])
+        owner.systems.attach('broken', SystemDefinition('def update(dt):\n    raise ValueError("editor failure")'))
+        runtime.step(0)
+        self.assertTrue(any(r.kind == 'system.error' for r in log.view()))
+        self.assertFalse(any(r.kind == 'system.call' for r in log.view()))
+        log.clear()
+        excluded = runtime.create(tags=['ui'])
+        log.exclude(excluded)
+        excluded.systems.attach('panel_error', SystemDefinition('def update(dt):\n    raise ValueError("log panel failure")'))
+        runtime.step(0)
+        self.assertTrue(any(r.kind == 'system.error' and 'log panel failure' in r.detail for r in log.view()))
+
     def test_mutations_have_immutable_values_and_system_source(self):
         runtime = Runtime()
         log = ActivityLog(runtime)

@@ -60,7 +60,7 @@ class ActivityLog:
         entity = change.entity
         current = entity
         while current is not None:
-            if current.id in self.excluded:
+            if current.id in self.excluded and not change.kind.endswith('error'):
                 if change.kind == 'entity.destroy':
                     self.excluded.discard(entity.id)
                 return
@@ -115,5 +115,5 @@ class ActivityLog:
 
     def view(self, *, include_editor=False, text=''):
         needle = text.casefold()
-        return tuple(r for r in self.records if (include_editor or not r.editor)
+        return tuple(r for r in self.records if (include_editor or not r.editor or r.kind.endswith('error'))
                      and (not needle or needle in (r.kind+' '+r.target+' '+r.source+' '+r.detail).casefold()))

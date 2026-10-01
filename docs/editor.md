@@ -192,7 +192,7 @@ value snapshots. Arbitrary objects use safe type descriptions; `touch()` cannot
 recover an unknown prior in-place value. Direct internal Python mutations and
 arbitrary Python function calls are not automatically intercepted.
 
-Game activity is shown by default. **Editor** enables editor activity capture;
+Game activity and errors are shown by default, including editor and log-panel system failures. **Editor** enables routine editor activity capture;
 **Calls** includes noisy per-frame update/draw entries. Filter by kind, target,
 source or value; use the wheel to review history. **Pause** stops capture without
 pausing the game, **Clear** clears retained records, and **X** hides the panel.
