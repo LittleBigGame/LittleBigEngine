@@ -20,7 +20,7 @@ class AssetRescanTests(unittest.TestCase):
             registry.scan()
             new_id = registry.get_id(old)
             self.assertNotEqual(new_id, original_id)
-            self.assertEqual(registry.get_path(original_id), renamed)
+            self.assertTrue(registry.get_path(original_id).samefile(renamed))
             registry.scan()
             self.assertEqual(registry.get_id(old), new_id)
             loaded = AssetRegistry(root)

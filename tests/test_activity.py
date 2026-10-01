@@ -4,6 +4,21 @@ from lbe.activity import ActivityLog
 
 
 class ActivityTests(unittest.TestCase):
+    def test_creation_records_capture_initial_state_without_retaining_mutable_values(self):
+        runtime = Runtime()
+        self.addCleanup(runtime.close)
+        log = ActivityLog(runtime)
+        parent = runtime.create(name='World')
+        inventory = ['key']
+        owner = runtime.create(parent=parent, tags=['player'], name='Player', health=100, inventory=inventory)
+        record = next(r for r in log.records if r.kind == 'entity.create' and str(owner.id) in r.target)
+        self.assertIn('health', record.detail)
+        self.assertIn('100', record.detail)
+        self.assertIn('player', record.detail)
+        self.assertIn(str(parent.id), record.detail)
+        inventory.append('coin')
+        self.assertNotIn('coin', record.detail)
+
     def test_editor_errors_remain_visible_with_editor_noise_disabled(self):
         runtime = Runtime()
         self.addCleanup(runtime.close)
@@ -238,3 +253,31 @@ class ActivityTests(unittest.TestCase):
             self.assertNotIn('on_drag', panel.components)
             self.assertNotIn(panel.id, runtime.services['log'].excluded)
             self.assertFalse(runtime.changes.errors)
+
+    def test_repeated_panel_lifecycle_does_not_leak_entities_or_observers(self):
+        import tempfile
+        from types import SimpleNamespace
+        from lbe.desktop import Input
+        from lbe.project import load_project, template_path
+        from test_scene import RecordingGraphics
+        with tempfile.TemporaryDirectory() as folder:
+            runtime = load_project(SimpleNamespace(width=1440,height=900), RecordingGraphics(),
+                                   Input(), folder, template=template_path('editor'))
+            self.addCleanup(runtime.close)
+            runtime.step(0)
+            runtime.step(0)
+            app = runtime.entities[0]
+            log = runtime.services['log']
+            baseline = len(runtime.entities), len(runtime.events._observers)
+            for cycle in range(12):
+                app.application_state.ui.dispatch(('key','L',True,False))
+                panel = app.relations['system_log_panel']
+                panel.systems.reload('system_log', panel.systems['system_log'].definition)
+                runtime.step(0)
+                runtime.destroy(panel)
+                self.assertNotIn('system_log_panel', app.relations)
+                self.assertNotIn(panel.id, log.excluded)
+                self.assertEqual((len(runtime.entities),len(runtime.events._observers)), baseline)
+            self.assertFalse(runtime.changes.errors)
+            self.assertFalse(runtime.events.errors)
+            self.assertTrue(all(not s.errors for e in runtime.entities for s in e.systems.values()))

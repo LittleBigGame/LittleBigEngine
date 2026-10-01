@@ -188,7 +188,8 @@ header to move it; drag the lower-right handle to resize it.
 The log records entity/component/tag/relation/hierarchy changes, system lifecycle
 entry points, named events, UI actions and failures. Select a row to inspect its
 target, responsible system/phase and details, including bounded before/after
-value snapshots. Arbitrary objects use safe type descriptions; `touch()` cannot
+value snapshots. Creation records include initial components, tags and parent.
+Arbitrary objects use safe type descriptions; `touch()` cannot
 recover an unknown prior in-place value. Direct internal Python mutations and
 arbitrary Python function calls are not automatically intercepted.
 
