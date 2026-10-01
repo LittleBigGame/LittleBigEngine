@@ -195,7 +195,8 @@ arbitrary Python function calls are not automatically intercepted.
 
 Game activity and errors are shown by default, including editor and log-panel system failures. **Editor** enables routine editor activity capture;
 **Calls** includes noisy per-frame update/draw entries. Filter by kind, target,
-source or value; use the wheel to review history. **Pause** stops capture without
+source or value; use the wheel to review history. Changing filters clears a
+selection that no longer matches. **Pause** stops capture without
 pausing the game, **Clear** clears retained records, and **X** hides the panel.
 The buffer retains at most 2,000 entries and does not persist session logs.
 

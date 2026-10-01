@@ -111,10 +111,13 @@ def update(dt):
         x += w+4
     put(controls['FilterLog'], x=x, y=y, w=max(0, entity.x+entity.w-8-x))
     records = log.view(include_editor=log.include_editor, text=controls['FilterLog'].buffer.text)
+    if entity.selected_record is not None and entity.selected_record not in records:
+        entity.selected_record = None
     row_count = max(0, min(8, int((entity.h-160)//22)))
     entity.offset = min(entity.offset, max(0, len(records)-row_count))
     end = len(records)-entity.offset
     displayed = records[max(0, end-row_count):end] if row_count else ()
+    selected = entity.selected_record or (displayed[-1] if displayed else None)
     summary = controls['LogSummary']
     put(summary, x=entity.x+8, y=y+30, w=width,
         text=f'{len(records)} matching / {len(log.records)} retained | wheel: history | click: details | capture: {"paused" if log.paused else "live"}')
@@ -122,9 +125,10 @@ def update(dt):
         row = controls[f'LogRow{i}']
         record = displayed[i] if i < len(displayed) else None
         put(row, x=entity.x+8, y=y+54+i*22, w=width, visible=record is not None,
+            color=ACCENT if record is not None and record is selected else FIELD,
             text=f'#{record.sequence} {record.time:.2f}s {record.kind} | {record.target}' if record else '',
             action=lambda r=record: setattr(entity, 'selected_record', r))
-    record = entity.selected_record or (displayed[-1] if displayed else None)
+    record = selected
     for i, (name, text) in enumerate((('LogTarget', 'Target: '+record.target if record else ''),
                                       ('LogSource', 'Source: '+record.source if record else ''),
                                       ('LogDetail', record.detail if record else ''))):

@@ -143,6 +143,12 @@ class ActivityTests(unittest.TestCase):
             runtime.step(0)
             self.assertTrue(any(r.kind == 'component.set' and 'test_value' in r.detail for r in runtime.services['log'].view()))
             self.assertTrue(any(c.text and 'test_value' in c.text for c in panel.children if 'text' in c.components))
+            controls = {c.name:c for c in panel.children}
+            panel.selected_record = next(r for r in runtime.services['log'].view() if 'test_value' in r.detail)
+            controls['FilterLog'].buffer.text = 'no matching audit record'
+            runtime.step(0)
+            self.assertIsNone(panel.selected_record)
+            self.assertEqual(controls['LogDetail'].text, '')
             state.save_editor_project()
             self.assertFalse(runtime.changes.errors)
             self.assertFalse(runtime.events.errors)
