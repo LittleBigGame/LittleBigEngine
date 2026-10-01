@@ -17,6 +17,23 @@ except ImportError:
 
 
 class EditorTests(unittest.TestCase):
+    def test_active_tabs_keep_panel_border_colour_without_hover_and_attach_text_fits(self):
+        ed = self.editor
+        hierarchy = next(b for b in ed.dock_tab_buttons if b.text == 'HIERARCHY')
+        files = next(b for b in ed.dock_tab_buttons if b.text == 'PROJECT FILES')
+        self.send(('motion',1400,880))
+        self.assertEqual(hierarchy.color, ed.hierarchy.border_color)
+        self.assertNotEqual(files.color, hierarchy.color)
+        self.click(files)
+        self.send(('motion',1400,880))
+        self.assertEqual(files.color, ed.file_explorer.border_color)
+        self.assertNotEqual(hierarchy.color, files.color)
+        self.graphics.texts.clear()
+        ed.ui.draw()
+        drawn = [args[0] for args,kwargs in self.graphics.texts
+                 if kwargs.get('key') == (ed.add_system_button.id,'text')]
+        self.assertEqual(drawn, ['+ Attach'])
+
     def test_viewport_content_is_separate_from_tabs_and_hidden_rendering_stops(self):
         ed = self.editor
         self.assertIs(ed.viewport.parent, ed.viewport_panel)

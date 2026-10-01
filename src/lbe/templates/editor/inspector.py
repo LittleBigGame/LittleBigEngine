@@ -285,7 +285,7 @@ def inspector_sync():
     show_sys_title = (cur_y + 22 <= max_bottom)
     put(state.system_label, visible=show_sys_title, x=ip.x + 12, y=cur_y, w=max(80, ip.w - 24 - 80), h=22,
         text=f"{'▶' if sys_collapsed else '▼'} SYSTEMS ({len(systems)})")
-    sys_btn_w = 70
+    sys_btn_w = len('+ Attach') * state.ui.pitch + 16
     put(state.add_system_button, visible=show_sys_title, x=ip.x + ip.w - 12 - sys_btn_w, y=cur_y, w=sys_btn_w, h=22, text='+ Attach')
     cur_y += 26
 

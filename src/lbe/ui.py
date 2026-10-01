@@ -341,6 +341,8 @@ class UI:
 
     def create(self, parent, name, kind, **values):
         defaults = dict(name=name, x=0, y=0, w=0, h=0, visible=True, layer=2, color=PANEL)
+        if kind == 'panel':
+            defaults.update(border_color=(38,55,75), border_width=2, bevel=False)
         defaults.update(values)
         return self.runtime.create(parent=parent, tags=["ui", kind], **defaults)
 
@@ -1028,6 +1030,14 @@ class UI:
                     graphics.rect(control.x, control.y, control.w, 1, (*INK[:3], 35), key=(control.id, 'bevel_top'), layer=layer+1)
                     graphics.rect(control.x, control.y+control.h-1, control.w, 1, (*BG, 180), key=(control.id, 'bevel_bottom'), layer=layer+1)
                 accent = control.components.get('accent_color')
+                border = control.components.get('border_color')
+                if border is not None:
+                    thickness = max(1, control.components.get('border_width', 1))
+                    for edge, (x,y,w,h) in enumerate(((control.x,control.y,control.w,thickness),
+                            (control.x,control.y+control.h-thickness,control.w,thickness),
+                            (control.x,control.y,thickness,control.h),
+                            (control.x+control.w-thickness,control.y,thickness,control.h))):
+                        graphics.rect(x,y,w,h,border,key=(control.id,'border',edge),layer=layer+1)
                 if accent is not None:
                     graphics.rect(control.x, control.y+control.h-2, control.w, 2, accent, key=(control.id, 'accent'), layer=layer+1)
             if "field" in control.tags:

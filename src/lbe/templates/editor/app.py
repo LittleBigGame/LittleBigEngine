@@ -809,6 +809,9 @@ def layout():
             put(state.close_code_btn, visible=False)
 
     # Dynamic Tab Buttons for all panel groups (title bars + tab selectors)
+    panel_border = (38, 55, 75)
+    for panel in (state.hierarchy, state.file_explorer, state.inspector, state.viewport_panel, state.code_panel):
+        put(panel, border_color=panel_border, border_width=2, bevel=False)
     tab_btn_idx = 0
     if hasattr(state, "dock_tree") and hasattr(state, "dock_tab_buttons"):
         for group in state.dock_tree.all_tab_groups():
@@ -840,19 +843,14 @@ def layout():
                 btn.on_click = lambda c, ev, a=act: a()
                 btn.on_drag = _make_drag(p_name)
 
-                if len(group.panels) == 1:
-                    tab_bg = (30, 42, 58)
-                    tab_hover = (42, 58, 78)
-                    tab_ink = INK
-                else:
-                    tab_bg = (38, 55, 75) if is_active else PANEL
-                    tab_hover = (50, 75, 105) if is_active else (45, 60, 80)
-                    tab_ink = INK if is_active else MUTED
-
-                # Don't set 'color' — let normal_color/hover_color drive it to avoid flashing
+                tab_ink = INK if is_active else MUTED
+                tab_bg = panel_border if is_active else PANEL
+                tab_hover = panel_border if is_active else (45, 60, 80)
+                mouse = getattr(state.ui, 'mouse_pos', (-1, -1))
+                hovered = tx <= mouse[0] < tx+tw and ty <= mouse[1] < ty+th
                 put(btn, visible=True, x=tx, y=ty, w=tw, h=th, text=p_display,
                     normal_color=tab_bg, hover_color=tab_hover, ink=tab_ink, layer=4,
-                    accent_color=ACCENT if is_active else None)
+                    color=tab_hover if hovered else tab_bg, bevel=False, accent_color=None)
 
         for i in range(tab_btn_idx, len(state.dock_tab_buttons)):
             put(state.dock_tab_buttons[i], visible=False)

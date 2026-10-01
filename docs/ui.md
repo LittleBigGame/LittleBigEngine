@@ -140,7 +140,9 @@ length, so subsequent editing remains valid after contents are shortened.
 
 ## Subtle control decoration
 
-Panels, fields and raised buttons draw faint top and bottom bevel lines using
+Fields and raised buttons draw faint top and bottom bevel lines using
 the existing palette. Set `bevel=False` for flat controls, or `bevel=True` to
 request the effect explicitly. Set `accent_color` to draw a thin bottom accent
-line; tab selectors use this to distinguish the active panel.
+line. Panels use a subdued dark-blue border by default. Set `border_color` and
+`border_width` to customise it, or `border_color=None` to disable it. Editor
+active tabs share their panel border colour and remain distinct without hover.
