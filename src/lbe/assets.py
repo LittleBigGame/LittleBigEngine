@@ -91,7 +91,13 @@ class AssetRegistry:
         existing = self._path_to_id.get(key)
         uid = UUID(str(asset_id)) if asset_id is not None else existing or uuid.uuid5(uuid.NAMESPACE_URL, f"lbe://{key}")
         if uid in self._entries and self._key(self._entries[uid]["path"]) != key:
-            raise ValueError(f"Asset identity {uid} already belongs to another path")
+            if asset_id is not None:
+                raise ValueError(f"Asset identity {uid} already belongs to another path")
+            # A renamed asset retains its UUID. Recreating its former path is a
+            # new asset, even though the deterministic path UUID is still owned.
+            uid = uuid.uuid4()
+            while uid in self._entries:
+                uid = uuid.uuid4()
         previous = self._entries.get(existing, {})
         entry = {"path": relative, "type": asset_type or previous.get("type", self.infer_type(relative)),
                  "name": name or previous.get("name", Path(relative).name)}
