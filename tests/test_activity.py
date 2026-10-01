@@ -149,6 +149,16 @@ class ActivityTests(unittest.TestCase):
             runtime.step(0)
             self.assertIsNone(panel.selected_record)
             self.assertEqual(controls['LogDetail'].text, '')
+            controls['FilterLog'].buffer.text = 'history_probe'
+            for value in range(20):
+                state.game.history_probe = value
+            runtime.step(0)
+            panel.offset = 3
+            runtime.step(0)
+            before = tuple(controls[f'LogRow{i}'].text for i in range(8))
+            state.game.history_probe = 20
+            runtime.step(0)
+            self.assertEqual(tuple(controls[f'LogRow{i}'].text for i in range(8)), before)
             state.save_editor_project()
             self.assertFalse(runtime.changes.errors)
             self.assertFalse(runtime.events.errors)

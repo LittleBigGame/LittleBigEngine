@@ -111,6 +111,19 @@ def update(dt):
         x += w+4
     put(controls['FilterLog'], x=x, y=y, w=max(0, entity.x+entity.w-8-x))
     records = log.view(include_editor=log.include_editor, text=controls['FilterLog'].buffer.text)
+    filter_key = (log.include_editor, controls['FilterLog'].buffer.text)
+    previous_filter = entity.components.get('history_filter')
+    previous_tail = entity.components.get('history_tail')
+    if previous_filter != filter_key:
+        entity.offset = 0
+    elif entity.offset and previous_tail is not None:
+        tail_index = next((i for i,r in enumerate(records) if r.sequence == previous_tail), None)
+        if tail_index is not None:
+            entity.offset += len(records)-1-tail_index
+        elif records:
+            entity.offset = len(records)
+    entity.history_filter = filter_key
+    entity.history_tail = records[-1].sequence if records else None
     if entity.selected_record is not None and entity.selected_record not in records:
         entity.selected_record = None
     row_count = max(0, min(8, int((entity.h-160)//22)))
