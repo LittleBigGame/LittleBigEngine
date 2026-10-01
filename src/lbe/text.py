@@ -157,15 +157,18 @@ class TextBuffer:
         self.cursor = self.anchor = start + len(text)
 
     def delete(self, backward=True):
+        before = self._snapshot()
         if self.cursor == self.anchor:
             self.anchor = max(0, self.cursor - 1) if backward else min(len(self.text), self.cursor + 1)
         if self.cursor != self.anchor:
             self.insert("")
+            self._undo[-1] = before
 
     def delete_word(self, backward=True):
         if self.cursor != self.anchor:
             self.insert("")
             return
+        before = self._snapshot()
         orig = self.cursor
         if backward:
             target = orig
@@ -203,6 +206,7 @@ class TextBuffer:
             self.anchor = min(len(self.text), target)
         if self.cursor != self.anchor:
             self.insert("")
+            self._undo[-1] = before
 
     def move(self, direction, select=False):
         row, column = self.position

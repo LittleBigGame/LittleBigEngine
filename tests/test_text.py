@@ -4,6 +4,20 @@ from lbe.text import TextBuffer
 
 
 class TextTests(unittest.TestCase):
+    def test_deletion_undo_restores_original_caret_and_selection(self):
+        for word in (False, True):
+            for backward in (False, True):
+                with self.subTest(word=word, backward=backward):
+                    buffer = TextBuffer('one two')
+                    buffer.cursor = buffer.anchor = 4
+                    delete = buffer.delete_word if word else buffer.delete
+                    delete(backward=backward)
+                    changed = buffer.text, buffer.cursor, buffer.anchor
+                    buffer.undo()
+                    self.assertEqual((buffer.text,buffer.cursor,buffer.anchor), ('one two',4,4))
+                    buffer.undo(redo=True)
+                    self.assertEqual((buffer.text,buffer.cursor,buffer.anchor), changed)
+
     def test_selection_replacement_undo_and_redo(self):
         buffer = TextBuffer("hello world")
         buffer.anchor, buffer.cursor = 6, 11
