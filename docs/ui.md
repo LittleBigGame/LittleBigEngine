@@ -137,3 +137,10 @@ history, without requiring callers to select the replacement range first.
 `ValueError` without changing text or undo history.
 Assigning `buffer.text` clamps the existing caret and selection to the new text
 length, so subsequent editing remains valid after contents are shortened.
+
+## Subtle control decoration
+
+Panels, fields and raised buttons draw faint top and bottom bevel lines using
+the existing palette. Set `bevel=False` for flat controls, or `bevel=True` to
+request the effect explicitly. Set `accent_color` to draw a thin bottom accent
+line; tab selectors use this to distinguish the active panel.

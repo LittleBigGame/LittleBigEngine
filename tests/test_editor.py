@@ -17,6 +17,30 @@ except ImportError:
 
 
 class EditorTests(unittest.TestCase):
+    def test_viewport_content_is_separate_from_tabs_and_hidden_rendering_stops(self):
+        ed = self.editor
+        self.assertIs(ed.viewport.parent, ed.viewport_panel)
+        for panel in ('hierarchy','files','inspector','code_panel'):
+            ed.dock_tree.remove_panel(panel)
+        self.runtime.step(0)
+        group = ed.dock_tree.find_tab_group_with_panel('viewport')
+        self.assertGreaterEqual(ed.viewport.y, group.tab_bar_rect[1]+group.tab_bar_rect[3])
+        self.assertLessEqual(ed.viewport.y+ed.viewport.h, ed.zoom_label.y)
+        self.assertTrue(ed.viewport.visible)
+        render = ed.game.systems['render']
+        ed.dock_tree.remove_panel('viewport')
+        self.runtime.step(0)
+        self.assertFalse(ed.viewport_panel.visible)
+        self.graphics.rectangles.clear()
+        render.call('draw')
+        self.assertEqual(self.graphics.rectangles, [])
+        ed.dock_tree.restore_panel_default('viewport')
+        self.runtime.step(0)
+        self.assertTrue(ed.viewport_panel.visible)
+        self.graphics.rectangles.clear()
+        render.call('draw')
+        self.assertTrue(self.graphics.rectangles)
+
     def test_pair_deletion_and_completion_undo_restore_original_caret(self):
         code = self.editor.code
         self.editor.ui.focus(code)
@@ -426,7 +450,8 @@ class EditorTests(unittest.TestCase):
         # Check reflow
         self.assertEqual((ed.header.x, ed.header.y, ed.header.w, ed.header.h), (0, 0, 1600, 44))
         self.assertEqual((ed.status.x, ed.status.y, ed.status.w, ed.status.h), (16, 975, 1568, 20))
-        self.assertEqual(ed.viewport.w, 1600 - 370 - 24)
+        self.assertEqual(ed.viewport_panel.w, 1600 - 370 - 24)
+        self.assertEqual(ed.viewport.w, ed.viewport_panel.w - 12)
         self.assertEqual(ed.code_panel.w, 1600 - 370 - 24)
 
         # Hit test in reflowed header button
@@ -442,9 +467,9 @@ class EditorTests(unittest.TestCase):
         self.runtime.step(0)
         self.assertEqual(ed.hierarchy.w, 404)
         self.assertEqual(ed.inspector.w, 404)
-        self.assertEqual(ed.viewport.x, 428)
+        self.assertEqual(ed.viewport_panel.x, 428)
         self.assertEqual(ed.code_panel.x, 428)
-        self.assertEqual(ed.viewport.w, 1440 - 420 - 24)
+        self.assertEqual(ed.viewport_panel.w, 1440 - 420 - 24)
 
         # 2. Resize hierarchy panel height from 240 to 300
         ed.hierarchy.panel_h = 300
@@ -456,7 +481,8 @@ class EditorTests(unittest.TestCase):
         ed.code_panel.split_y = 500
         self.runtime.step(0)
         self.assertEqual(ed.code_panel.y, 500)
-        self.assertEqual(ed.viewport.h, 500 - 44 - 48)
+        group = ed.dock_tree.find_tab_group_with_panel('viewport')
+        self.assertEqual(ed.viewport.h, ed.viewport_panel.h-group.tab_bar_rect[3]-32)
 
         # 4. Floating panel: dock="float" preserves custom moved coordinates
         ed.hierarchy.dock = "float"
@@ -900,7 +926,7 @@ class EditorTests(unittest.TestCase):
         # 2. Moving mouse while dragging from outside (e.g. viewport) does NOT initiate splitter resize
         orig_col_w = ed.app.components.get("left_column_w", 370)
         orig_hier_w = ed.hierarchy.w
-        orig_vp_x = ed.viewport.x
+        orig_vp_x = ed.viewport_panel.x
 
         self.send(("click", ed.viewport.x + 20, ed.viewport.y + 20, 1))
         self.send(("drag", ed.col_splitter.x + 2, ed.col_splitter.y + 100, 1, 0, 50, 0))
@@ -914,7 +940,7 @@ class EditorTests(unittest.TestCase):
         self.assertEqual(ed.app.components.get("left_column_w"), orig_col_w + 50)
         self.assertEqual(ed.hierarchy.w, orig_hier_w + 50)
         self.assertEqual(ed.inspector.w, orig_hier_w + 50)
-        self.assertEqual(ed.viewport.x, orig_vp_x + 50)
+        self.assertEqual(ed.viewport_panel.x, orig_vp_x + 50)
         self.assertEqual(ed.code_panel.x, orig_vp_x + 50)
 
         # 4. Drag hierarchy splitter vertically

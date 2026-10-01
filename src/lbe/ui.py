@@ -1023,6 +1023,13 @@ class UI:
             layer = control.components.get("layer", 2)
             if "label" not in control.tags:
                 graphics.rect(control.x, control.y, control.w, control.h, control.color, key=control.id, layer=layer)
+                framed = any(tag in control.tags for tag in ('panel', 'field')) or ('button' in control.tags and control.color != PANEL)
+                if control.components.get('bevel', framed):
+                    graphics.rect(control.x, control.y, control.w, 1, (*INK[:3], 35), key=(control.id, 'bevel_top'), layer=layer+1)
+                    graphics.rect(control.x, control.y+control.h-1, control.w, 1, (*BG, 180), key=(control.id, 'bevel_bottom'), layer=layer+1)
+                accent = control.components.get('accent_color')
+                if accent is not None:
+                    graphics.rect(control.x, control.y+control.h-2, control.w, 2, accent, key=(control.id, 'accent'), layer=layer+1)
             if "field" in control.tags:
                 pitch = control.components.get("pitch", self.pitch)
                 buffer = control.buffer
