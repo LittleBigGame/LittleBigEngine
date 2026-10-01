@@ -193,3 +193,32 @@ class ActivityTests(unittest.TestCase):
             self.assertLessEqual(panel.y+panel.h,window.height)
             self.assertFalse(runtime.changes.errors)
             self.assertTrue(all(not s.errors for e in runtime.entities for s in e.systems.values()))
+
+    def test_log_panel_reload_and_detach_release_owned_controls(self):
+        import tempfile
+        from types import SimpleNamespace
+        from lbe.desktop import Input
+        from lbe.project import load_project, template_path
+        from test_scene import RecordingGraphics
+        with tempfile.TemporaryDirectory() as folder:
+            runtime = load_project(SimpleNamespace(width=1440,height=900), RecordingGraphics(),
+                                   Input(), folder, template=template_path('editor'))
+            self.addCleanup(runtime.close)
+            runtime.step(0)
+            app = runtime.entities[0]
+            app.application_state.ui.dispatch(('key','L',True,False))
+            panel = app.relations['system_log_panel']
+            original = tuple(panel.children)
+            definition = panel.systems['system_log'].definition
+            panel.systems.reload('system_log', definition)
+            self.assertEqual(len(panel.children), len(original))
+            self.assertTrue(all(not child.alive for child in original))
+            custom = runtime.create(parent=panel, name='Custom')
+            replacement = lambda control,event: False
+            panel.on_click = replacement
+            del panel.systems['system_log']
+            self.assertEqual(panel.children, (custom,))
+            self.assertIs(panel.on_click, replacement)
+            self.assertNotIn('on_drag', panel.components)
+            self.assertNotIn(panel.id, runtime.services['log'].excluded)
+            self.assertFalse(runtime.changes.errors)

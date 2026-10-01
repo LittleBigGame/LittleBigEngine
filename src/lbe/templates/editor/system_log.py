@@ -4,6 +4,8 @@ from lbe.ui import put, FIELD, ACCENT, MUTED
 
 
 def start():
+    global owned_controls
+    owned_controls = []
     ui = entity.root.components['ui']
     log.exclude(entity)
     entity.components['log'] = log
@@ -18,14 +20,30 @@ def start():
         ('CallsLog', 'Calls', toggle_calls), ('EditorLog', 'Editor', toggle_editor),
         ('CloseLog', 'X', lambda: setattr(entity, 'visible', False)),
     ):
-        ui.button(entity, name, text, callback, h=26, layer=entity.layer+1)
-    ui.field(entity, 'FilterLog', '', hint='Filter kind, target, source or value', h=26, layer=entity.layer+1)
-    ui.create(entity, 'LogSummary', 'label', text='', h=20, ink=MUTED, layer=entity.layer+1)
+        owned_controls.append(ui.button(entity, name, text, callback, h=26, layer=entity.layer+1))
+    owned_controls.append(ui.field(entity, 'FilterLog', '', hint='Filter kind, target, source or value', h=26, layer=entity.layer+1))
+    owned_controls.append(ui.create(entity, 'LogSummary', 'label', text='', h=20, ink=MUTED, layer=entity.layer+1))
     for i in range(8):
-        ui.button(entity, f'LogRow{i}', '', lambda: None, h=22, layer=entity.layer+1, row_index=i)
+        owned_controls.append(ui.button(entity, f'LogRow{i}', '', lambda: None, h=22, layer=entity.layer+1, row_index=i))
     for name in ('LogTarget', 'LogSource', 'LogDetail'):
-        ui.create(entity, name, 'label', text='', h=20, ink=MUTED, layer=entity.layer+1)
-    ui.splitter(entity, 'LogResize', axis='x', on_drag=resize, layer=entity.layer+2)
+        owned_controls.append(ui.create(entity, name, 'label', text='', h=20, ink=MUTED, layer=entity.layer+1))
+    owned_controls.append(ui.splitter(entity, 'LogResize', axis='x', on_drag=resize, layer=entity.layer+2))
+
+
+def stop():
+    for control in globals().get('owned_controls', ()):
+        if control.alive:
+            runtime.destroy(control)
+    for name, callback in (('on_scroll', scroll), ('on_click', press),
+                           ('on_drag', move), ('on_release', release)):
+        if entity.components.get(name) is callback:
+            del entity.components[name]
+    if entity.root.relations.get('active_drag') is entity:
+        del entity.root.relations['active_drag']
+    entity.components.pop('drag_offset', None)
+    if entity.components.get('log') is log:
+        del entity.components['log']
+    log.excluded.discard(entity.id)
 
 
 def press(control, event):
