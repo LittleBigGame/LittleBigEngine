@@ -144,6 +144,12 @@ class TextBuffer:
         return self.text, self.cursor, self.anchor
 
     def insert(self, text):
+        self.replace(*self.selection, text)
+
+    def replace(self, start, end, text):
+        """Replace a range atomically without changing the pre-edit undo selection."""
+        if not isinstance(start, int) or not isinstance(end, int) or not 0 <= start <= end <= len(self.text):
+            raise ValueError('Replacement range must be within the text')
         self.preferred_column = None
         if not text:
             text = ""
@@ -152,7 +158,6 @@ class TextBuffer:
         self._undo.append(self._snapshot())
         del self._undo[:-200]
         self._redo.clear()
-        start, end = self.selection
         self.text = self.text[:start] + text + self.text[end:]
         self.cursor = self.anchor = start + len(text)
 

@@ -4,6 +4,19 @@ from lbe.text import TextBuffer
 
 
 class TextTests(unittest.TestCase):
+    def test_range_replacement_validation_and_atomic_undo(self):
+        buffer = TextBuffer('abcdef')
+        buffer.cursor = buffer.anchor = 3
+        for start,end in ((-1,2),(3,2),(0,7),(1.5,2)):
+            with self.assertRaises(ValueError):
+                buffer.replace(start,end,'x')
+        self.assertEqual((buffer.text,buffer.cursor,buffer.anchor), ('abcdef',3,3))
+        self.assertFalse(buffer._undo)
+        buffer.replace(1,5,'X')
+        self.assertEqual(buffer.text, 'aXf')
+        buffer.undo()
+        self.assertEqual((buffer.text,buffer.cursor,buffer.anchor), ('abcdef',3,3))
+
     def test_dedent_keeps_caret_on_original_character_before_a_newline(self):
         buffer = TextBuffer('    x\n    y')
         buffer.cursor = buffer.anchor = 5

@@ -337,9 +337,7 @@ def handle_editor_key(control, event):
         if 0 < buffer.cursor < len(buffer.text):
             pair = (buffer.text[buffer.cursor - 1], buffer.text[buffer.cursor])
             if pair in EMPTY_PAIRS:
-                buffer.anchor = buffer.cursor - 1
-                buffer.cursor = buffer.cursor + 1
-                buffer.insert("")
+                buffer.replace(buffer.cursor - 1, buffer.cursor + 1, "")
                 control.components.touch("buffer")
                 return True
 
@@ -366,8 +364,7 @@ def accept_completion(control, state, index):
     end = buffer.cursor
     while end < len(buffer.text) and (buffer.text[end].isalnum() or buffer.text[end] == "_"):
         end += 1
-    buffer.anchor, buffer.cursor = start, end
-    buffer.insert(chosen)
+    buffer.replace(start, end, chosen)
     control.components.touch("buffer")
     dismiss_completion(control, state)
 

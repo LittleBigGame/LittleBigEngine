@@ -17,6 +17,21 @@ except ImportError:
 
 
 class EditorTests(unittest.TestCase):
+    def test_pair_deletion_and_completion_undo_restore_original_caret(self):
+        code = self.editor.code
+        self.editor.ui.focus(code)
+        code.buffer.text = '()'
+        code.buffer.cursor = code.buffer.anchor = 1
+        self.send(('key','BACKSPACE',False,False), ('key','Z',True,False))
+        self.assertEqual((code.buffer.text,code.buffer.cursor,code.buffer.anchor), ('()',1,1))
+        code.buffer.text = 'enti'
+        code.buffer.cursor = code.buffer.anchor = 4
+        state = {'snapshot': ('enti',4,4), 'matches': [('entity','statement')], 'prefix': 'enti'}
+        code.systems['code_editor'].namespace['accept_completion'](code,state,0)
+        self.assertEqual(code.buffer.text, 'entity')
+        self.send(('key','Z',True,False))
+        self.assertEqual((code.buffer.text,code.buffer.cursor,code.buffer.anchor), ('enti',4,4))
+
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
