@@ -29,7 +29,12 @@ class EditorTests(unittest.TestCase):
         self.assertEqual(files.color, ed.file_explorer.border_color)
         self.assertNotEqual(hierarchy.color, files.color)
         self.graphics.texts.clear()
+        self.graphics.rectangles.clear()
         ed.ui.draw()
+        group = ed.dock_tree.find_tab_group_with_panel('files')
+        top_border = next(args for args,kwargs in self.graphics.rectangles
+                          if kwargs.get('key') == (ed.file_explorer.id,'border',0))
+        self.assertEqual(top_border[1], group.tab_bar_rect[1]+group.tab_bar_rect[3])
         drawn = [args[0] for args,kwargs in self.graphics.texts
                  if kwargs.get('key') == (ed.add_system_button.id,'text')]
         self.assertEqual(drawn, ['+ Attach'])

@@ -146,3 +146,5 @@ request the effect explicitly. Set `accent_color` to draw a thin bottom accent
 line. Panels use a subdued dark-blue border by default. Set `border_color` and
 `border_width` to customise it, or `border_color=None` to disable it. Editor
 active tabs share their panel border colour and remain distinct without hover.
+`border_inset` accepts top/right/bottom/left spacing for the frame. Docked editor
+panels use a top inset so their content borders start below the fixed tab strip.

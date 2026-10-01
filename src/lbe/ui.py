@@ -1032,12 +1032,17 @@ class UI:
                 accent = control.components.get('accent_color')
                 border = control.components.get('border_color')
                 if border is not None:
+                    top,right,bottom,left = parse_box(control.components.get('border_inset', 0))
+                    bx,by = control.x+left,control.y+top
+                    bw,bh = max(0,control.w-left-right),max(0,control.h-top-bottom)
                     thickness = max(1, control.components.get('border_width', 1))
-                    for edge, (x,y,w,h) in enumerate(((control.x,control.y,control.w,thickness),
-                            (control.x,control.y+control.h-thickness,control.w,thickness),
-                            (control.x,control.y,thickness,control.h),
-                            (control.x+control.w-thickness,control.y,thickness,control.h))):
-                        graphics.rect(x,y,w,h,border,key=(control.id,'border',edge),layer=layer+1)
+                    if bw and bh:
+                        thickness = min(thickness,bw,bh)
+                        for edge, (x,y,w,h) in enumerate(((bx,by,bw,thickness),
+                                (bx,by+bh-thickness,bw,thickness),
+                                (bx,by,thickness,bh),
+                                (bx+bw-thickness,by,thickness,bh))):
+                            graphics.rect(x,y,w,h,border,key=(control.id,'border',edge),layer=layer+1)
                 if accent is not None:
                     graphics.rect(control.x, control.y+control.h-2, control.w, 2, accent, key=(control.id, 'accent'), layer=layer+1)
             if "field" in control.tags:

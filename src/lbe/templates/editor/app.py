@@ -810,8 +810,11 @@ def layout():
 
     # Dynamic Tab Buttons for all panel groups (title bars + tab selectors)
     panel_border = (38, 55, 75)
-    for panel in (state.hierarchy, state.file_explorer, state.inspector, state.viewport_panel, state.code_panel):
-        put(panel, border_color=panel_border, border_width=2, bevel=False)
+    for name,panel in (('hierarchy',state.hierarchy), ('files',state.file_explorer),
+                       ('inspector',state.inspector), ('viewport',state.viewport_panel), ('code_panel',state.code_panel)):
+        group = state.dock_tree.find_tab_group_with_panel(name)
+        inset = max(0, group.tab_bar_rect[1]+group.tab_bar_rect[3]-panel.y) if group else 0
+        put(panel, border_color=panel_border, border_width=2, border_inset=(inset,0,0,0), bevel=False)
     tab_btn_idx = 0
     if hasattr(state, "dock_tree") and hasattr(state, "dock_tab_buttons"):
         for group in state.dock_tree.all_tab_groups():
