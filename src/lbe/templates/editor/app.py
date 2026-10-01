@@ -335,6 +335,7 @@ def open_edit_menu_dropdown(button):
         {"label": "Inspect Selection", "run": lambda _: open_panel()},
         None,
         {"label": "Reset Default Layout", "run": lambda _: reset_default_layout()},
+        {"label": "System Log (Ctrl+L)", "run": lambda _: open_system_log()},
     ]
     open_menu(state.ui, button, button.x, button.y + button.h + 2, actions=actions)
 
@@ -2116,6 +2117,9 @@ def open_move_file_menu(src_path):
 
 
 def keyboard(event):
+    if event[1] == 'L' and event[2]:
+        open_system_log()
+        return True
     if event[1] == "ESCAPE":
         if not state.path_field.components.get("readonly", True):
             state.path_field.components["readonly"] = True
@@ -2215,8 +2219,21 @@ def start():
     if state is None:
         initialize()
     bind_actions()
+    entity.tags.add('editor')
     if "ui" not in entity.systems:
         state.ui.install(definition=assets.system(project / "ui.py"))
+
+
+def open_system_log():
+    existing = state.app.relations.get('system_log_panel')
+    if existing is not None:
+        existing.visible = not existing.visible
+        return
+    panel = state.ui.create(state.app, 'SystemLogPanel', 'panel', text='SYSTEM LOG',
+                            x=max(0, state.window.width-840), y=80, w=820, h=360,
+                            layer=20, modal=True, dock='float', movable=True, resizable=True)
+    state.app.relations['system_log_panel'] = panel
+    panel.systems.attach('system_log', assets.system(project / 'system_log.py'))
 
 
 def update(dt):

@@ -4,6 +4,52 @@ from lbe.text import TextBuffer
 
 
 class TextTests(unittest.TestCase):
+    def test_replacing_contents_clamps_selection_before_next_edit(self):
+        buffer = TextBuffer('long document')
+        buffer.cursor, buffer.anchor = 13, 5
+        buffer.text = 'x'
+        self.assertEqual((buffer.cursor,buffer.anchor), (1,1))
+        buffer.insert('y')
+        self.assertEqual(buffer.text, 'xy')
+        buffer.undo()
+        self.assertEqual((buffer.text,buffer.cursor,buffer.anchor), ('x',1,1))
+
+    def test_range_replacement_validation_and_atomic_undo(self):
+        buffer = TextBuffer('abcdef')
+        buffer.cursor = buffer.anchor = 3
+        for start,end in ((-1,2),(3,2),(0,7),(1.5,2)):
+            with self.assertRaises(ValueError):
+                buffer.replace(start,end,'x')
+        self.assertEqual((buffer.text,buffer.cursor,buffer.anchor), ('abcdef',3,3))
+        self.assertFalse(buffer._undo)
+        buffer.replace(1,5,'X')
+        self.assertEqual(buffer.text, 'aXf')
+        buffer.undo()
+        self.assertEqual((buffer.text,buffer.cursor,buffer.anchor), ('abcdef',3,3))
+
+    def test_dedent_keeps_caret_on_original_character_before_a_newline(self):
+        buffer = TextBuffer('    x\n    y')
+        buffer.cursor = buffer.anchor = 5
+        buffer.indent(dedent=True)
+        self.assertEqual(buffer.text, 'x\n    y')
+        self.assertEqual(buffer.position, (0, 1))
+        buffer.undo()
+        self.assertEqual((buffer.text,buffer.cursor,buffer.anchor), ('    x\n    y',5,5))
+
+    def test_deletion_undo_restores_original_caret_and_selection(self):
+        for word in (False, True):
+            for backward in (False, True):
+                with self.subTest(word=word, backward=backward):
+                    buffer = TextBuffer('one two')
+                    buffer.cursor = buffer.anchor = 4
+                    delete = buffer.delete_word if word else buffer.delete
+                    delete(backward=backward)
+                    changed = buffer.text, buffer.cursor, buffer.anchor
+                    buffer.undo()
+                    self.assertEqual((buffer.text,buffer.cursor,buffer.anchor), ('one two',4,4))
+                    buffer.undo(redo=True)
+                    self.assertEqual((buffer.text,buffer.cursor,buffer.anchor), changed)
+
     def test_selection_replacement_undo_and_redo(self):
         buffer = TextBuffer("hello world")
         buffer.anchor, buffer.cursor = 6, 11

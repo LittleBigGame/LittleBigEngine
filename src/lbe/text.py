@@ -110,6 +110,9 @@ class TextBuffer:
     def text(self, value):
         self._text = value.replace("\r\n", "\n").replace("\r", "\n") if value else ""
         self._lines = None
+        for name in ('cursor', 'anchor'):
+            if hasattr(self, name):
+                setattr(self, name, max(0, min(getattr(self, name), len(self._text))))
 
     @property
     def lines(self):
@@ -144,6 +147,12 @@ class TextBuffer:
         return self.text, self.cursor, self.anchor
 
     def insert(self, text):
+        self.replace(*self.selection, text)
+
+    def replace(self, start, end, text):
+        """Replace a range atomically without changing the pre-edit undo selection."""
+        if not isinstance(start, int) or not isinstance(end, int) or not 0 <= start <= end <= len(self.text):
+            raise ValueError('Replacement range must be within the text')
         self.preferred_column = None
         if not text:
             text = ""
@@ -152,20 +161,22 @@ class TextBuffer:
         self._undo.append(self._snapshot())
         del self._undo[:-200]
         self._redo.clear()
-        start, end = self.selection
         self.text = self.text[:start] + text + self.text[end:]
         self.cursor = self.anchor = start + len(text)
 
     def delete(self, backward=True):
+        before = self._snapshot()
         if self.cursor == self.anchor:
             self.anchor = max(0, self.cursor - 1) if backward else min(len(self.text), self.cursor + 1)
         if self.cursor != self.anchor:
             self.insert("")
+            self._undo[-1] = before
 
     def delete_word(self, backward=True):
         if self.cursor != self.anchor:
             self.insert("")
             return
+        before = self._snapshot()
         orig = self.cursor
         if backward:
             target = orig
@@ -203,6 +214,7 @@ class TextBuffer:
             self.anchor = min(len(self.text), target)
         if self.cursor != self.anchor:
             self.insert("")
+            self._undo[-1] = before
 
     def move(self, direction, select=False):
         row, column = self.position
@@ -322,8 +334,8 @@ class TextBuffer:
 
         self.text = "\n".join(new_lines)
         if start == end:
-            line_start_idx = self.text.rfind("\n", 0, self.cursor) + 1 if self.cursor > 0 else 0
-            cur_col = max(0, start - line_start_idx)
+            line_start_idx = sum(len(line) + 1 for line in lines[:start_row])
+            cur_col = start - line_start_idx
             self.cursor = self.anchor = self.index(start_row, max(0, cur_col + first_line_shift))
         else:
             new_start = sum(len(new_lines[i]) + 1 for i in range(start_row))

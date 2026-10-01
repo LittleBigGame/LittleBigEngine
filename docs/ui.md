@@ -127,3 +127,13 @@ an assumed parent after a dock/reparent operation.
 Inline UUID reference pills are opt-in: set `inline_references=True` on a code
 text area. Only actual `asset(...)`, `resolve(...)`, and `assets[...]` expressions
 are recognized; comments, string contents, and ordinary text fields remain text.
+
+## Atomic text range replacement
+
+`TextBuffer.replace(start, end, text)` replaces the half-open range `[start, end)`
+as one undoable edit. It preserves the original caret and selection in undo
+history, without requiring callers to select the replacement range first.
+`insert(text)` continues to replace the current selection. Invalid ranges raise
+`ValueError` without changing text or undo history.
+Assigning `buffer.text` clamps the existing caret and selection to the new text
+length, so subsequent editing remains valid after contents are shortened.

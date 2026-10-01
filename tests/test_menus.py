@@ -108,3 +108,54 @@ class MenuTests(unittest.TestCase):
         self.ui.dispatch(("click", dis_item.x + 5, dis_item.y + 5, 1, 0))
         self.assertEqual(ran, [])
 
+
+    def test_informational_menu_items_cannot_execute(self):
+        menu = open_menu(self.ui, object(), 10, 10, [dict(label='No assets', run=None)])
+        item = menu.children[0]
+        self.assertFalse(item.menu_action['enabled'])
+        self.ui.dispatch(('click', item.x+2, item.y+2, 1, 0))
+        self.ui.dispatch(('key', 'DOWN', False, False))
+        self.ui.dispatch(('key', 'ENTER', False, False))
+        self.assertEqual(menu.active, -1)
+        self.assertTrue(menu.alive)
+
+    def test_custom_alive_attribute_and_action_observation(self):
+        from lbe.activity import ActivityLog
+        log = ActivityLog(self.runtime)
+        self.addCleanup(log.close)
+        target = SimpleNamespace(alive=False)
+        calls = []
+        for keyboard in (False, True):
+            menu = open_menu(self.ui, target, 10, 10,
+                             [dict(label='Inspect', run=calls.append)])
+            if keyboard:
+                self.ui.dispatch(('key', 'DOWN', False, False))
+                self.ui.dispatch(('key', 'ENTER', False, False))
+            else:
+                item = menu.children[0]
+                self.ui.dispatch(('click', item.x+2, item.y+2, 1, 0))
+            self.assertFalse(menu.alive)
+        self.assertEqual(calls, [target, target])
+        records = [r for r in log.records if r.kind == 'event.ui.action']
+        self.assertEqual(len(records), 2)
+        self.assertIn('append', records[0].detail)
+        self.assertFalse(self.runtime.events.errors)
+
+    def test_popup_release_cancels_underlying_drags_without_dropping(self):
+        released, dropped = [], []
+        handle = self.ui.splitter(self.root, 'Handle', x=10,y=10,w=10,h=100)
+        handle.on_release = lambda control,event: released.append(control)
+        self.root.relations['active_drag'] = handle
+        self.root.relations['text_drag'] = handle
+        for name in ('entity', 'asset', 'dock'):
+            self.root.components[name+'_drag'] = {'value': name}
+            self.root.components['on_'+name+'_drop'] = lambda data,event: dropped.append(data)
+        menu = open_menu(self.ui, object(), 100,100, [dict(label='Run',run=lambda target:None)])
+        self.ui.dispatch(('release',110,110,1,0))
+        self.assertNotIn('active_drag', self.root.relations)
+        self.assertNotIn('text_drag', self.root.relations)
+        self.assertEqual(released, [handle])
+        self.assertEqual(dropped, [])
+        for name in ('entity_drag','asset_drag','dock_drag'):
+            self.assertNotIn(name, self.root.components)
+        self.assertTrue(menu.alive)

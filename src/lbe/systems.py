@@ -113,7 +113,8 @@ class SystemInstance:
             f"{self.name}.{phase}", str(error), traceback.format_exc()
         ))
         self.running = False
-        self.entity._changed("system.error", self.name)
+        with self.entity.runtime.changes.context(self.entity, self.name, phase):
+            self.entity._changed("system.error", self.name, new=str(error))
 
     def initialize(self):
         runtime = self.entity.runtime
@@ -136,7 +137,9 @@ class SystemInstance:
         })
         self._injected = frozenset(self.namespace)
         try:
-            exec(self.definition.code, self.namespace)
+            with runtime.changes.context(self.entity, self.name, 'initialize'):
+                runtime.events.emit('system.call', self.entity, self.name, 'initialize')
+                exec(self.definition.code, self.namespace)
             for name in ("start", "update", "draw", "stop"):
                 value = self.namespace.get(name)
                 if value is not None and not callable(value):
@@ -159,7 +162,9 @@ class SystemInstance:
         if callback is None:
             return
         try:
-            callback(*args)
+            with self.entity.runtime.changes.context(self.entity, self.name, phase):
+                self.entity.runtime.events.emit('system.call', self.entity, self.name, phase)
+                callback(*args)
         except Exception as error:
             self._error(phase, error)
 
@@ -168,7 +173,10 @@ class SystemInstance:
         def guarded(*args, **kwargs):
             if self.running:
                 try:
-                    callback(*args, **kwargs)
+                    with self.entity.runtime.changes.context(self.entity, self.name, f'event:{name}'):
+                        if name != 'system.call':
+                            self.entity.runtime.events.emit('system.call', self.entity, self.name, f'event:{name}')
+                        callback(*args, **kwargs)
                 except Exception as error:
                     self._error(f"event:{name}", error)
 

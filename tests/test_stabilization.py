@@ -341,7 +341,7 @@ class FileOperationContracts(TestCase):
             self.assertTrue(script.exists())
             self.assertEqual((folder / 'project.json').read_bytes(), previous)
             self.assertEqual(registry.get_id(script), identity)
-            self.assertEqual(Path(instance.definition.path), script)
+            self.assertTrue(Path(instance.definition.path).samefile(script))
             files.relocate(folder / 'src', folder / 'lib', save=save)
             self.assertEqual(registry.get_id(folder / 'lib/a.py'), identity)
             self.assertIs(entity.systems['custom'], instance)

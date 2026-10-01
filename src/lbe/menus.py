@@ -1,6 +1,7 @@
 """Context actions and popup menus built from ordinary UI entities."""
 
 from .ui import ACCENT, FIELD, INK, MUTED, contains, put, stack
+from .core import Entity
 
 
 def close_menu(ui):
@@ -23,7 +24,8 @@ def open_menu(ui, target, x, y, actions=None):
             provider = getattr(owner, "components", {}).get("context_actions")
             if provider:
                 actions.extend(provider(target))
-    actions = list(actions)
+    actions = [dict(a, enabled=a.get('enabled', True) and callable(a.get('run'))) if a is not None else None
+               for a in actions]
     if not actions:
         return None
     width = min(ui.window.width, max(160, max(len(a["label"]) * ui.pitch + 24 for a in actions if a) if any(actions) else 160))
@@ -61,9 +63,11 @@ def _activate(ui, menu, item):
         return
     target = menu.context_target
     close_menu(ui)
-    if hasattr(target, "alive") and not target.alive:
+    if isinstance(target, Entity) and not target.alive:
         return
-    action["run"](target)
+    callback = action['run']
+    ui.runtime.events.emit('ui.action', target, getattr(callback, '__qualname__', type(callback).__name__))
+    callback(target)
 
 
 def dispatch_menu(ui, event):
@@ -71,7 +75,7 @@ def dispatch_menu(ui, event):
     menu = ui.root.relations.get("context_menu")
     kind = event[0]
     if menu is not None:
-        if hasattr(menu.context_target, "alive") and not menu.context_target.alive:
+        if isinstance(menu.context_target, Entity) and not menu.context_target.alive:
             close_menu(ui)
             return True
         items = [c for c in menu.children if "menu_action" in c.components]

@@ -178,3 +178,31 @@ components keep references to the existing target entities.
 Dockable panels remain work in progress. Custom dock trees retain their own split
 ratios; the default layout still supports the existing scalar split controls during
 migration. Completing panel drag/drop is separate from project stabilization.
+
+## System activity log
+
+Open **View → System Log** or press **Ctrl+L**. The panel is an ordinary editor
+entity with a `system_log` attachment and inspectable child controls. Drag its
+header to move it; drag the lower-right handle to resize it.
+
+The log records entity/component/tag/relation/hierarchy changes, system lifecycle
+entry points, named events, UI actions and failures. Select a row to inspect its
+target, responsible system/phase and details, including bounded before/after
+value snapshots. Creation records include initial components, tags and parent.
+Arbitrary objects use safe type descriptions; `touch()` cannot
+recover an unknown prior in-place value. Direct internal Python mutations and
+arbitrary Python function calls are not automatically intercepted.
+
+Game activity and errors are shown by default, including editor and log-panel system failures. **Editor** enables routine editor activity capture;
+**Calls** includes noisy per-frame update/draw entries. Filter by kind, target,
+source or value; use the wheel to review history. Changing filters clears a
+selection that no longer matches. **Pause** stops capture without
+pausing the game, **Clear** clears retained records, and **X** hides the panel.
+The buffer retains at most 2,000 entries and does not persist session logs.
+
+Application scripts receive the reusable `log` service and can report custom
+operations with `log.write("info", "loading level")`. It captures the current
+system source automatically. Runtime changes also expose immutable `old`, `new`
+and `source` metadata; event observers can use `events.observe(callback)`.
+These are generic runtime observations, while panel presentation and filtering
+policy live in the editor project scripts.

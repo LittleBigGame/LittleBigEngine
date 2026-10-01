@@ -396,6 +396,7 @@ class UI:
             except Exception as error:
                 message = f"{type(error).__name__}: {error}"
                 self.root.components["ui_error"] = message
+                self.runtime.events.emit('ui.error', message)
                 callback = self.root.components.get("on_ui_error")
                 if callback:
                     callback(message)
@@ -427,6 +428,7 @@ class UI:
                 except Exception as error:
                     message = f"{type(error).__name__}: {error}"
                     self.root.components["ui_error"] = message
+                    self.runtime.events.emit('ui.error', message)
                     callback = self.root.components.get("on_ui_error")
                     if callback:
                         callback(message)
@@ -458,6 +460,18 @@ class UI:
             self.mouse_pos = (event[1], event[2])
 
         if dispatch_menu(self, event):
+            if kind == 'release':
+                self.root.relations.pop('text_drag', None)
+                for name in ('entity_drag', 'asset_drag', 'dock_drag'):
+                    self.root.components.pop(name, None)
+                active_drag = self.root.relations.pop('active_drag', None)
+                if active_drag is not None:
+                    if any(tag in active_drag.tags for tag in ('splitter', 'scrollbar_thumb', 'button', 'chip')):
+                        normal = active_drag.components.get('normal_color', active_drag.components.get('color', FIELD))
+                        put(active_drag, color=normal)
+                    callback = active_drag.components.get('on_release')
+                    if callback:
+                        callback(active_drag, event)
             return
         if kind == "motion":
             mx, my = event[1], event[2]
@@ -548,6 +562,8 @@ class UI:
                 if cb:
                     if cb(control, event) is not False:
                         return
+                if control.components.get('modal', False):
+                    return
             return
         if kind in ("click", "scroll"):
             if kind == "click":
@@ -568,7 +584,7 @@ class UI:
             controls = [e for e in self.controls() if self.visible(e) and contains(e, event[1], event[2])]
             controls.sort(key=lambda e: (e.components.get("layer", 2), e.depth), reverse=True)
             for control in controls:
-                if "splitter" in control.tags or "scrollbar_thumb" in control.tags:
+                if kind == 'click' and event[3] == 1 and ("splitter" in control.tags or "scrollbar_thumb" in control.tags):
                     self.root.relations["active_drag"] = control
                     control.color = control.components.get("hover_color", ACCENT)
                 callback = control.components.get("on_"+kind)
@@ -582,6 +598,7 @@ class UI:
                         return
                     continue
                 if "button" in control.tags:
+                    self.runtime.events.emit('ui.action', control, getattr(control.action, '__qualname__', type(control.action).__name__))
                     control.action()
                     return
                 if "field" in control.tags and not control.components.get("readonly", False):
