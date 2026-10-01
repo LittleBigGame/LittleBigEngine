@@ -572,7 +572,7 @@ class UI:
             controls = [e for e in self.controls() if self.visible(e) and contains(e, event[1], event[2])]
             controls.sort(key=lambda e: (e.components.get("layer", 2), e.depth), reverse=True)
             for control in controls:
-                if "splitter" in control.tags or "scrollbar_thumb" in control.tags:
+                if kind == 'click' and event[3] == 1 and ("splitter" in control.tags or "scrollbar_thumb" in control.tags):
                     self.root.relations["active_drag"] = control
                     control.color = control.components.get("hover_color", ACCENT)
                 callback = control.components.get("on_"+kind)

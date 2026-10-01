@@ -16,6 +16,28 @@ class UITests(unittest.TestCase):
         self.graphics = RecordingGraphics()
         self.input = Input()
 
+    def test_resize_handles_require_left_press_before_capture(self):
+        runtime = Runtime()
+        self.addCleanup(runtime.close)
+        root = runtime.create()
+        ui = UI(root, self.window, self.graphics, self.input)
+        calls = []
+        for tag in ('splitter', 'scrollbar_thumb'):
+            handle = ui.create(root, tag, tag, x=10, y=10, w=10, h=100,
+                               on_drag=lambda control,event: calls.append(control))
+            for event in (('scroll',12,12,0,-1), ('click',12,12,2,0)):
+                ui.dispatch(event)
+                self.assertNotIn('active_drag', root.relations)
+                ui.dispatch(('drag',30,20,1,0,18,8))
+                self.assertEqual(calls, [])
+            ui.dispatch(('click',12,12,1,0))
+            self.assertIs(root.relations['active_drag'], handle)
+            ui.dispatch(('drag',30,20,1,0,18,8))
+            self.assertEqual(calls, [handle])
+            ui.dispatch(('release',30,20,1,0))
+            runtime.destroy(handle)
+            calls.clear()
+
     def test_unrelated_application_runs_without_editor_services(self):
         with tempfile.TemporaryDirectory() as directory:
             runtime = load_project(self.window, self.graphics, self.input, directory,

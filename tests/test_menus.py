@@ -118,3 +118,25 @@ class MenuTests(unittest.TestCase):
         self.ui.dispatch(('key', 'ENTER', False, False))
         self.assertEqual(menu.active, -1)
         self.assertTrue(menu.alive)
+
+    def test_custom_alive_attribute_and_action_observation(self):
+        from lbe.activity import ActivityLog
+        log = ActivityLog(self.runtime)
+        self.addCleanup(log.close)
+        target = SimpleNamespace(alive=False)
+        calls = []
+        for keyboard in (False, True):
+            menu = open_menu(self.ui, target, 10, 10,
+                             [dict(label='Inspect', run=calls.append)])
+            if keyboard:
+                self.ui.dispatch(('key', 'DOWN', False, False))
+                self.ui.dispatch(('key', 'ENTER', False, False))
+            else:
+                item = menu.children[0]
+                self.ui.dispatch(('click', item.x+2, item.y+2, 1, 0))
+            self.assertFalse(menu.alive)
+        self.assertEqual(calls, [target, target])
+        records = [r for r in log.records if r.kind == 'event.ui.action']
+        self.assertEqual(len(records), 2)
+        self.assertIn('append', records[0].detail)
+        self.assertFalse(self.runtime.events.errors)
