@@ -200,7 +200,7 @@ class ProjectPersistenceTests(unittest.TestCase):
         }
 
         migrated = migrate_project_data(v0_data)
-        self.assertEqual(migrated["version"], 1)
+        self.assertEqual(migrated["version"], CURRENT_VERSION)
         self.assertIn("layout", migrated)
         e = migrated["entities"][0]
         self.assertEqual(e["tags"], ["root", "game"])
@@ -487,7 +487,7 @@ class ProjectPersistenceTests(unittest.TestCase):
 
         missing_id = uuid4()
         buf = TextBuffer(f'app = resolve("{missing_id}")\ntex = asset("{missing_id}")\n')
-        control = fake_runtime.create(x=0, y=0, w=500, h=300, layer=0, buffer=buf)
+        control = fake_runtime.create(x=0, y=0, w=500, h=300, layer=0, buffer=buf, inline_references=True)
         control.tags.add("multiline")
 
         ui._sync_text(control)

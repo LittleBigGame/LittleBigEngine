@@ -1,23 +1,14 @@
 """Project File Explorer entity system for LittleBigEngine."""
 
 import os
+from time import monotonic
 from pathlib import Path
-from lbe.ui import put, contains, PANEL, FIELD, INK, MUTED, ACCENT
+from lbe.ui import bind_callbacks, put, contains, PANEL, FIELD, INK, MUTED, ACCENT
 from lbe.assets import ASSET_ICONS, AssetRef
 from lbe.menus import open_menu
 
 
-class StateProxy:
-    def __getattr__(self, name):
-        s = entity.root.components.get("application_state")
-        return getattr(s, name)
-
-    def __setattr__(self, name, value):
-        s = entity.root.components.get("application_state")
-        setattr(s, name, value)
-
-
-state = StateProxy()
+state = entity.inherit("application_state")
 selected = lambda: state.selected()
 message = lambda text: state.message(text)
 
@@ -61,7 +52,7 @@ def build_file_tree(project_dir, expanded_folders):
                     scan_dir(entry, depth + 1)
             else:
                 ext = entry.suffix.lower()
-                atype = "system" if ext == ".py" else ("image" if ext in (".png", ".jpg", ".jpeg", ".bmp") else ("audio" if ext in (".wav", ".ogg", ".mp3") else "data"))
+                atype = state.runtime.assets.registry.infer_type(entry)
                 icon = ASSET_ICONS.get(atype, "📄")
                 reg = getattr(state.runtime.assets, "registry", None)
                 asset_id = reg.get_id(entry) if reg else None
@@ -95,7 +86,11 @@ def file_explorer_sync():
         return
 
     expanded = fe.components.setdefault("expanded", set())
-    visible_items = build_file_tree(state.project, expanded)
+    key = (tuple(sorted(expanded)), state.runtime.assets.registry.revision, int(monotonic()))
+    if getattr(state, "file_tree_key", None) != key:
+        state.file_tree_items = build_file_tree(state.project, expanded)
+        state.file_tree_key = key
+    visible_items = state.file_tree_items
     fe.components["visible_items"] = visible_items
 
     capacity = int(max(0, (fe.h - 34)) // 22)
@@ -264,6 +259,15 @@ def update(dt):
 
 
 def start():
-    state.file_explorer_sync = file_explorer_sync
-    state.file_scroll_drag = file_scroll_drag
-    state.file_track_click = file_track_click
+    global _release
+    _release = bind_callbacks(system, state, {
+        "file_explorer_sync": file_explorer_sync,
+        "file_scroll_drag": file_scroll_drag,
+        "file_track_click": file_track_click,
+    })
+
+
+def stop():
+    release = globals().get("_release")
+    if release:
+        release()

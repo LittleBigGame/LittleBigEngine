@@ -15,16 +15,41 @@ def bounds(entity):
         return None
 
 
+def world_position(entity, root=None):
+    """Template-level relative coordinates; Core hierarchy has no implicit transforms."""
+    x = y = 0.0
+    current = entity
+    while current is not None and current is not root:
+        if current is not entity and root is None and "root" in current.tags:
+            break
+        x += current.components.get("x", 0.0)
+        y += current.components.get("y", 0.0)
+        current = current.parent
+    return x, y
+
+
+def world_bounds(entity):
+    box = bounds(entity)
+    if box is None:
+        return None
+    x, y = world_position(entity)
+    dx, dy = x - entity.x, y - entity.y
+    return box[0] + dx, box[1] + dy, box[2] + dx, box[3] + dy
+
+
 class SpatialIndex:
     """Spatial hash refreshed automatically from observable component changes.
 
     Oversized objects are kept separately rather than allocating unbounded cells.
     """
 
-    def __init__(self, runtime, cell_size=16.0):
+    def __init__(self, runtime, cell_size=16.0, *, scope=None, bounds_fn=bounds):
         if not isfinite(cell_size) or cell_size <= 0:
             raise ValueError("cell_size must be finite and positive")
         self.cell_size = cell_size
+        self.runtime = runtime
+        self.scope = scope
+        self.bounds_fn = bounds_fn
         self._bounds = {}
         self._membership = {}
         self._cells = {}
@@ -50,7 +75,9 @@ class SpatialIndex:
 
     def _refresh(self, entity):
         self._remove(entity)
-        box = bounds(entity)
+        if self.scope is not None and entity is not self.scope and self.scope not in entity.ancestors:
+            return
+        box = self.bounds_fn(entity)
         if box is None:
             return
         self._bounds[entity] = box
@@ -65,8 +92,24 @@ class SpatialIndex:
     def _change(self, change):
         if change.kind == "entity.destroy":
             self._remove(change.entity)
+        elif change.kind in {"hierarchy.parent", "tag.add", "tag.remove"}:
+            for entity in (change.entity,) + change.entity.descendants:
+                self._refresh(entity)
         elif change.kind == "entity.create" or (change.kind.startswith("component.") and change.key in {"x", "y", "w", "h"}):
             self._refresh(change.entity)
+            if self.bounds_fn is world_bounds and change.key in {"x", "y"}:
+                for entity in change.entity.descendants:
+                    self._refresh(entity)
+
+    def configure(self, *, scope=None, bounds_fn=bounds):
+        """Change coordinate/membership policy without changing the public query operations."""
+        self.scope, self.bounds_fn = scope, bounds_fn
+        self._bounds.clear()
+        self._membership.clear()
+        self._cells.clear()
+        self._large.clear()
+        for entity in self.runtime.entities:
+            self._refresh(entity)
 
     def query(self, x, y, w=0, h=0):
         if any(not isinstance(v, (int, float)) or not isfinite(v) for v in (x, y, w, h)):
@@ -104,8 +147,8 @@ class SpatialIndex:
         """Check if two entities have overlapping bounding boxes."""
         if entity_a is entity_b:
             return False
-        box_a = self._bounds.get(entity_a) or bounds(entity_a)
-        box_b = self._bounds.get(entity_b) or bounds(entity_b)
+        box_a = self._bounds.get(entity_a)
+        box_b = self._bounds.get(entity_b)
         if box_a is None or box_b is None:
             return False
         return (box_a[0] < box_b[2] and box_a[2] > box_b[0] and
@@ -116,7 +159,7 @@ class SpatialIndex:
         
         Uses the spatial hash to narrow candidates to only nearby entities before testing overlap.
         """
-        box = self._bounds.get(entity) or bounds(entity)
+        box = self._bounds.get(entity)
         if box is None:
             return ()
         keys = self._keys(box)
@@ -145,7 +188,7 @@ class SpatialIndex:
 
     def query_nearby(self, entity, radius=0.0):
         """Query entities near the given entity, expanded by an optional margin/radius."""
-        box = self._bounds.get(entity) or bounds(entity)
+        box = self._bounds.get(entity)
         if box is None:
             return ()
         left, bottom, right, top = box

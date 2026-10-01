@@ -13,9 +13,24 @@ class Input:
     x: float = 0
     y: float = 0
     ctrl: bool = False
+    held: set[str] = field(default_factory=set)
+
+    def is_key_down(self, name):
+        return name.upper() in self.held
+
+    def press(self, name):
+        self.held.add(name.upper())
+
+    def release(self, name):
+        self.held.discard(name.upper())
 
     def drain(self):
         pending, self.pending = self.pending, []
+        for event in pending:
+            if event[0] == "key":
+                self.press(event[1])
+            elif event[0] == "key_up":
+                self.release(event[1])
         return pending
 
 
@@ -88,6 +103,10 @@ class Graphics:
 
     def text(self, text, x, y, *, color=(215, 223, 233, 255), size=10, key=None, layer=3):
         import pyglet
+
+        if self._view is not None:
+            camera, viewport = self._view
+            x, y = world_to_screen(camera, viewport, x, y)
 
         identity = self._identity("text", key, layer)
         obj = self._pool.get(identity)
@@ -174,6 +193,7 @@ def launch(build, *, headless=False, frames=None, screenshot=None):
         nonlocal is_active
         is_active = False
         pressed_keys.clear()
+        input_state.held.clear()
         input_state.ctrl = False
 
     @window.event
@@ -242,6 +262,7 @@ def launch(build, *, headless=False, frames=None, screenshot=None):
     @window.event
     def on_key_press(symbol, modifiers):
         pressed_keys.add(symbol)
+        input_state.press(key.symbol_string(symbol))
         ctrl = check_ctrl() or bool(modifiers & key.MOD_CTRL) or symbol in (key.LCTRL, key.RCTRL)
         input_state.ctrl = ctrl
         shift = bool(modifiers & key.MOD_SHIFT) or bool({key.LSHIFT, key.RSHIFT} & pressed_keys)
@@ -258,6 +279,7 @@ def launch(build, *, headless=False, frames=None, screenshot=None):
     @window.event
     def on_key_release(symbol, modifiers):
         pressed_keys.discard(symbol)
+        input_state.release(key.symbol_string(symbol))
         ctrl = check_ctrl() or bool(modifiers & key.MOD_CTRL) or bool({key.LCTRL, key.RCTRL} & pressed_keys)
         input_state.ctrl = ctrl
         shift = bool(modifiers & key.MOD_SHIFT) or bool({key.LSHIFT, key.RSHIFT} & pressed_keys)

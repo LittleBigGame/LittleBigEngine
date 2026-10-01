@@ -1,26 +1,17 @@
 """Inspector panel entity system."""
 
 import ast
+from copy import deepcopy
 from pathlib import Path
 from uuid import UUID
 
-from lbe.ui import put, contains, parse_box, PANEL, FIELD, INK, MUTED
+from lbe.ui import bind_callbacks, put, contains, parse_box, PANEL, FIELD, INK, MUTED
 from lbe.text import TextBuffer
 from lbe.menus import open_menu
 from lbe.project import template_path
 
 
-class StateProxy:
-    def __getattr__(self, name):
-        s = entity.root.components.get("application_state")
-        return getattr(s, name)
-
-    def __setattr__(self, name, value):
-        s = entity.root.components.get("application_state")
-        setattr(s, name, value)
-
-
-state = StateProxy()
+state = entity.inherit("application_state")
 selected = lambda: state.selected()
 inspected = lambda: state.inspected() if hasattr(state, "inspected") else state.selected()
 select = lambda target: state.select(target)
@@ -238,7 +229,7 @@ def inspector_sync():
             put(label, x=ip.x + 12, y=y + 1, w=lbl_w, h=23)
             if is_asset:
                 icon = ASSET_ICONS.get(value.type, "📦")
-                display_val = f" {icon} {value.type.capitalize()}: {value.name or 'Asset'} "
+                display_val = f" {icon} {value.type.capitalize()}: {(state.runtime.assets.registry.get(value.id) or {}).get('name', value.name or 'Asset')} "
                 put(field, x=ip.x + 12 + lbl_w + 6, y=y, w=field_w, h=23, readonly=True,
                     color=(35, 55, 75), normal_color=(35, 55, 75), hover_color=(50, 80, 110),
                     ink=(220, 240, 255))
@@ -252,7 +243,7 @@ def inspector_sync():
                 put(field, x=ip.x + 12 + lbl_w + 6, y=y, w=field_w, h=23, readonly=not editable,
                     color=FIELD, normal_color=FIELD, ink=INK)
             if field.components.get('component_key') != key or field.relations.get('target') is not entity:
-                if state.ui.focused is field:
+                if state.ui.focused in (field, label):
                     del state.app.relations['focus']
             field.component_key = key
             field.relations['target'] = entity
@@ -494,12 +485,24 @@ def inspector_sync():
 
 def commit_component(field):
     target, key = (field.relations['target'], field.component_key)
+    if field.buffer.text == safe_repr(target.components[key]):
+        return
     target.components[key] = parse_value(field.buffer.text)
     message(f'Updated {key}')
     inspector_sync()
 
+def save_component_changes(target, before):
+    try:
+        save_editor_project()
+    except Exception:
+        target.components.clear()
+        target.components.update(before)
+        raise
+
+
 def add_component():
     ent = inspected()
+    before = dict(ent.components)
     renaming_key = state.add_name.components.pop("renaming_key", None)
     saving_preset = state.add_name.components.pop("saving_preset", False)
     name = state.add_name.buffer.text.strip()
@@ -515,6 +518,8 @@ def add_component():
         return
 
     if renaming_key:
+        if renaming_key != name and name in ent.components:
+            raise ValueError(f"Component '{name}' already exists")
         if renaming_key != name:
             ent.components.pop(renaming_key, None)
         ent.components[name] = val
@@ -524,7 +529,7 @@ def add_component():
         message(f"Added component '{name}'")
     state.add_name.buffer = TextBuffer()
     state.add_value.buffer = TextBuffer()
-    save_editor_project()
+    save_component_changes(ent, before)
     inspector_sync()
 
 def commit_tags():
@@ -670,9 +675,9 @@ def inspector_duplicate_entity():
     parent = ent.parent or state.game
     orig_name = str(ent.components.get('name', 'Entity'))
     new_name = orig_name + "_copy"
-    comps = dict(ent.components)
+    comps = deepcopy(dict(ent.components))
     comps['name'] = new_name
-    dup = state.runtime.create(parent=parent, tags=list(ent.tags), **comps)
+    dup = state.runtime.create(parent=parent, tags=list(ent.tags), components=comps)
     inspect_entity(dup)
     message(f"Duplicated '{orig_name}' as '{new_name}'")
     hierarchy_sync()
@@ -798,10 +803,13 @@ def commit_component_key(lbl):
         state.ui.set_text(lbl, old_key or "")
         return
     if old_key and new_key != old_key and target and target.alive:
-        val = target.components.pop(old_key, 0)
+        if new_key in target.components:
+            raise ValueError(f"Component '{new_key}' already exists")
+        before = dict(target.components)
+        val = target.components.pop(old_key)
         target.components[new_key] = val
         message(f"Renamed component '{old_key}' -> '{new_key}'")
-        save_editor_project()
+        save_component_changes(target, before)
         inspector_sync()
         focus_component_value(new_key)
 
@@ -862,37 +870,27 @@ def change_component_type(ent, comp, target_type):
             else:
                 new_val = [0.0, 0.0]
         elif target_type == "dict":
-            new_val = dict(val) if isinstance(val, dict) else {}
+            new_val = dict(val)
         elif target_type == "AssetRef":
             from lbe.assets import AssetRef
             reg = getattr(state.runtime.assets, "registry", None)
             ref = None
             if reg:
                 ref = reg.get_ref(val)
-                if ref is None and reg._entries:
-                    first_id, first_entry = next(iter(reg._entries.items()))
-                    ref = AssetRef(id=first_id, type=first_entry["type"], name=first_entry["name"])
-            new_val = ref or val
+            if ref is None:
+                raise ValueError("Select a registered asset reference")
+            new_val = ref
         elif target_type == "NoneType":
             new_val = None
         else:
             new_val = val
-    except Exception:
-        defaults = {
-            "float": 0.0,
-            "int": 0,
-            "str": "",
-            "bool": False,
-            "tuple": (0.0, 0.0),
-            "list": [0.0, 0.0],
-            "dict": {},
-            "NoneType": None,
-        }
-        new_val = defaults.get(target_type, val)
+    except (TypeError, ValueError) as error:
+        raise ValueError(f"Cannot convert '{comp}' to {target_type}: {error}") from None
 
+    before = dict(ent.components)
     ent.components[comp] = new_val
     message(f"Changed '{comp}' type to {target_type}")
-    save_editor_project()
+    save_component_changes(ent, before)
     inspector_sync()
     focus_component_value(comp)
 
@@ -1146,7 +1144,7 @@ def open_asset_picker_menu(ent, comp):
     from lbe.assets import ASSET_ICONS, AssetRef
     actions = []
     if reg:
-        for uid, entry in sorted(reg._entries.items(), key=lambda x: (x[1]["type"], x[1]["name"].lower())):
+        for uid, entry in sorted(reg.entries(), key=lambda x: (x[1]["type"], x[1]["name"].lower())):
             icon = ASSET_ICONS.get(entry["type"], "📦")
             is_active = (isinstance(current_val, AssetRef) and current_val.id == uid)
             pref = "> " if is_active else "   "
@@ -1179,55 +1177,64 @@ def clear_asset_ref(ent, comp):
     message(f"Cleared '{comp}'")
 
 def start():
-    state.inspector_sync = inspector_sync
-    state.format_float_clean = format_float_clean
-    state.clean_repr = clean_repr
-    state.safe_repr = safe_repr
-    state.parse_value = parse_value
-    state.commit_component = commit_component
-    state.add_component = add_component
-    state.commit_tags = commit_tags
-    state.resolve_name = resolve_name
-    state.commit_parent = commit_parent
-    state.commit_relation = commit_relation
-    state.start_edit_link = start_edit_link
-    state.quick_link_to = quick_link_to
-    state.commit_name = commit_name
-    state.inspector_add_child = inspector_add_child
-    state.inspector_duplicate_entity = inspector_duplicate_entity
-    state.inspector_delete_entity = inspector_delete_entity
-    state.delete_component = delete_component
-    state.unlink_relation = unlink_relation
-    state.focus_component_value = focus_component_value
-    state.quick_add_pos = quick_add_pos
-    state.quick_add_size = quick_add_size
-    state.quick_add_vel = quick_add_vel
-    state.quick_add_color = quick_add_color
-    state.quick_add_speed = quick_add_speed
-    state.add_custom_component = add_custom_component
-    state.context_add_component = context_add_component
-    state.commit_component_key = commit_component_key
-    state.open_add_component_menu = open_add_component_menu
-    state.open_attach_system_menu = open_attach_system_menu
-    state.prompt_new_system = prompt_new_system
-    state.attach_system_to_entity = attach_system_to_entity
-    state.detach_system_from_entity = detach_system_from_entity
-    state.toggle_section = toggle_section
-    state.open_add_chip_menu = open_add_chip_menu
-    state.prompt_add_preset = prompt_add_preset
-    state.pin_to_quick_bar = pin_to_quick_bar
-    state.apply_quick_preset = apply_quick_preset
-    state.remove_quick_preset = remove_quick_preset
-    state.start_rename_component = start_rename_component
-    state.start_rename_tag = start_rename_tag
-    state.remove_tag = remove_tag
-    state.start_add_tag = start_add_tag
-    state.change_component_type = change_component_type
-    state.open_change_type_menu = open_change_type_menu
-    state.inspector_scroll_drag = inspector_scroll_drag
-    state.inspector_track_click = inspector_track_click
-    state.component_click = component_click
+    global _release
+    _release = bind_callbacks(system, state, {
+        "inspector_sync": inspector_sync,
+        "format_float_clean": format_float_clean,
+        "clean_repr": clean_repr,
+        "safe_repr": safe_repr,
+        "parse_value": parse_value,
+        "commit_component": commit_component,
+        "add_component": add_component,
+        "commit_tags": commit_tags,
+        "resolve_name": resolve_name,
+        "commit_parent": commit_parent,
+        "commit_relation": commit_relation,
+        "start_edit_link": start_edit_link,
+        "quick_link_to": quick_link_to,
+        "commit_name": commit_name,
+        "inspector_add_child": inspector_add_child,
+        "inspector_duplicate_entity": inspector_duplicate_entity,
+        "inspector_delete_entity": inspector_delete_entity,
+        "delete_component": delete_component,
+        "unlink_relation": unlink_relation,
+        "focus_component_value": focus_component_value,
+        "quick_add_pos": quick_add_pos,
+        "quick_add_size": quick_add_size,
+        "quick_add_vel": quick_add_vel,
+        "quick_add_color": quick_add_color,
+        "quick_add_speed": quick_add_speed,
+        "add_custom_component": add_custom_component,
+        "context_add_component": context_add_component,
+        "commit_component_key": commit_component_key,
+        "open_add_component_menu": open_add_component_menu,
+        "open_attach_system_menu": open_attach_system_menu,
+        "prompt_new_system": prompt_new_system,
+        "attach_system_to_entity": attach_system_to_entity,
+        "detach_system_from_entity": detach_system_from_entity,
+        "toggle_section": toggle_section,
+        "open_add_chip_menu": open_add_chip_menu,
+        "prompt_add_preset": prompt_add_preset,
+        "pin_to_quick_bar": pin_to_quick_bar,
+        "apply_quick_preset": apply_quick_preset,
+        "remove_quick_preset": remove_quick_preset,
+        "start_rename_component": start_rename_component,
+        "start_rename_tag": start_rename_tag,
+        "remove_tag": remove_tag,
+        "start_add_tag": start_add_tag,
+        "change_component_type": change_component_type,
+        "open_change_type_menu": open_change_type_menu,
+        "inspector_scroll_drag": inspector_scroll_drag,
+        "inspector_track_click": inspector_track_click,
+        "component_click": component_click,
+    })
 
 
 def update(dt):
     inspector_sync()
+
+
+def stop():
+    release = globals().get("_release")
+    if release:
+        release()

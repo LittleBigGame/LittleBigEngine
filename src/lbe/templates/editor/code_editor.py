@@ -155,6 +155,7 @@ VISIBLE_ITEMS = 8
 
 def start():
     """Attach input callbacks once at system start, not every frame."""
+    entity.components["inline_references"] = True
     target = entity if "buffer" in entity.components else None
     if target is not None:
         target.components["on_text"] = handle_editor_text
@@ -602,6 +603,13 @@ def update(dt):
 
     # 5. Hover inspection
     hover_state = target.components.setdefault("hover_state", {"active": False, "dwell_start": 0.0, "last_mouse": (-100, -100)})
+    hover_snapshot = (text, str(target.components.get("source_path")), target.components.get("completion_context"))
+    if hover_state.get("snapshot") != hover_snapshot:
+        future = hover_state.pop("future", None)
+        if future:
+            future.cancel()
+        hover_state.update(active=False, snapshot=hover_snapshot, dwell_start=monotonic())
+        hover_state.pop("resolved_empty", None)
     mouse_pos = getattr(ui, "mouse_pos", None)
     if ui and mouse_pos and contains(target, mouse_pos[0], mouse_pos[1]) and not ac_state.get("active"):
         mx, my = mouse_pos
@@ -667,6 +675,10 @@ def stop():
         fut = hover_state.pop("future", None)
         if fut:
             fut.cancel()
+    for key in ("on_key", "on_text", "on_scroll"):
+        callback = entity.components.get(key)
+        if getattr(callback, "__globals__", None) is globals():
+            entity.components.pop(key, None)
     # Hide popup child entities so they don't linger after system stop
     popup_parts = ("autocomplete_popup", "ac_scroll_track", "ac_scroll_thumb",
                    "hover_panel", "hover_title", "hover_doc")

@@ -1363,7 +1363,7 @@ class EditorTests(unittest.TestCase):
         code = self.editor.code
         self.click(code)
         self.send(("key", "A", True, False), ("key", "BACKSPACE", False, False))
-        self.send(("text", "HeroShip.v"))
+        self.send(("text", 'resolve("HeroShip").v'))
         self.await_completion()
 
         ac_state = code.components.get("autocomplete_state", {})

@@ -2,6 +2,7 @@
 
 import ast
 import keyword
+import os
 from pathlib import Path
 import re
 from types import SimpleNamespace
@@ -9,24 +10,16 @@ import tempfile
 from uuid import UUID
 
 from lbe.ui import (UI, put, contains, parse_box, content_rect, stack, dock,
-                    row, column, apply_layout, Layout, BG, PANEL, FIELD, ACCENT,
+                    row, column, apply_layout, BG, PANEL, FIELD, ACCENT,
                     INK, MUTED, PITCH, LINE, STACK_COLORS)
 from lbe.text import TextBuffer
-from lbe.space import screen_to_world, world_to_screen
-from lbe.project import save_project, load_project_data, deserialize_entities
+from lbe.space import screen_to_world, world_to_screen, world_bounds, world_position
+from lbe.project import save_project, load_project_data, deserialize_entities, activate_entities, PersistentGraph
+from lbe.project_files import ProjectFiles
 from lbe.menus import open_menu
 from lbe.dock import DockTree, SplitNode, TabGroupNode
 
 state = entity.components.get("application_state")
-
-
-def selected():
-    sel = state.app.relations.get('selection')
-    if sel is None or not sel.alive:
-        sel = state.game
-        state.app.relations['selection'] = sel
-        state.game.relations['selection'] = sel
-    return sel
 
 
 def message(text):
@@ -382,12 +375,13 @@ def initialize():
     state = SimpleNamespace(runtime=entity.runtime, project=project, window=window,
                             graphics=graphics, input=input, app=entity)
     entity.components["application_state"] = state
+    state.files = ProjectFiles(state.runtime, state.project)
     state.ui = UI(entity, window, graphics, input)
     state.background = state.ui.create(entity, "Background", "rect", color=BG, layer=0)
 
     project_data = load_project_data(project)
     if project_data is not None and project_data.get("entities"):
-        restored = deserialize_entities(project_data["entities"], state.runtime, default_parent=entity, project_dir=project)
+        restored = deserialize_entities(project_data["entities"], state.runtime, default_parent=entity, project_dir=project, activate=False)
         state.game = next((e for e in restored.values() if "root" in e.tags and e.components.get("name") == "Game"), None)
         if state.game is None:
             state.game = next((e for e in restored.values() if e.parent is entity), next(iter(restored.values())))
@@ -400,8 +394,11 @@ def initialize():
 
     state.camera = create(parent=entity, name="Camera", x=0.0, y=0.0, zoom=48.0)
     state.viewport = state.ui.create(entity, "Viewport", "surface", color=(12, 18, 25), layer=0)
+    space.configure(scope=state.game, bounds_fn=world_bounds)
     state.game.relations["camera"] = state.camera
     state.game.relations["viewport"] = state.viewport
+    if project_data and project_data.get("entities"):
+        activate_entities(restored.values(), state.runtime, project_dir=project)
 
     state.hierarchy_rows = []
     state.component_rows = []
@@ -632,6 +629,7 @@ def initialize():
         state.file_explorer.systems.attach('file_explorer', assets.system(project / 'file_explorer.py'))
     if (project / 'inspector.py').exists() and 'inspector' not in state.inspector.systems:
         state.inspector.systems.attach('inspector', assets.system(project / 'inspector.py'))
+    state.project_graph = PersistentGraph(state.runtime, tuple(restored.values()) + state.game.descendants if project_data and project_data.get("entities") else (state.game,) + state.game.descendants, application=state.app)
     if "render" in state.game.systems:
         open_system(state.game, "render")
     elif state.game.systems:
@@ -698,24 +696,9 @@ def layout():
         split_left = state.dock_tree.find_node("split_left")
         split_right = state.dock_tree.find_node("split_right")
     else:
-        split_main = state.dock_tree.find_node("split_main") if hasattr(state, "dock_tree") else None
-        if split_main and isinstance(split_main, SplitNode):
-            cur_w = state.app.components.get("left_column_w")
-            if cur_w is not None:
-                split_main.ratio = max(0.1, min(0.9, (cur_w - ws_x) / ws_w))
-
-        split_left = state.dock_tree.find_node("split_left") if hasattr(state, "dock_tree") else None
-        if split_left and isinstance(split_left, SplitNode):
-            cur_h = state.hierarchy.components.get("panel_h")
-            if cur_h is not None:
-                split_left.ratio = max(0.1, min(0.9, cur_h / ws_h))
-
-        split_right = state.dock_tree.find_node("split_right") if hasattr(state, "dock_tree") else None
-        if split_right and isinstance(split_right, SplitNode):
-            cur_split = state.code_panel.components.get("split_y")
-            if cur_split is not None:
-                split_right.ratio = max(0.1, min(0.9, (cur_split - ws_y) / ws_h))
-
+        split_main = state.dock_tree.find_node("split_main")
+        split_left = state.dock_tree.find_node("split_left")
+        split_right = state.dock_tree.find_node("split_right")
         panel_rects = state.dock_tree.compute_layout(ws_x, ws_y, ws_w, ws_h) if hasattr(state, "dock_tree") else {}
 
     # Legacy header tab buttons hidden — dynamic tab buttons on each group replace them
@@ -1430,91 +1413,33 @@ def rename_file(new_name, old_name=None):
     new_name = new_name.strip()
     if not new_name.endswith('.py'):
         new_name += '.py'
-    if old_name is None:
-        old_path = source_path()
-        old_name = old_path.name
-    else:
-        old_path = (state.project / old_name).resolve()
-
-    new_path = (state.project / new_name).resolve()
-    if not new_path.is_relative_to(state.project):
+    old_path = source_path() if old_name is None else (state.project / old_name).resolve()
+    destination = (state.project / new_name).resolve()
+    if not destination.is_relative_to(state.project):
         raise ValueError('Rename destination must be inside the project folder')
-
-    if new_path == old_path:
-        return new_path
-
-    if new_path.exists():
-        raise FileExistsError(f"A file named '{new_name}' already exists in the project")
-
     if old_path.exists():
-        old_path.rename(new_path)
+        state.files.relocate(old_path, destination, save=save_editor_project)
     else:
-        new_path.parent.mkdir(parents=True, exist_ok=True)
-        new_path.write_text(state.code.buffer.text, encoding='utf-8')
-
-    old_stem = old_path.stem
-    new_stem = new_path.stem
-
-    # Update asset cache
-    if hasattr(state.runtime.assets, "_systems"):
-        state.runtime.assets._systems.pop(old_path, None)
-        try:
-            state.runtime.assets._systems.pop(old_path.resolve(), None)
-        except Exception:
-            pass
-        state.runtime.assets._systems.pop(str(old_path), None)
-    definition = state.runtime.assets.system(new_path)
-
-    # Update persistent asset registry
-    reg = getattr(state.runtime.assets, "registry", None)
-    if reg:
-        old_id = reg.get_id(old_path)
-        if old_id:
-            reg.rename(old_id, new_path)
-        else:
-            reg.register(new_path)
-
-    updated_count = 0
-    for ent in state.runtime.entities:
-        for name, instance in tuple(ent.systems.items()):
-            inst_def_path = None
-            if hasattr(instance, "definition") and hasattr(instance.definition, "path"):
-                inst_def_path = Path(instance.definition.path)
-            is_match = False
-            if inst_def_path is not None:
-                try:
-                    if inst_def_path.resolve() == old_path.resolve():
-                        is_match = True
-                except Exception:
-                    if inst_def_path == old_path:
-                        is_match = True
-            if is_match or name == old_stem:
-                if name == old_stem:
-                    del ent.systems[name]
-                    ent.systems.attach(new_stem, definition)
-                    updated_count += 1
-                else:
-                    ent.systems.reload(name, definition)
-                    updated_count += 1
-
-        for comp_k, comp_v in tuple(ent.components.items()):
-            if isinstance(comp_v, str):
-                if comp_v == old_path.name:
-                    ent.components[comp_k] = new_path.name
-                elif comp_v == old_stem:
-                    ent.components[comp_k] = new_stem
-
-    rel_name = str(new_path.relative_to(state.project))
-    state.path_field.buffer = TextBuffer(rel_name)
-    state._saved_source = (rel_name, state.code.buffer.text)
-    state.code.source_path = str(new_path)
-    if state.code.components.get("system_name") == old_stem:
-        state.code.system_name = new_stem
-
-    save_editor_project()
+        if destination.exists():
+            raise FileExistsError(destination)
+        # Naming a new unsaved buffer does not claim its contents were written.
+    update_open_source_location(old_path, destination)
     inspector_sync()
-    message(f"Renamed {old_path.name} to {new_path.name}; updated {updated_count} system attachment(s)")
-    return new_path
+    message(f"Renamed {old_path.name} to {destination.name}")
+    return destination
+
+
+def update_open_source_location(source, destination):
+    open_path = Path(state.code.components.get("source_path", source_path())).resolve()
+    if open_path == source or open_path.is_relative_to(source):
+        new_path = destination / open_path.relative_to(source) if open_path != source else destination
+        relative = new_path.relative_to(state.project).as_posix()
+        state.path_field.buffer = TextBuffer(relative)
+        if state._saved_source:
+            state._saved_source = (relative, state._saved_source[1])
+        state.code.source_path = str(new_path)
+        if state.code.components.get("system_name") == open_path.stem:
+            state.code.system_name = new_path.stem
 
 def open_system(owner, name):
     if not confirm_discard((owner.id, name)):
@@ -1541,38 +1466,7 @@ def confirm_discard(action):
     return True
 
 def get_project_entities():
-    splitters = (getattr(state, "col_splitter", None), getattr(state, "hierarchy_splitter", None), getattr(state, "code_splitter", None))
-    editor_roots = [
-        state.background, state.camera, state.viewport,
-        state.header, state.hierarchy, state.inspector,
-        state.code_panel, state.status, state.zoom_label,
-    ]
-    if hasattr(state, "tab_hierarchy"):
-        editor_roots.append(state.tab_hierarchy)
-    if hasattr(state, "tab_files"):
-        editor_roots.append(state.tab_files)
-    if hasattr(state, "file_explorer"):
-        editor_roots.append(state.file_explorer)
-    for s in splitters:
-        if s is not None:
-            editor_roots.append(s)
-    editor_roots.extend(getattr(state, "extra_panels", []))
-    editor_roots.extend(getattr(state, "dock_tab_buttons", []))
-    editor_roots.extend(getattr(state, "extra_splitters", []))
-    for mb in (getattr(state, "menu_file_btn", None), getattr(state, "menu_edit_btn", None), getattr(state, "menu_view_btn", None)):
-        if mb is not None:
-            editor_roots.append(mb)
-    for cb in (getattr(state, "close_hierarchy_btn", None),
-               getattr(state, "close_files_btn", None),
-               getattr(state, "close_inspector_btn", None),
-               getattr(state, "close_viewport_btn", None),
-               getattr(state, "close_code_btn", None)):
-        if cb is not None:
-            editor_roots.append(cb)
-
-    def is_editor_entity(e):
-        return e is state.app or any(e is r or r in e.ancestors for r in editor_roots)
-    return [e for e in state.runtime.entities if not is_editor_entity(e)]
+    return list(state.project_graph.entities)
 
 
 def extract_completion_context():
@@ -1596,7 +1490,7 @@ def extract_completion_context():
                 all_comps[k] = tname
         name = ent.components.get("name")
         if name and isinstance(name, str) and name.isidentifier() and not keyword.iskeyword(name):
-            entities_info[name] = {"components": ent_comps}
+            entities_info[name] = {"components": ent_comps, "id": str(ent.id)}
 
     return {
         "owner": {"components": owner_comps},
@@ -1640,7 +1534,7 @@ def save_editor_project():
     entities_to_save = get_project_entities()
     reg = getattr(state.runtime.assets, "registry", None)
     app_id = getattr(getattr(state, "app", None), "id", None)
-    save_project(state.project, entities=entities_to_save, layout=get_editor_layout(), assets=reg, application_id=app_id)
+    save_project(state.project, entities=entities_to_save, layout=get_editor_layout(), assets=reg, application_id=app_id, transient_relations={state.game.id: ("camera", "viewport", "selection")})
 
 
 def save_project_action():
@@ -1754,13 +1648,7 @@ def scroll_list(control, event):
 
 
 def get_game_world_pos(e):
-    x, y = 0.0, 0.0
-    curr = e
-    while curr is not None and curr is not state.game:
-        x += curr.components.get("x", 0.0)
-        y += curr.components.get("y", 0.0)
-        curr = curr.parent
-    return x, y
+    return world_position(e, root=state.game)
 
 
 def find_hit_game_entity(wx, wy):
@@ -2027,7 +1915,7 @@ def open_replace_asset_menu(pill_control):
     from lbe.assets import ASSET_ICONS
     cur_id = pill_control.components.get("asset_id")
     actions = []
-    for uid, entry in sorted(reg._entries.items(), key=lambda x: (x[1]["type"], x[1]["name"].lower())):
+    for uid, entry in sorted(reg.entries(), key=lambda x: (x[1]["type"], x[1]["name"].lower())):
         icon = ASSET_ICONS.get(entry["type"], "📦")
         is_cur = (str(uid) == str(cur_id))
         pref = "> " if is_cur else "   "
@@ -2106,28 +1994,21 @@ def assign_entity_sprite(ent, item):
     message(f"Assigned sprite '{item['name']}' to {ent.components.get('name', ent.id)}")
 
 
-def attach_system_to_entity(ent, path):
-    path = Path(path).resolve()
-    definition = state.runtime.assets.system(path)
-    if path.stem in ent.systems:
-        ent.systems.reload(path.stem, definition)
-    else:
-        ent.systems.attach(path.stem, definition)
-    save_editor_project()
-    inspector_sync()
-    message(f"Attached {path.stem} to {ent.components.get('name', ent.id)}")
 
 
 def refresh_project_files():
     reg = getattr(state.runtime.assets, "registry", None)
     if reg:
         reg.scan(state.project)
+    state.file_tree_key = None
     if hasattr(state, "file_explorer_sync"):
         state.file_explorer_sync()
     message("Refreshed project files")
 
 
 def new_source_in_dir(folder_path):
+    if not confirm_discard(("new", str(folder_path))):
+        return
     f_path = Path(folder_path).resolve()
     rel_folder = f_path.relative_to(state.project) if f_path.is_relative_to(state.project) else f_path.name
     i = 1
@@ -2149,25 +2030,43 @@ def prompt_rename_file_item(item):
         open_specific_file(item["path"])
         prompt_rename_file()
     else:
-        message(f"Renaming '{item['name']}'")
+        path = Path(item['path']).resolve()
+        original = state.path_field.buffer.text
+        state.path_field.buffer = TextBuffer(path.name)
+        prompt_rename_file()
+
+        def commit():
+            name = state.path_field.buffer.text.strip()
+            state.path_field.buffer = TextBuffer(original)
+            state.path_field.readonly = True
+            state.path_field.on_commit = None
+            if not name or Path(name).name != name or name in ('.', '..'):
+                raise ValueError('Enter a file or folder name without a directory')
+            destination = path.with_name(name)
+            state.files.relocate(path, destination, save=save_editor_project)
+            update_open_source_location(path, destination)
+            refresh_project_files()
+            message(f"Renamed '{path.name}' to '{name}'")
+
+        state.path_field.on_commit = commit
 
 
 def delete_file_item(item):
-    p = Path(item["path"]).resolve()
-    try:
-        if item["is_dir"]:
-            import shutil
-            shutil.rmtree(p)
-        else:
-            p.unlink()
-            reg = getattr(state.runtime.assets, "registry", None)
-            if reg and item.get("asset_id"):
-                reg.unregister(item["asset_id"])
-        save_editor_project()
-        refresh_project_files()
-        message(f"Deleted {item['name']}")
-    except Exception as e:
-        message(f"Delete failed: {e}")
+    path = Path(item["path"]).resolve()
+    open_path = Path(state.code.components.get("source_path", source_path())).resolve()
+    is_open = open_path == path or open_path.is_relative_to(path)
+    if is_open and not confirm_discard(('delete', str(path))):
+        return
+    state.files.delete(path, save=save_editor_project)
+    if is_open:
+        state.path_field.buffer = TextBuffer('new_system.py')
+        state.code.buffer = TextBuffer('def update(dt):\n    pass\n')
+        state.code.source_path = str(state.project / 'new_system.py')
+        state._saved_source = None
+        state.code.components.pop('system_name', None)
+        state.code.relations.pop('owner', None)
+    refresh_project_files()
+    message(f"Deleted '{path.name}'; references remain recoverable")
 
 
 def create_new_folder(parent_dir=None):
@@ -2187,50 +2086,12 @@ def create_new_folder(parent_dir=None):
 
 
 def move_file_or_folder(src_path, dst_folder):
-    src = Path(src_path).resolve()
-    dst_dir = Path(dst_folder).resolve()
-    if not src.exists() or not dst_dir.is_dir():
-        return
-    dst = dst_dir / src.name
-    if src == dst:
-        return
-    if dst.exists():
-        message(f"Cannot move: '{dst.name}' already exists in destination")
-        return
-
-    was_open = (getattr(state, "active_file", None) and Path(state.active_file).resolve() == src)
-    try:
-        src.rename(dst)
-    except Exception as e:
-        message(f"Move failed: {e}")
-        return
-
-    reg = getattr(state.runtime.assets, "registry", None)
-    if reg:
-        aid = reg.get_id(src)
-        if aid:
-            reg.rename(aid, dst)
-
-    if was_open:
-        state.active_file = str(dst)
-        rel = str(dst.relative_to(Path(state.project).resolve())).replace("\\", "/")
-        state.path_field.buffer = TextBuffer(rel)
-        state._saved_source = (rel, state.code.buffer.text)
-
-    if dst.suffix.lower() == ".py":
-        try:
-            definition = state.runtime.assets.system(dst)
-            for ent in state.runtime.entities:
-                for name, instance in tuple(ent.systems.items()):
-                    inst_path = getattr(getattr(instance, "definition", None), "path", None)
-                    if inst_path and Path(inst_path).resolve() == src.resolve():
-                        ent.systems.reload(name, definition)
-        except Exception:
-            pass
-
-    save_editor_project()
+    source = Path(src_path).resolve()
+    destination = Path(dst_folder).resolve() / source.name
+    state.files.relocate(source, destination, save=save_editor_project)
+    update_open_source_location(source, destination)
     refresh_project_files()
-    message(f"Moved '{src.name}' to '{dst_dir.name or 'root'}'")
+    message(f"Moved '{source.name}' to '{destination.parent.name}'")
 
 
 def open_move_file_menu(src_path):
@@ -2360,12 +2221,13 @@ def start():
 
 def update(dt):
     owner = state.code.relations.get('owner', selected())
-    state.code.completion_components = tuple(owner.components) if owner.alive else ()
-    state.code.completion_context = extract_completion_context()
+    context_key = (state.project_graph.schema_revision, owner.id, tuple((key, type(value)) for key, value in owner.components.items()))
+    if getattr(state, "completion_context_key", None) != context_key:
+        state.code.completion_components = tuple(owner.components) if owner.alive else ()
+        state.code.completion_context = extract_completion_context()
+        state.completion_context_key = context_key
     state.code.source_path = state.project / state.path_field.buffer.text
     layout()
-    hierarchy_sync()
-    inspector_sync()
     panels_sync()
     row, column = state.code.buffer.position
     diag = state.code.components.get("diagnostic")
@@ -2492,7 +2354,7 @@ def context_target(control, event):
     if hasattr(state, "file_explorer") and (control is state.file_explorer or state.file_explorer in control.ancestors):
         return dict(file_explorer=True, control=state.file_explorer)
     if control is state.tags_field or control is state.tags_label:
-        return dict(entity=selected(), tags=True)
+        return dict(entity=inspected(), tags=True)
     if 'component_key' in control.components and 'target' in control.relations:
         return dict(entity=control.relations['target'], component=control.component_key)
     if 'relation_key' in control.components and 'target' in control.relations:
@@ -2513,7 +2375,7 @@ def context_target(control, event):
         if 'target' in candidate.relations:
             return candidate.relations['target']
     if control is state.inspector or state.inspector in control.ancestors:
-        return selected()
+        return inspected()
     if control is state.code or state.code in control.ancestors or control is state.code_panel or state.code_panel in control.ancestors:
         return dict(code=True, control=state.code)
     if control is state.hierarchy or state.hierarchy in control.ancestors:

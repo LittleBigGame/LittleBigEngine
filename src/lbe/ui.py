@@ -2,14 +2,31 @@
 
 from pathlib import Path
 import re
+import io
+import tokenize
 from time import monotonic
 
 from .syntax import slice_spans
 from .text import TextBuffer
 
 ASSET_PATTERN = re.compile(
-    r'(?:asset|entity|resolve|entity_ref)\(\s*["\']([0-9a-fA-F-]{36})["\']\s*\)|assets\[\s*["\']([0-9a-fA-F-]{36})["\']\s*\]'
+    r'(?:asset|resolve)\(\s*["\']([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})["\']\s*\)|assets\[\s*["\']([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})["\']\s*\]'
 )
+
+def reference_matches(text):
+    """Recognize reference calls only in Python code, never inside comments or strings."""
+    offsets = [0]
+    for line in text.splitlines(keepends=True):
+        offsets.append(offsets[-1] + len(line))
+    names = set()
+    try:
+        for token in tokenize.generate_tokens(io.StringIO(text).readline):
+            if token.type == tokenize.NAME and token.string in ("asset", "resolve", "assets"):
+                names.add(offsets[token.start[0] - 1] + token.start[1])
+    except (tokenize.TokenError, IndentationError):
+        pass
+    return tuple(match for match in ASSET_PATTERN.finditer(text) if match.start() in names)
+
 
 PITCH = 8
 LINE = 20
@@ -35,6 +52,27 @@ def put(entity, **values):
     for key, value in values.items():
         if entity.components.get(key) != value:
             entity.components[key] = value
+
+
+def bind_callbacks(system, target, callbacks):
+    """Register panel-owned operations and release only this attachment's bindings."""
+    bindings = {}
+    for name, callback in callbacks.items():
+        def guarded(*args, _callback=callback, **kwargs):
+            if system.running:
+                return _callback(*args, **kwargs)
+        bindings[name] = guarded
+        setattr(target, name, guarded)
+
+    def release():
+        for name, callback in bindings.items():
+            if getattr(target, name, None) is callback:
+                delattr(target, name)
+        for control in (system.entity,) + system.entity.descendants:
+            for key, callback in tuple(control.components.items()):
+                if callable(callback) and getattr(callback, "__globals__", None) is system.namespace:
+                    del control.components[key]
+    return release
 
 
 def contains(entity, x, y):
@@ -245,12 +283,18 @@ def apply_layout(entity, recursive=False):
 
 
 class Layout:
-    """Attached entity system that automatically evaluates layout rules on update."""
+    """Layout operations, optionally installed as an ordinary script system."""
     def __init__(self, entity):
         self.entity = entity
 
     def update(self, dt):
         apply_layout(self.entity, recursive=True)
+
+    def install(self, name="layout"):
+        from .systems import SystemDefinition
+        return self.entity.systems.attach(name, SystemDefinition(
+            'from lbe.ui import apply_layout\ndef update(dt):\n    apply_layout(entity, recursive=True)\n',
+            '<layout>'))
 
 
 class UI:
@@ -363,7 +407,7 @@ class UI:
             line = text_drag.components.get("line_height", self.line_height)
             rows = max(1, int((text_drag.h - 12) // line))
             cols = max(1, int((text_drag.w - 64) // pitch))
-            lines_count = len(text_drag.buffer.text.split("\n"))
+            lines_count = len(text_drag.buffer.lines)
             changed = False
             if my < text_drag.y + 6 and text_drag.buffer.scroll > 0:
                 text_drag.buffer.scroll = max(0, text_drag.buffer.scroll - 1)
@@ -481,7 +525,7 @@ class UI:
                     dy_lines = max(1, int((text_drag.y + 6 - my) // line))
                     text_drag.buffer.scroll = max(0, text_drag.buffer.scroll - dy_lines)
                 elif my > text_drag.y + text_drag.h - 6:
-                    lines_count = len(text_drag.buffer.text.split("\n"))
+                    lines_count = len(text_drag.buffer.lines)
                     dy_lines = max(1, int((my - (text_drag.y + text_drag.h - 6)) // line))
                     text_drag.buffer.scroll = max(0, min(text_drag.buffer.scroll + dy_lines, max(0, lines_count - rows)))
 
@@ -605,7 +649,7 @@ class UI:
         multiline = "multiline" in control.tags
         if kind == "text":
             if multiline:
-                for m in ASSET_PATTERN.finditer(buffer.text):
+                for m in self.references(control):
                     s, e = m.span()
                     if s < buffer.cursor < e:
                         buffer.cursor = buffer.anchor = e
@@ -628,7 +672,7 @@ class UI:
             elif key in ("LEFT", "RIGHT", "UP", "DOWN", "HOME", "END", "FILE_HOME", "FILE_END", "PAGEUP", "PAGEDOWN", "WORD_LEFT", "WORD_RIGHT"):
                 if multiline and key in ("LEFT", "RIGHT") and not ctrl:
                     jumped = False
-                    for m in ASSET_PATTERN.finditer(buffer.text):
+                    for m in self.references(control):
                         s, e = m.span()
                         if key == "LEFT" and s < buffer.cursor <= e:
                             buffer.cursor = s
@@ -659,7 +703,7 @@ class UI:
             elif key in ("BACKSPACE", "DELETE"):
                 deleted_pill = False
                 if multiline and buffer.anchor == buffer.cursor:
-                    for m in ASSET_PATTERN.finditer(buffer.text):
+                    for m in self.references(control):
                         s, e = m.span()
                         if (key == "BACKSPACE" and s < buffer.cursor <= e) or (key == "DELETE" and s <= buffer.cursor < e):
                             buffer.cursor = e
@@ -708,15 +752,25 @@ class UI:
         buffer = control.buffer
         row = max(0, int((y-control.y-6)//line))+buffer.scroll
         column = max(0, round((x-control.x-48)/pitch))+buffer.horizontal
-        lines = buffer.text.split("\n")
+        lines = buffer.lines
         if row < len(lines):
             line_str = lines[row]
-            for m in ASSET_PATTERN.finditer(line_str):
+            for m in reference_matches(line_str) if control.components.get("inline_references") else ():
                 s, e = m.span()
                 if s < column < e:
                     column = s if (column - s) < (e - column) else e
                     break
         return buffer.index(row, column)
+
+    def references(self, control):
+        if not control.components.get("inline_references"):
+            return ()
+        text = control.buffer.text
+        cached = control.components.get("reference_cache")
+        if cached is None or cached[0] != text:
+            cached = (text, reference_matches(text))
+            control.components["reference_cache"] = cached
+        return cached[1]
 
     def _sync_text(self, control):
         pitch = control.components.get("pitch", self.pitch)
@@ -724,19 +778,19 @@ class UI:
         buffer = control.buffer
         rows = max(1, int((control.h-12)//line_height))
         columns = max(1, int((control.w-64)//pitch))
-        lines = buffer.text.split("\n")
+        lines = buffer.lines
         buffer.scroll = max(0, min(buffer.scroll, max(0, len(lines)-rows)))
         max_col = max((len(l) for l in lines), default=0)
         buffer.horizontal = max(0, min(buffer.horizontal, max(0, max_col-columns)))
         cursor_state = (buffer.text, buffer.cursor)
         if self.focused is control and control.components.get("_view_cursor") != cursor_state:
             buffer.reveal(rows, columns)
-        control.components["_view_cursor"] = cursor_state
+        put(control, _view_cursor=cursor_state)
         children = {child.components.get("part"): child for child in control.children}
 
         def part(name, kind, **values):
             if name not in children:
-                children[name] = self.create(control, name, kind, part=name, **values)
+                children[name] = self.create(control, name, kind, part=name, text_part=True, **values)
             return children[name]
 
         caret = part("cursor", "rect", color=ACCENT, layer=control.layer+3)
@@ -747,6 +801,7 @@ class UI:
         selection_start, selection_end = buffer.selection
         offset = sum(len(line)+1 for line in lines[:buffer.scroll])
         used = {"cursor", "scrollbar", "scroll_track"}
+        reference_starts = {match.start() for match in self.references(control)}
         line_spans = control.components.get("line_spans")
         diag = control.components.get("diagnostic")
         err_row = (diag.get("line", 0) - 1) if diag else -1
@@ -764,7 +819,7 @@ class UI:
             is_error = (row == err_row)
             put(number, visible=True, x=control.x+6, y=y, w=40, h=line_height, text=str(row+1), ink=(ERROR if is_error else MUTED), layer=control.layer+1)
             raw_line = lines[row]
-            matches = list(ASSET_PATTERN.finditer(raw_line))
+            matches = [m for m in ASSET_PATTERN.finditer(raw_line) if offset + m.start() in reference_starts]
             display_line = raw_line
             if matches:
                 line_chars = list(display_line)
@@ -773,11 +828,18 @@ class UI:
                     line_chars[cs:ce] = [" "] * (ce - cs)
                 display_line = "".join(line_chars)
 
-            spans = slice_spans(line_spans[row], buffer.horizontal, columns) if (line_spans and row < len(line_spans)) else None
+            spans = None
+            if line_spans and row < len(line_spans):
+                masked_spans, column = [], 0
+                for chunk, color in line_spans[row]:
+                    masked_spans.append((display_line[column:column + len(chunk)], color))
+                    column += len(chunk)
+                spans = slice_spans(masked_spans, buffer.horizontal, columns)
             put(line, visible=True, x=control.x+48, y=y, w=control.w-64, h=line_height,
                 text=display_line[buffer.horizontal:buffer.horizontal+columns], spans=spans, layer=control.layer+1)
 
-            for m_i, m in enumerate(matches):
+            pill_index = 0
+            for m in matches:
                 uid_str = m.group(1) or m.group(2)
                 reg = getattr(self.runtime.assets, "registry", None) if hasattr(self.runtime, "assets") else None
                 entry = reg.get(uid_str) if reg else None
@@ -816,14 +878,17 @@ class UI:
                 c_vis_start = max(0, col_start - buffer.horizontal)
                 c_vis_end = min(columns, col_end - buffer.horizontal)
 
-                pill_part_name = f"pill:{row}:{m_i}"
+                if c_vis_end <= c_vis_start:
+                    continue
+                pill_part_name = f"pill:{index}:{pill_index}"
+                pill_index += 1
                 used.add(pill_part_name)
                 pill = part(pill_part_name, "button", layer=control.layer+3)
                 pill.tags.add("asset_pill")
                 if c_vis_end > c_vis_start and (col_start >= buffer.horizontal or col_end > buffer.horizontal):
                     pill_x = line.x + c_vis_start * pitch
                     span_w = (c_vis_end - c_vis_start) * pitch
-                    pill_w = max(span_w, len(pill_label) * pitch + 16)
+                    pill_w = min(max(span_w, len(pill_label) * pitch + 16), control.x + control.w - pill_x - 12)
                     pill.components["asset_id"] = uid_str
                     pill.components["asset_token"] = m.group(0)
                     pill.components["asset_name"] = entry["name"] if entry else pill_label.strip()
@@ -831,20 +896,16 @@ class UI:
                     pill.components["asset_span"] = (col_start, col_end)
                     pill.components["text_control"] = control
 
-                    def make_pill_click(p_ctrl, r_num, c_span):
-                        def on_p_click(p_inst, ev=None):
-                            t_ctrl = p_inst.components.get("text_control")
-                            if t_ctrl and "multiline" in t_ctrl.tags:
-                                self.focus(t_ctrl)
-                                mx = ev[1] if ev else p_inst.x + p_inst.w
-                                tgt_col = c_span[0] if (ev and mx < p_inst.x + p_inst.w / 2) else c_span[1]
-                                t_ctrl.buffer.cursor = t_ctrl.buffer.anchor = t_ctrl.buffer.index(r_num, tgt_col)
-                                t_ctrl.components.touch("buffer")
-                        return on_p_click
-
-                    p_click = make_pill_click(pill, row, (col_start, col_end))
-                    pill.components["action"] = p_click
-                    pill.components["on_click"] = p_click
+                    if "on_click" not in pill.components:
+                        def on_pill_click(control, event=None):
+                            target = control.components["text_control"]
+                            self.focus(target)
+                            start, end = control.components["asset_span"]
+                            column = start if event and event[1] < control.x + control.w / 2 else end
+                            target.buffer.cursor = target.buffer.anchor = target.buffer.index(control.components["asset_row"], column)
+                            target.components.touch("buffer")
+                        pill.components["action"] = on_pill_click
+                        pill.components["on_click"] = on_pill_click
 
                     pill_selected = (selection_start < offset + col_end and selection_end > offset + col_start)
                     pill_col = (60, 110, 165) if pill_selected else (35, 55, 75)
@@ -887,7 +948,7 @@ class UI:
             else:
                 put(b_part, visible=False)
         for name, child in children.items():
-            if name not in used:
+            if child.components.get("text_part") and name not in used:
                 put(child, visible=False)
         row, column = buffer.position
         caret_visible = (self.focused is control and
@@ -1078,5 +1139,3 @@ class UI:
             graphics.rect(mx + 14, my + 14, cw, 24, (20, 36, 54, 240), key="dock_chip_bg", layer=30)
             graphics.rect(mx + 14, my + 14, cw, 1, ACCENT, key="dock_chip_top", layer=31)
             graphics.text(chip_text, mx + 18, my + 18, color=(240, 248, 255, 255), key="dock_chip_txt", layer=32)
-
-

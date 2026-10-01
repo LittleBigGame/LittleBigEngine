@@ -10,6 +10,7 @@ def main() -> None:
     parser.add_argument("--frames", type=int, help="Close after this many rendered frames")
     parser.add_argument("--screenshot", help="Save the final frame as a PNG")
     parser.add_argument("--project", help="Directory containing app.py and application scripts")
+    parser.add_argument("--upgrade-template", action="store_true", help="Upgrade unchanged managed template files and preserve custom edits")
     parser.add_argument("--demo", action="store_true", help="Show only the two-entity rendering demo")
     parser.add_argument("--template", default="editor", help="Template used to initialize a new project (editor, demo, counter)")
     args = parser.parse_args()
@@ -22,6 +23,18 @@ def main() -> None:
         return
     if args.frames is not None and args.frames < 1:
         parser.error("--frames must be positive")
+    if args.upgrade_template:
+        from .project import template_path
+        from .project_templates import upgrade_template
+        if not args.project:
+            parser.error("--upgrade-template requires --project")
+        try:
+            result = upgrade_template(args.project, template_path(args.template))
+        except ValueError as error:
+            parser.error(str(error))
+        for name, status in result.items():
+            print(f"{name}: {status}")
+        return
     try:
         import pyglet  # noqa: F401
     except ImportError:

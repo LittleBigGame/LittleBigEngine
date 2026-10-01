@@ -109,6 +109,13 @@ class TextBuffer:
     @text.setter
     def text(self, value):
         self._text = value.replace("\r\n", "\n").replace("\r", "\n") if value else ""
+        self._lines = None
+
+    @property
+    def lines(self):
+        if self._lines is None:
+            self._lines = tuple(self.text.split("\n"))
+        return self._lines
 
     @property
     def selection(self):
@@ -129,7 +136,7 @@ class TextBuffer:
         return prefix.count("\n"), len(prefix.rsplit("\n", 1)[-1])
 
     def index(self, row, column):
-        lines = self.text.split("\n")
+        lines = self.lines
         row = max(0, min(row, len(lines) - 1))
         return sum(len(line) + 1 for line in lines[:row]) + max(0, min(column, len(lines[row])))
 
@@ -216,7 +223,7 @@ class TextBuffer:
         elif direction == "DOWN":
             target = self.index(row + 1, target_col)
         elif direction == "HOME":
-            lines = self.text.split("\n")
+            lines = self.lines
             line = lines[row] if row < len(lines) else ""
             first_non_ws = len(line) - len(line.lstrip(" \t"))
             if column == first_non_ws:
@@ -288,7 +295,7 @@ class TextBuffer:
         else:
             end_row = self.text[:end].count("\n")
 
-        lines = self.text.split("\n")
+        lines = self.lines
         new_lines = list(lines)
         first_line_shift = 0
 
@@ -342,7 +349,7 @@ class TextBuffer:
         else:
             end_row = self.text[:end].count("\n")
 
-        lines = self.text.split("\n")
+        lines = self.lines
         new_lines = list(lines)
 
         non_empty = [new_lines[r] for r in range(start_row, end_row + 1) if new_lines[r].strip()]

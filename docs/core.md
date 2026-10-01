@@ -96,3 +96,38 @@ stop. Event listener failures are recorded without aborting other listeners.
 has a monotonic sequence, kind, entity and optional key. Re-read live state for the
 current value. Recent history is bounded to 4,096 records; subscribe for a complete
 live stream. Listener errors are available through `changes.errors`.
+
+## Persistent application state
+
+`lbe.project.save_project(directory, entities=...)` saves an explicitly owned graph.
+Save persistent application entities, not platform services or UI callbacks. Runtime
+objects are rejected by default; `on_unsupported="skip"` is an explicit lossy option.
+References to live entities outside that graph are rejected rather than silently
+lost. `transient_relations` explicitly excludes links such as editor viewports.
+
+Version 2 preserves detached parents and sibling order, escapes dictionary type
+markers, and atomically replaces `project.json`. Versions 0 and 1 migrate on load.
+Keep backups when upgrading; older engines cannot read version 2 projects.
+Missing entity references become `EntityRef`; missing parent, relation and script
+declarations remain available for recovery and resaving. Inspect
+`restoration(runtime).diagnostics` for missing resources and initialization errors.
+
+`deserialize_entities(..., activate=False)` first restores data and links. Set up
+application services and temporary camera/viewport links, then call
+`activate_entities(...)`. Script `start()` runs against the complete graph. It must
+remain idempotent: avoid creating a second copy of children already restored from
+storage. Project loading exposes `project_data` and `restoring` as runtime services;
+application templates decide which state they own and restore. Loading a template
+alone does not make all its arbitrary Python objects persistent.
+
+`PersistentGraph` tracks explicit application ownership independently of UI
+placement. Call `include(entity)` for additional owned entities and `close()` to
+release its change subscription. Entity handles retain their identity when copied
+inside `components.edit(...)`; containers are still copied.
+
+`lbe.project_files.ProjectFiles` validates project-local moves/deletes and preserves
+asset UUIDs and attached script instances. Its save callback must synchronously
+save the same project's graph. Interrupted operations recover at project startup.
+Deletion retains missing asset identities so restoring a resource recovers links.
+This protects process interruption and ordinary write failures; it is not a
+multi-process transaction or a substitute for backups against disk failure.

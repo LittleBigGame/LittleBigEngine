@@ -155,3 +155,26 @@ changes in an existing project, compare its `code_editor.py` and `app.py` agains
 `src/lbe/templates/editor/` and port the coding system plus the `source_path` and
 `completion_components` assignments in `app.py`'s update function. A new editor
 project receives the updated scripts automatically.
+
+## Safe project and template updates
+
+New projects record template provenance. To adopt engine-supplied script updates,
+run `python -m lbe --project path/to/project --template editor --upgrade-template`.
+Only unchanged managed files are updated. Customized files remain yours; compare
+and port their changes manually. Backups are retained under `.lbe-template-backups`.
+Existing projects without provenance require manual comparison; the engine never
+assumes their scripts are disposable copies.
+
+Project entities retain persistence ownership when reparented; popup UI entities
+are excluded. File and folder moves preserve registered UUIDs and attached script
+instances, including their ordering. They do not rewrite arbitrary component
+strings that happen to match a file name. A deleted asset remains a missing UUID
+reference rather than silently becoming another asset.
+
+The current Duplicate Entity action copies component containers and tags only;
+it does not duplicate children, system instances, or relation edges. Entity-valued
+components keep references to the existing target entities.
+
+Dockable panels remain work in progress. Custom dock trees retain their own split
+ratios; the default layout still supports the existing scalar split controls during
+migration. Completing panel drag/drop is separate from project stabilization.

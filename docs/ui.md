@@ -116,3 +116,14 @@ Click an enabled item or use Up/Down and Enter. Escape or an outside click close
 the menu without activating controls underneath it. The wheel scrolls long
 menus. Disabled items cannot execute. Text focus is retained while popup input
 is captured. Callback errors use the UI's existing error reporting path.
+
+`Layout(entity).install()` attaches layout through the ordinary script-system API;
+`Layout(entity).update(dt)` remains available for direct application scheduling.
+`lbe.ui.bind_callbacks(system, owner, callbacks)` registers lifecycle-owned handlers;
+call the returned release function in `stop()` to remove them. Panel scripts should
+retain their application state when initialized rather than rediscovering it from
+an assumed parent after a dock/reparent operation.
+
+Inline UUID reference pills are opt-in: set `inline_references=True` on a code
+text area. Only actual `asset(...)`, `resolve(...)`, and `assets[...]` expressions
+are recognized; comments, string contents, and ordinary text fields remain text.

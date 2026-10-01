@@ -42,17 +42,17 @@ class CompletionTests(unittest.TestCase):
         }
 
         # 1. Direct entity symbols and their components
-        src1 = 'def update(dt):\n    HeroShip.v'
+        src1 = 'def update(dt):\n    resolve("HeroShip").v'
         prefix1, matches1 = complete(src1, len(src1), 'test.py', context)
         self.assertEqual(prefix1, 'v')
         self.assertIn(('vx', 'statement'), matches1)
 
         # 2. entities container namespace
-        src2 = 'def update(dt):\n    entities.'
+        src2 = 'def update(dt):\n    resolve("DockingBay").'
         _, matches2 = complete(src2, len(src2), 'test.py', context)
         names2 = [m[0] for m in matches2]
-        self.assertIn('HeroShip', names2)
-        self.assertIn('DockingBay', names2)
+        self.assertIn('status', names2)
+        self.assertIn('docked', names2)
 
         # 3. query child return type with game components
         src3 = 'def update(dt):\n    for child in query("ship"):\n        child.v'
@@ -61,9 +61,9 @@ class CompletionTests(unittest.TestCase):
         self.assertIn(('vx', 'statement'), matches3)
 
         # 4. Known components prioritized ahead of generic Entity properties
-        src4 = 'def update(dt):\n    HeroShip.'
+        src4 = 'def update(dt):\n    resolve("HeroShip").'
         _, matches4 = complete(src4, len(src4), 'test.py', context)
-        first_match_names = [m[0] for m in matches4[:4]]
+        first_match_names = [m[0] for m in matches4[:len(context["all_components"])]]
         # Components health, vx, x, y should appear first
         for comp in ('health', 'vx', 'x', 'y'):
             self.assertIn(comp, first_match_names)
