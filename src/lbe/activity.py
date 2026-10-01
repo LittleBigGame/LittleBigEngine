@@ -83,6 +83,8 @@ class ActivityLog:
         self.write(change.kind, detail, target=self._target(entity), source=self._source(change.source), editor=editor)
 
     def _event(self, name, args, kwargs):
+        if name == 'query.result' and not self.frame_calls:
+            return
         if args and isinstance(args[0], Entity):
             current = args[0]
             while current is not None:

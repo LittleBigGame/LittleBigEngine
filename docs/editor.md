@@ -212,3 +212,24 @@ system source automatically. Runtime changes also expose immutable `old`, `new`
 and `source` metadata; event observers can use `events.observe(callback)`.
 These are generic runtime observations, while panel presentation and filtering
 policy live in the editor project scripts.
+
+
+## Observed system effects
+
+Right-click a system script in Project Files and choose **Highlight affected
+entities**. Blue outlines show entities returned by its queries; green outlines
+show entities it changed through LBE component, tag, relation or hierarchy APIs.
+Green takes priority when both apply. The inspector also lists systems attached
+to other owners that affected the selected entity, using the same colours.
+Click a system row to open its source. Names resolve from the asset registry;
+selection uses the stable asset UUID.
+
+Effects describe the most recent update and subsequent draw/event activity for
+each attachment, rather than predictions about code that has not run. Component
+assignments count as observed writes, including assigning the existing value.
+Unreported mutations inside arbitrary Python objects cannot be detected.
+
+The editor template supports nested system files. Docking, effects presentation
+and source/file operations are separate attachments under `systems/editor/`.
+They can be detached and replaced using the standard system API. Further editor
+systems currently remain in the template root during the folder migration.

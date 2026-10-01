@@ -17,6 +17,42 @@ except ImportError:
 
 
 class EditorTests(unittest.TestCase):
+    def test_system_effect_file_menu_and_inspector_use_asset_identity(self):
+        from lbe import SystemDefinition
+        ed = self.editor
+        path = ed.project / 'observed.py'
+        path.write_text('def update(dt):\n    for target in query("effect_target"):\n        target.x += 1', encoding='utf-8')
+        identity = self.runtime.assets.registry.register(path)
+        ed.game.systems.attach('observed', self.runtime.assets[identity])
+        target = self.runtime.create(parent=ed.game, effect_target=True, x=0, y=0, w=1, h=1)
+        self.runtime.step(0)
+        actions = ed.app.systems["app"].namespace["context_actions"]({'file_item':dict(path=path,name=path.name,is_dir=False,type='system',asset_id=identity,rel_path=path.name)})
+        next(a for a in actions if a and a['label'] == 'Highlight affected entities')['run'](None)
+        self.assertEqual(ed.app.highlight_system_asset, identity)
+        self.assertEqual(ed.affected_entities()[target.id], (90,195,125))
+        ed.select(target)
+        ed.inspector_sync()
+        row = next(r for r in ed.system_rows if r.visible and r.components.get('system_key') == (ed.game.id,'observed'))
+        self.assertEqual(row.ink,(90,195,125))
+        self.assertEqual(row.asset_id,identity)
+        path.write_text('def update(dt):\n    list(query("effect_target"))', encoding='utf-8')
+        ed.game.systems.reload('observed', SystemDefinition(path.read_text(encoding='utf-8'), str(path)))
+        self.runtime.step(0)
+        self.assertEqual(ed.affected_entities()[target.id], (85,155,230))
+        self.assert_healthy()
+
+    def test_docking_attachment_can_detach_and_recompose(self):
+        app = self.editor.app
+        instance = app.systems['docking']
+        definition = instance.definition
+        self.assertTrue(definition.path.endswith('systems\\editor\\layout\\docking.py') or definition.path.endswith('systems/editor/layout/docking.py'))
+        del app.systems['docking']
+        self.runtime.step(0)
+        self.assert_healthy()
+        app.systems.attach('docking',definition)
+        self.runtime.step(0)
+        self.assert_healthy()
+
     def test_active_tabs_keep_panel_border_colour_without_hover_and_attach_text_fits(self):
         ed = self.editor
         hierarchy = next(b for b in ed.dock_tab_buttons if b.text == 'HIERARCHY')
@@ -290,13 +326,19 @@ class EditorTests(unittest.TestCase):
         from lbe import SystemDefinition
         root = self.editor.app
         old = root.systems["app"]
-        source = old.definition.source.replace("New source:", "Revised source:")
+        source = old.definition.source
         before = set(self.runtime.entities)
         replacement = root.systems.reload("app", SystemDefinition(source, old.definition.path))
         self.assertIsNot(replacement, old)
         self.assertEqual(set(self.runtime.entities), before)
         self.click(self.editor.new_button)
+        self.assertIn("New source:", root.status)
+        provider = root.systems["source_files"]
+        updated = provider.definition.source.replace("New source:", "Revised source:")
+        root.systems.reload("source_files", SystemDefinition(updated, provider.definition.path))
+        self.click(self.editor.new_button)
         self.assertIn("Revised source:", root.status)
+        self.assertEqual(set(self.runtime.entities), before)
         self.assertNotIn("editor", self.runtime.services)
 
     def test_source_editor_cursor_and_selection_alignment(self):
@@ -542,10 +584,10 @@ class EditorTests(unittest.TestCase):
         self.assertIs(ed.app.relations["selection"], ed.code_panel)
 
         sys_buttons = [b for b in ed.system_rows if b.visible]
-        self.assertTrue(any(b.components.get("text") == "code_editor" for b in sys_buttons))
+        self.assertTrue(any(b.components.get("text") == "code_editor.py" for b in sys_buttons))
 
         # Clicking system button opens its source in code editor
-        code_sys_btn = next(b for b in sys_buttons if b.components.get("text") == "code_editor")
+        code_sys_btn = next(b for b in sys_buttons if b.components.get("text") == "code_editor.py")
         self.click(code_sys_btn)
         self.assertEqual(ed.path_field.buffer.text, "code_editor.py")
         self.assertIn("Code editor panel and coding-specific specialization system", ed.code.buffer.text)
@@ -562,30 +604,30 @@ class EditorTests(unittest.TestCase):
 
         # 3. Inspect TextArea's reusable behavior and coding-specific behavior
         text_area_sys = [b.components.get("text") for b in ed.system_rows if b.visible]
-        self.assertIn("text_area", text_area_sys)
-        self.assertIn("code_editor", text_area_sys)
+        self.assertIn("text_area.py", text_area_sys)
+        self.assertIn("code_editor.py", text_area_sys)
 
         # Open text_area system source
-        ta_btn = next(b for b in ed.system_rows if b.visible and b.components.get("text") == "text_area")
+        ta_btn = next(b for b in ed.system_rows if b.visible and b.components.get("text") == "text_area.py")
         self.click(ta_btn)
         self.assertEqual(ed.path_field.buffer.text, "text_area.py")
         self.assertIn("Reusable multiline text area entity system", ed.code.buffer.text)
 
         # Open code_editor specialization system source
-        ce_btn = next(b for b in ed.system_rows if b.visible and b.components.get("text") == "code_editor")
+        ce_btn = next(b for b in ed.system_rows if b.visible and b.components.get("text") == "code_editor.py")
         self.click(ce_btn)
         self.assertEqual(ed.path_field.buffer.text, "code_editor.py")
 
         # 4. Verify same approach works for other controls (e.g. HierarchyPanel, InspectorPanel)
         self.select(ed.hierarchy)
         self.runtime.step(0)
-        h_btn = next(b for b in ed.system_rows if b.visible and b.components.get("text") == "hierarchy")
+        h_btn = next(b for b in ed.system_rows if b.visible and b.components.get("text") == "hierarchy.py")
         self.click(h_btn)
         self.assertEqual(ed.path_field.buffer.text, "hierarchy.py")
 
         self.select(ed.inspector)
         self.runtime.step(0)
-        i_btn = next(b for b in ed.system_rows if b.visible and b.components.get("text") == "inspector")
+        i_btn = next(b for b in ed.system_rows if b.visible and b.components.get("text") == "inspector.py")
         self.click(i_btn)
         self.assertEqual(ed.path_field.buffer.text, "inspector.py")
 

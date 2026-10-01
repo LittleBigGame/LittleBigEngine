@@ -123,3 +123,13 @@ records, and excludes its presentation subtree to prevent logging feedback. The
 editor's `system_log.py` composes ordinary UI entities; no log panel concepts enter
 Core. Observation preserves direct-child queries, independent system namespaces,
 listener failure isolation, and all-update-before-all-draw ordering.
+
+
+Query iteration publishes a generic `query.result` observation containing the
+snapshot returned to its caller. `SystemEffects` derives per-attachment queried
+and written entity UUID sets from that observation and existing source-attributed
+changes. It retains no entity handles and discards detached/deleted attachments.
+Registry identities and current attachment paths remain authoritative. Editor
+colouring, menu actions and overlays are ordinary template system behavior above
+Core; the runtime does not know about inspection colours or panels. Nested
+template files retain per-file upgrade provenance and recovery.

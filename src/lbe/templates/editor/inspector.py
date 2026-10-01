@@ -120,7 +120,18 @@ def inspector_sync():
 
     entity = inspected()
     items = tuple(entity.components.items())
-    systems = tuple(entity.systems.items())
+    systems = [(entity, name, instance, None) for name, instance in entity.systems.items()]
+    for effect in effects.affecting(entity):
+        owner = next((e for e in runtime.entities if e.id == effect.owner), None)
+        if owner is None or effect.system not in owner.systems:
+            continue
+        colour = (90, 195, 125) if entity.id in effect.changed else (85, 155, 230)
+        row = (owner, effect.system, owner.systems[effect.system], colour)
+        existing = next((i for i, r in enumerate(systems) if r[0] is owner and r[1] == effect.system), None)
+        if existing is None:
+            systems.append(row)
+        else:
+            systems[existing] = row
     children = tuple(entity.children)
     relations = tuple(entity.relations.items())
     i_pad = parse_box(ip.components.get("padding", (8, 12, 8, 12)))
@@ -340,14 +351,17 @@ def inspector_sync():
                 put(s_btn, visible=shown)
                 put(e_btn, visible=shown)
                 if shown:
-                    name, instance = systems[index]
-                    s_title = name + (' !' if instance.errors else '')
-                    s_ink = (255, 120, 120) if instance.errors else INK
+                    owner, name, instance, effect_colour = systems[index]
+                    identity = assets.registry.get_id(instance.definition.path) if instance.definition.path else None
+                    entry = assets.registry.get(identity) if identity else None
+                    s_title = (entry["name"] if entry else name) + (' !' if instance.errors else '')
+                    s_ink = (255, 120, 120) if instance.errors else (effect_colour or INK)
                     put(s_btn, x=ip.x + 12, y=cur_y, w=s_w, h=24, text=s_title, ink=s_ink)
                     put(e_btn, x=ip.x + 12 + s_w + 4, y=cur_y, w=btn_edit_w, h=24, text='Edit')
-                    s_btn.system_key = (entity.id, name)
-                    s_btn.action = lambda e=entity, n=name: open_system(e, n)
-                    e_btn.action = lambda e=entity, n=name: open_system(e, n)
+                    s_btn.system_key = (owner.id, name)
+                    s_btn.asset_id = identity
+                    s_btn.action = lambda e=owner, n=name: open_system(e, n)
+                    e_btn.action = lambda e=owner, n=name: open_system(e, n)
                     cur_y += 26
             cur_y += 4
 

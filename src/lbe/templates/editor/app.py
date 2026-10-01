@@ -110,214 +110,70 @@ def parse_value(text):
         raise ValueError("Use a Python literal; put text in quotes") from None
 
 
-def on_drag_col_splitter(control, event):
-    w = state.window.width
-    min_w = 200
-    max_w = max(min_w, w - 300)
-    cur_w = state.app.components.get("left_column_w", 370)
-    if len(event) > 5 and event[5] != 0:
-        new_w = max(min_w, min(max_w, cur_w + event[5]))
-    elif len(event) > 1:
-        new_w = max(min_w, min(max_w, event[1]))
-    else:
-        return
-    put(state.app, left_column_w=new_w)
-    if hasattr(state, "dock_tree"):
-        split_main = state.dock_tree.find_node("split_main")
-        if split_main and isinstance(split_main, SplitNode):
-            ws_x = 8
-            ws_w = max(100, w - 16)
-            split_main.ratio = max(0.1, min(0.9, (new_w - ws_x) / ws_w))
-    layout()
+def on_drag_col_splitter(*args, **kwargs):
+    callback = getattr(state, "on_drag_col_splitter", None)
+    if callback is not None:
+        return callback(*args, **kwargs)
 
 
-def on_drag_hierarchy_splitter(control, event):
-    top_y = state.header.y + state.header.h
-    status_m = parse_box(state.status.components.get("margin", (0, 16, 5, 16)))
-    status_h = state.status.components.get("h", 20)
-    status_y = state.window.height - status_m[2] - status_h
-    available_h = status_y - top_y
-    min_h = 100
-    max_h = max(min_h, available_h - 150)
-    cur_h = state.hierarchy.components.get("panel_h", 240)
-    if len(event) > 6 and event[6] != 0:
-        new_h = max(min_h, min(max_h, cur_h + event[6]))
-    elif len(event) > 2:
-        hm = parse_box(state.hierarchy.components.get("margin", (8, 8, 4, 8)))
-        new_h = max(min_h, min(max_h, event[2] - top_y - hm[0]))
-    else:
-        return
-    put(state.hierarchy, panel_h=new_h)
-    if hasattr(state, "dock_tree"):
-        split_left = state.dock_tree.find_node("split_left")
-        if split_left and isinstance(split_left, SplitNode):
-            split_left.ratio = max(0.1, min(0.9, new_h / max(1, available_h)))
-    layout()
+def on_drag_hierarchy_splitter(*args, **kwargs):
+    callback = getattr(state, "on_drag_hierarchy_splitter", None)
+    if callback is not None:
+        return callback(*args, **kwargs)
 
 
-def on_drag_code_splitter(control, event):
-    top_y = state.header.y + state.header.h
-    status_m = parse_box(state.status.components.get("margin", (0, 16, 5, 16)))
-    status_h = state.status.components.get("h", 20)
-    status_y = state.window.height - status_m[2] - status_h
-    available_h = status_y - top_y
-    min_y = top_y + 80
-    max_y = max(min_y, status_y - 120)
-    cur_split = state.code_panel.components.get("split_y", max(330, int(state.window.height * 0.45)))
-    if len(event) > 6 and event[6] != 0:
-        new_split = max(min_y, min(max_y, cur_split + event[6]))
-    elif len(event) > 2:
-        new_split = max(min_y, min(max_y, event[2]))
-    else:
-        return
-    put(state.code_panel, split_y=new_split)
-    if hasattr(state, "dock_tree"):
-        split_right = state.dock_tree.find_node("split_right")
-        if split_right and isinstance(split_right, SplitNode):
-            split_right.ratio = max(0.1, min(0.9, (new_split - top_y) / max(1, available_h)))
-    layout()
+def on_drag_code_splitter(*args, **kwargs):
+    callback = getattr(state, "on_drag_code_splitter", None)
+    if callback is not None:
+        return callback(*args, **kwargs)
 
 
-def contains_box(box, x, y):
-    bx, by, bw, bh = box
-    return bx <= x < bx + bw and by <= y < by + bh
+def contains_box(*args, **kwargs):
+    callback = getattr(state, "contains_box", None)
+    if callback is not None:
+        return callback(*args, **kwargs)
 
 
-def start_panel_dock_drag(panel_name, event):
-    if len(event) < 3:
-        return
-    mx, my = event[1], event[2]
-    state.app.components["dock_drag"] = {
-        "panel": panel_name,
-        "start_pos": (mx, my),
-        "mouse_pos": (mx, my),
-        "target_group": None,
-        "target_rect": None,
-        "drop_zones": None,
-        "zone": None,
-        "preview_rect": None,
-    }
+def start_panel_dock_drag(*args, **kwargs):
+    callback = getattr(state, "start_panel_dock_drag", None)
+    if callback is not None:
+        return callback(*args, **kwargs)
 
 
-def on_dock_drag(dock_drag, event):
-    if len(event) < 3 or not hasattr(state, "dock_tree"):
-        return
-    mx, my = event[1], event[2]
-    dock_drag["mouse_pos"] = (mx, my)
-    dragged = dock_drag.get("panel")
-
-    best_group = None
-    for group in state.dock_tree.all_tab_groups():
-        if group.panels == [dragged]:
-            continue
-        gx, gy, gw, gh = group.rect
-        if gx <= mx < gx + gw and gy <= my < gy + gh:
-            best_group = group
-            break
-
-    if best_group is not None:
-        target_rect = best_group.content_rect
-        zones = DockTree.get_dock_drop_zones(target_rect)
-        active_zone = None
-        if contains_box(zones["center"], mx, my):
-            active_zone = "center"
-        elif contains_box(zones["left"], mx, my):
-            active_zone = "left"
-        elif contains_box(zones["right"], mx, my):
-            active_zone = "right"
-        elif contains_box(zones["top"], mx, my):
-            active_zone = "top"
-        elif contains_box(zones["bottom"], mx, my):
-            active_zone = "bottom"
-        else:
-            tx, ty, tw, th = target_rect
-            rel_x = (mx - tx) / max(1, tw)
-            rel_y = (my - ty) / max(1, th)
-            if 0.25 <= rel_x <= 0.75 and 0.25 <= rel_y <= 0.75:
-                active_zone = "center"
-            elif rel_x < 0.25:
-                active_zone = "left"
-            elif rel_x > 0.75:
-                active_zone = "right"
-            elif rel_y < 0.25:
-                active_zone = "top"
-            else:
-                active_zone = "bottom"
-
-        dock_drag["target_group"] = best_group
-        dock_drag["target_rect"] = target_rect
-        dock_drag["drop_zones"] = zones
-        dock_drag["zone"] = active_zone
-        dock_drag["preview_rect"] = DockTree.get_dock_preview_rect(target_rect, active_zone) if active_zone else None
-    else:
-        dock_drag["target_group"] = None
-        dock_drag["target_rect"] = None
-        dock_drag["drop_zones"] = None
-        dock_drag["zone"] = None
-        dock_drag["preview_rect"] = None
+def on_dock_drag(*args, **kwargs):
+    callback = getattr(state, "on_dock_drag", None)
+    if callback is not None:
+        return callback(*args, **kwargs)
 
 
-def on_dock_drop(dock_drag, event):
-    dragged = dock_drag.get("panel")
-    target_group = dock_drag.get("target_group")
-    zone = dock_drag.get("zone")
-
-    if dragged and target_group and zone and hasattr(state, "dock_tree"):
-        success = state.dock_tree.dock_panel(dragged, target_group, zone)
-        if success:
-            display_name = dragged.replace("_", " ").title()
-            message(f"Docked {display_name} ({zone})")
-            save_editor_project()
-    layout()
-    sync_all_editor_panels()
+def on_dock_drop(*args, **kwargs):
+    callback = getattr(state, "on_dock_drop", None)
+    if callback is not None:
+        return callback(*args, **kwargs)
 
 
-def sync_all_editor_panels():
-    fn_h = getattr(state, "hierarchy_sync", None)
-    if fn_h and fn_h is not hierarchy_sync:
-        fn_h()
-    fn_f = getattr(state, "file_explorer_sync", None)
-    if fn_f:
-        fn_f()
-    fn_i = getattr(state, "inspector_sync", None)
-    if fn_i and fn_i is not inspector_sync:
-        fn_i()
+def sync_all_editor_panels(*args, **kwargs):
+    callback = getattr(state, "sync_all_editor_panels", None)
+    if callback is not None:
+        return callback(*args, **kwargs)
 
 
-def close_panel(panel_name):
-    if hasattr(state, "dock_tree"):
-        state.dock_tree.remove_panel(panel_name)
-    display_name = panel_name.replace("_", " ").title()
-    message(f"Closed {display_name} (restore from View menu)")
-    layout()
-    sync_all_editor_panels()
-    save_editor_project()
+def close_panel(*args, **kwargs):
+    callback = getattr(state, "close_panel", None)
+    if callback is not None:
+        return callback(*args, **kwargs)
 
 
-def toggle_panel_view(panel_name):
-    if not hasattr(state, "dock_tree"):
-        return
-    group = state.dock_tree.find_tab_group_with_panel(panel_name)
-    if group:
-        close_panel(panel_name)
-    else:
-        state.dock_tree.restore_panel_default(panel_name)
-        display_name = panel_name.replace("_", " ").title()
-        message(f"Restored {display_name}")
-        layout()
-        sync_all_editor_panels()
-        save_editor_project()
+def toggle_panel_view(*args, **kwargs):
+    callback = getattr(state, "toggle_panel_view", None)
+    if callback is not None:
+        return callback(*args, **kwargs)
 
 
-def reset_default_layout():
-    state.dock_tree = DockTree()
-    state.app.components["left_column_w"] = 370
-    state.hierarchy.components["panel_h"] = 240
-    state.code_panel.components["split_y"] = max(330, int(state.window.height * 0.45))
-    message("Reset editor layout to default")
-    layout()
-    sync_all_editor_panels()
-    save_editor_project()
+def reset_default_layout(*args, **kwargs):
+    callback = getattr(state, "reset_default_layout", None)
+    if callback is not None:
+        return callback(*args, **kwargs)
 
 
 def open_file_menu_dropdown(button):
@@ -361,14 +217,10 @@ def open_view_menu_dropdown(button):
     open_menu(state.ui, button, button.x, button.y + button.h + 2, actions=actions)
 
 
-def select_dock_tab(group, index, panel_name):
-    group.active = index
-    if panel_name == "hierarchy":
-        state.active_left_tab = "hierarchy"
-    elif panel_name == "files":
-        state.active_left_tab = "files"
-    layout()
-    sync_all_editor_panels()
+def select_dock_tab(*args, **kwargs):
+    callback = getattr(state, "select_dock_tab", None)
+    if callback is not None:
+        return callback(*args, **kwargs)
 
 
 def initialize():
@@ -376,6 +228,12 @@ def initialize():
     state = SimpleNamespace(runtime=entity.runtime, project=project, window=window,
                             graphics=graphics, input=input, app=entity)
     entity.components["application_state"] = state
+    state.hierarchy_sync = hierarchy_sync
+    state.inspector_sync = inspector_sync
+    state.message = message
+    state.save_editor_project = save_editor_project
+    entity.systems.attach("docking", assets["31c71ace-2c53-52f9-9164-56b175f5d969"])
+    entity.systems.attach("effects", assets["d6929c06-9cca-576e-b179-d577c2da8312"])
     state.files = ProjectFiles(state.runtime, state.project)
     state.ui = UI(entity, window, graphics, input)
     state.background = state.ui.create(entity, "Background", "rect", color=BG, layer=0)
@@ -631,6 +489,7 @@ def initialize():
         state.file_explorer.systems.attach('file_explorer', assets.system(project / 'file_explorer.py'))
     if (project / 'inspector.py').exists() and 'inspector' not in state.inspector.systems:
         state.inspector.systems.attach('inspector', assets.system(project / 'inspector.py'))
+    entity.systems.attach("source_files", assets["1e1ba739-27d5-552a-a816-91b1fa7081b3"])
     state.project_graph = PersistentGraph(state.runtime, tuple(restored.values()) + state.game.descendants if project_data and project_data.get("entities") else (state.game,) + state.game.descendants, application=state.app)
     if "render" in state.game.systems:
         open_system(state.game, "render")
@@ -638,310 +497,10 @@ def initialize():
         open_system(state.game, next(iter(state.game.systems)))
 
 
-def layout():
-    w, h = (state.window.width, state.window.height)
-    put(state.app, x=0, y=0, w=w, h=h)
-    put(state.background, x=0, y=0, w=w, h=h)
-
-    # Header layout (docked top with padding)
-    header_h = state.header.components.get("h", 44)
-    put(state.header, x=0, y=0, w=w, h=header_h)
-    btn_gap = 10
-    rx = w - 16
-    is_paused = bool(state.game.components.get("paused", False))
-    put(state.run_button, text='Run (F5)' if is_paused else 'Pause (F5)')
-    for btn, width in ((state.panel_button, 174), (state.system_panel_button, 150),
-                       (state.detach_button, 150), (state.save_project_button, 130),
-                       (state.run_button, 110)):
-        rx -= width
-        put(btn, x=rx, y=8, w=width, h=28)
-        rx -= btn_gap
-
-    # Top menu bar buttons layout
-    if hasattr(state, "menu_file_btn"):
-        put(state.menu_file_btn, x=64, y=8, w=48, h=28)
-    if hasattr(state, "menu_edit_btn"):
-        put(state.menu_edit_btn, x=116, y=8, w=48, h=28)
-    if hasattr(state, "menu_view_btn"):
-        put(state.menu_view_btn, x=168, y=8, w=54, h=28)
-
-    # Status bar layout (docked bottom with margin)
-    status_m = parse_box(state.status.components.get("margin", (0, 16, 5, 16)))
-    status_h = state.status.components.get("h", 20)
-    status_y = h - status_m[2] - status_h
-    put(state.status, x=status_m[3], y=status_y, w=max(0, w - status_m[3] - status_m[1]), h=status_h, text=state.app.status)
-
-    top_y = state.header.y + state.header.h
-    ws_x = 8
-    ws_y = top_y + 4
-    ws_w = max(100, w - 16)
-    ws_h = max(100, status_y - ws_y - 4)
-
-
-
-    if hasattr(state, "dock_tree") and state.dock_tree.is_default():
-        left_col_w = state.app.components.get("left_column_w", 370)
-        panel_h = state.hierarchy.components.get("panel_h", 240)
-        split_y = state.code_panel.components.get("split_y", max(330, int(h * 0.45)))
-        group_hf = state.dock_tree.find_tab_group_with_panel("hierarchy")
-        panel_rects = state.dock_tree.compute_default_layout(
-            w=w,
-            h=h,
-            header_h=header_h,
-            status_h=status_h,
-            status_m_bottom=status_m[2],
-            left_col_w=left_col_w,
-            panel_h=panel_h,
-            split_y=split_y,
-        )
-        split_main = state.dock_tree.find_node("split_main")
-        split_left = state.dock_tree.find_node("split_left")
-        split_right = state.dock_tree.find_node("split_right")
-    else:
-        split_main = state.dock_tree.find_node("split_main")
-        split_left = state.dock_tree.find_node("split_left")
-        split_right = state.dock_tree.find_node("split_right")
-        panel_rects = state.dock_tree.compute_layout(ws_x, ws_y, ws_w, ws_h) if hasattr(state, "dock_tree") else {}
-
-    # Legacy header tab buttons hidden — dynamic tab buttons on each group replace them
-    put(state.tab_hierarchy, visible=False)
-    put(state.tab_files, visible=False)
-
-    # Panels layout
-    if state.hierarchy.components.get("dock") == "float":
-        put(state.hierarchy, visible=True)
-    elif "hierarchy" in panel_rects:
-        hx, hy, hw, hh = panel_rects["hierarchy"]
-        put(state.hierarchy, visible=True, x=hx, y=hy, w=hw, h=hh)
-    else:
-        put(state.hierarchy, visible=False)
-
-    if hasattr(state, "file_explorer"):
-        if state.file_explorer.components.get("dock") == "float":
-            put(state.file_explorer, visible=True)
-        elif "files" in panel_rects:
-            fx, fy, fw, fh = panel_rects["files"]
-            put(state.file_explorer, visible=True, x=fx, y=fy, w=fw, h=fh)
-        else:
-            put(state.file_explorer, visible=False)
-
-    if state.inspector.components.get("dock") == "float":
-        pass
-    elif "inspector" in panel_rects:
-        ix, iy, iw, ih = panel_rects["inspector"]
-        put(state.inspector, visible=True, x=ix, y=iy, w=iw, h=ih)
-    else:
-        put(state.inspector, visible=False)
-
-    if state.viewport.components.get("dock") == "float":
-        pass
-    elif "viewport" in panel_rects:
-        vx, vy, vw, vh = panel_rects["viewport"]
-        group = state.dock_tree.find_tab_group_with_panel('viewport')
-        px, py, pw, ph = group.rect
-        content_y = max(vy, group.tab_bar_rect[1] + group.tab_bar_rect[3]) + 6
-        content_bottom = py + ph - 26
-        put(state.viewport_panel, visible=True, x=px, y=py, w=pw, h=ph)
-        put(state.zoom_label, visible=True, x=px + 8, y=py + ph - 22, w=max(0, pw - 16), h=18,
-            text=f'WORLD  /  {state.camera.zoom:.0f} px per metre  /  drag to pan  /  scroll to zoom')
-        put(state.viewport, visible=True, x=px + 6, y=content_y, w=max(0, pw - 12), h=max(0, content_bottom-content_y))
-    else:
-        put(state.zoom_label, visible=False)
-        put(state.viewport, visible=False)
-        put(state.viewport_panel, visible=False)
-
-    if state.code_panel.components.get("dock") == "float":
-        pass
-    elif "code_panel" in panel_rects:
-        cx, cy, cw, ch = panel_rects["code_panel"]
-        put(state.code_panel, visible=True, x=cx, y=cy, w=cw, h=ch)
-        cp = state.code_panel
-        c_pad = parse_box(cp.components.get("padding", (8, 12, 8, 12)))
-        tb_y = cy + 32
-        if state.ui.focused is not state.path_field and not state.path_field.components.get("readonly", True):
-            state.path_field.components["readonly"] = True
-            state.path_field.components["ink"] = (160, 180, 205)
-            state.path_field.on_commit = None
-            if state._saved_source:
-                state.path_field.buffer = TextBuffer(state._saved_source[0])
-        put(state.path_field, x=cx + c_pad[3], y=tb_y, w=max(130, cw - c_pad[3] - c_pad[1]), h=28)
-        for button in (state.new_button, state.open_button, state.save_button, state.attach_button):
-            put(button, visible=False)
-        put(state.code, x=cx + c_pad[3], y=cy + 68, w=max(0, cw - c_pad[3] - c_pad[1]), h=max(0, ch - 100))
-        put(state.code_info, x=cx + c_pad[3], y=cy + ch - 25, w=max(0, cw - c_pad[3] - c_pad[1]), h=20)
-    else:
-        put(state.code_panel, visible=False)
-
-    # Panel close buttons (X)
-    if hasattr(state, "close_hierarchy_btn"):
-        if "hierarchy" in panel_rects and state.hierarchy.components.get("visible", True):
-            hx, hy, hw, hh = panel_rects["hierarchy"]
-            put(state.close_hierarchy_btn, visible=True, x=hx + hw - 24, y=hy + 4, w=18, h=18)
-        else:
-            put(state.close_hierarchy_btn, visible=False)
-
-    if hasattr(state, "close_files_btn"):
-        if "files" in panel_rects and state.file_explorer.components.get("visible", True):
-            fx, fy, fw, fh = panel_rects["files"]
-            put(state.close_files_btn, visible=True, x=fx + fw - 24, y=fy + 4, w=18, h=18)
-        else:
-            put(state.close_files_btn, visible=False)
-
-    if hasattr(state, "close_inspector_btn"):
-        if "inspector" in panel_rects and state.inspector.components.get("visible", True):
-            ix, iy, iw, ih = panel_rects["inspector"]
-            put(state.close_inspector_btn, visible=True, x=ix + iw - 24, y=iy + 4, w=18, h=18)
-        else:
-            put(state.close_inspector_btn, visible=False)
-
-    if hasattr(state, "close_viewport_btn"):
-        if "viewport" in panel_rects and state.viewport.components.get("visible", True):
-            vx, vy, vw, vh = state.dock_tree.find_tab_group_with_panel('viewport').tab_bar_rect
-            put(state.close_viewport_btn, visible=True, x=vx + vw - 24, y=vy + 4, w=18, h=18)
-        else:
-            put(state.close_viewport_btn, visible=False)
-
-    if hasattr(state, "close_code_btn"):
-        if "code_panel" in panel_rects and state.code_panel.components.get("visible", True):
-            cx, cy, cw, ch = panel_rects["code_panel"]
-            put(state.close_code_btn, visible=True, x=cx + cw - 24, y=cy + 4, w=18, h=18)
-        else:
-            put(state.close_code_btn, visible=False)
-
-    # Dynamic Tab Buttons for all panel groups (title bars + tab selectors)
-    panel_border = (38, 55, 75)
-    for name,panel in (('hierarchy',state.hierarchy), ('files',state.file_explorer),
-                       ('inspector',state.inspector), ('viewport',state.viewport_panel), ('code_panel',state.code_panel)):
-        group = state.dock_tree.find_tab_group_with_panel(name)
-        inset = max(0, group.tab_bar_rect[1]+group.tab_bar_rect[3]-panel.y) if group else 0
-        put(panel, border_color=panel_border, border_width=2, border_inset=(inset,0,0,0), bevel=False)
-    tab_btn_idx = 0
-    if hasattr(state, "dock_tree") and hasattr(state, "dock_tab_buttons"):
-        for group in state.dock_tree.all_tab_groups():
-            if not group.tab_rects:
-                continue
-            for p_idx, (p_name, (tx, ty, tw, th)) in enumerate(group.tab_rects):
-                if tab_btn_idx >= len(state.dock_tab_buttons):
-                    btn = state.ui.button(state.app, f"DockTab_{tab_btn_idx}", "", lambda: None)
-                    state.dock_tab_buttons.append(btn)
-                btn = state.dock_tab_buttons[tab_btn_idx]
-                tab_btn_idx += 1
-
-                is_active = (p_idx == group.active)
-                p_display = p_name.replace("_", " ").upper()
-                if p_name == "code_panel":
-                    p_display = "SYSTEM SOURCE"
-                elif p_name == "files":
-                    p_display = "PROJECT FILES"
-
-                def _make_click(grp, idx, name):
-                    return lambda: select_dock_tab(grp, idx, name)
-
-                def _make_drag(name):
-                    return lambda c, ev: start_panel_dock_drag(name, ev)
-
-                act = _make_click(group, p_idx, p_name)
-                btn.action = act
-                btn.components["action"] = act
-                btn.on_click = lambda c, ev, a=act: a()
-                btn.on_drag = _make_drag(p_name)
-
-                tab_ink = INK if is_active else MUTED
-                tab_bg = panel_border if is_active else PANEL
-                tab_hover = panel_border if is_active else (45, 60, 80)
-                mouse = getattr(state.ui, 'mouse_pos', (-1, -1))
-                hovered = tx <= mouse[0] < tx+tw and ty <= mouse[1] < ty+th
-                put(btn, visible=True, x=tx, y=ty, w=tw, h=th, text=p_display,
-                    normal_color=tab_bg, hover_color=tab_hover, ink=tab_ink, layer=4,
-                    color=tab_hover if hovered else tab_bg, bevel=False, accent_color=None)
-
-        for i in range(tab_btn_idx, len(state.dock_tab_buttons)):
-            put(state.dock_tab_buttons[i], visible=False)
-
-    # Splitters layout
-    active_splitters = state.dock_tree.all_splitters() if hasattr(state, "dock_tree") else []
-    active_node_ids = {node.id for (node, _, _) in active_splitters}
-
-    if not split_left:
-        for node, _, ori in active_splitters:
-            if ori == "vertical" and node.id != getattr(split_right, "id", None):
-                leaf_panels = []
-                def _collect(n):
-                    if isinstance(n, TabGroupNode): leaf_panels.extend(n.panels)
-                    elif isinstance(n, SplitNode): _collect(n.first); _collect(n.second)
-                _collect(node)
-                if any(p in ("hierarchy", "files", "inspector") for p in leaf_panels) and not any(p in ("viewport", "code_panel") for p in leaf_panels):
-                    split_left = node
-                    break
-
-    if not split_right:
-        for node, _, ori in active_splitters:
-            if ori == "vertical" and node is not split_left:
-                leaf_panels = []
-                def _collect(n):
-                    if isinstance(n, TabGroupNode): leaf_panels.extend(n.panels)
-                    elif isinstance(n, SplitNode): _collect(n.first); _collect(n.second)
-                _collect(node)
-                if any(p in ("viewport", "code_panel") for p in leaf_panels) and not any(p in ("hierarchy", "files", "inspector") for p in leaf_panels):
-                    split_right = node
-                    break
-
-    claimed_ids = set()
-    if split_main and split_main.id in active_node_ids and split_main.splitter_rect[2] > 0:
-        sx, sy, sw, sh = split_main.splitter_rect
-        put(state.col_splitter, visible=True, x=sx, y=sy, w=sw, h=sh)
-        claimed_ids.add(split_main.id)
-    else:
-        put(state.col_splitter, visible=False)
-
-    if split_left and split_left.id in active_node_ids and split_left.splitter_rect[3] > 0:
-        sx, sy, sw, sh = split_left.splitter_rect
-        put(state.hierarchy_splitter, visible=True, x=sx, y=sy, w=sw, h=sh)
-        claimed_ids.add(split_left.id)
-    else:
-        put(state.hierarchy_splitter, visible=False)
-
-    if split_right and split_right.id in active_node_ids and split_right.splitter_rect[3] > 0:
-        sx, sy, sw, sh = split_right.splitter_rect
-        put(state.code_splitter, visible=True, x=sx, y=sy, w=sw, h=sh)
-        claimed_ids.add(split_right.id)
-    else:
-        put(state.code_splitter, visible=False)
-
-    # Any additional dynamic splitters
-    extra_idx = 0
-    if hasattr(state, "extra_splitters"):
-        for node, s_rect, orientation in active_splitters:
-            if node.id in claimed_ids:
-                continue
-            if s_rect[2] <= 0 or s_rect[3] <= 0:
-                continue
-            if extra_idx >= len(state.extra_splitters):
-                es = state.ui.splitter(state.app, f"ExtraSplitter_{extra_idx}", axis="x")
-                state.extra_splitters.append(es)
-            es = state.extra_splitters[extra_idx]
-            extra_idx += 1
-
-            axis = "x" if orientation == "horizontal" else "y"
-            es.axis = axis
-
-            def _make_drag(snode):
-                def _on_drag(ctl, ev):
-                    if len(ev) < 3:
-                        return
-                    nx, ny, nw, nh = snode.rect
-                    if snode.orientation == "horizontal":
-                        snode.ratio = max(0.05, min(0.95, (ev[1] - nx) / max(1, nw)))
-                    else:
-                        snode.ratio = max(0.05, min(0.95, (ev[2] - ny) / max(1, nh)))
-                    layout()
-                return _on_drag
-
-            es.on_drag = _make_drag(node)
-            put(es, visible=True, x=s_rect[0], y=s_rect[1], w=s_rect[2], h=s_rect[3])
-
-        for i in range(extra_idx, len(state.extra_splitters)):
-            put(state.extra_splitters[i], visible=False)
+def layout(*args, **kwargs):
+    callback = getattr(state, "layout", None)
+    if callback is not None:
+        return callback(*args, **kwargs)
 
 def hierarchy_sync():
     fn = getattr(state, "hierarchy_sync", None)
@@ -1298,181 +857,74 @@ def open_change_type_menu(*args, **kwargs):
         return fn(*args, **kwargs)
 
 
-def source_path():
-    name = state.path_field.buffer.text.strip()
-    path = (state.project / name).resolve()
-    if not name or path.suffix != '.py' or (not path.is_relative_to(state.project)):
-        raise ValueError('Use a .py path inside the project folder')
-    return path
+def source_path(*args, **kwargs):
+    callback = getattr(state, "source_path", None)
+    if callback is not None:
+        return callback(*args, **kwargs)
 
 
-def new_source():
-    if not confirm_discard('new'):
-        return
-    state.path_field.buffer = TextBuffer('new_system.py')
-    state.code.buffer = TextBuffer('def update(dt):\n    pass\n')
-    state._saved_source = (state.path_field.buffer.text, state.code.buffer.text)
-    state.code.components.pop('system_name', None)
-    state.code.relations.pop('owner', None)
-    message('New source: right-click to Rename file... or Save / reload')
+def new_source(*args, **kwargs):
+    callback = getattr(state, "new_source", None)
+    if callback is not None:
+        return callback(*args, **kwargs)
 
 
-def open_path():
-    path = source_path()
-    if not path.exists():
-        message(f"File not found: {path.name}")
-        return
-    text = path.read_text(encoding='utf-8')
-    if not confirm_discard('open'):
-        return
-    state.code.buffer = TextBuffer(text)
-    state._saved_source = (state.path_field.buffer.text, text)
-    state.code.source_path = str(path)
-    state.code.components['system_name'] = path.stem
-    sel = selected()
-    if sel and path.stem in sel.systems:
-        state.code.relations['owner'] = sel
-    else:
-        state.code.relations.pop('owner', None)
-    message(f'Opened {path.name}')
+def open_path(*args, **kwargs):
+    callback = getattr(state, "open_path", None)
+    if callback is not None:
+        return callback(*args, **kwargs)
 
 
-def open_specific_file(path):
-    path = Path(path).resolve()
-    if not path.exists():
-        message(f"File not found: {path.name}")
-        return
-    if not confirm_discard('open'):
-        return
-    text = path.read_text(encoding='utf-8')
-    rel_name = str(path.relative_to(state.project)) if path.is_relative_to(state.project) else path.name
-    state.path_field.buffer = TextBuffer(rel_name)
-    state.code.buffer = TextBuffer(text)
-    state._saved_source = (rel_name, text)
-    state.code.source_path = str(path)
-    state.code.components['system_name'] = path.stem
-    sel = selected()
-    if sel and path.stem in sel.systems:
-        state.code.relations['owner'] = sel
-    else:
-        state.code.relations.pop('owner', None)
-    message(f"Opened {rel_name}")
+def open_specific_file(*args, **kwargs):
+    callback = getattr(state, "open_specific_file", None)
+    if callback is not None:
+        return callback(*args, **kwargs)
 
 
-def open_file_menu(x=None, y=None):
-    candidates = []
-    if state.project and state.project.exists():
-        for p in sorted(state.project.glob("*.py")):
-            candidates.append(p)
-    actions = []
-    cur_text = state.path_field.buffer.text.strip()
-    for p in candidates:
-        rel = str(p.relative_to(state.project)) if p.is_relative_to(state.project) else p.name
-        is_cur = (rel == cur_text or p.name == cur_text)
-        label = f"• {rel}" if is_cur else f"  {rel}"
-        actions.append(dict(label=label, run=lambda _, path=p: open_specific_file(path)))
-    if not actions:
-        actions.append(dict(label="(No .py files in project)", run=None))
-    if x is None or y is None:
-        mouse = getattr(state.ui, "mouse_pos", None)
-        if mouse:
-            x, y = mouse
-        else:
-            x, y = state.path_field.x, state.path_field.y + state.path_field.h + 2
-    open_menu(state.ui, state.code_panel, x, y, actions=actions)
+def open_file_menu(*args, **kwargs):
+    callback = getattr(state, "open_file_menu", None)
+    if callback is not None:
+        return callback(*args, **kwargs)
 
 
-def on_path_field_click(control, event):
-    if len(event) > 3 and event[3] in (2, 4):
-        return False
-    click_count = event[5] if len(event) >= 6 else 1
-    if click_count >= 2:
-        prompt_rename_file()
-        return True
-    return False
+def on_path_field_click(*args, **kwargs):
+    callback = getattr(state, "on_path_field_click", None)
+    if callback is not None:
+        return callback(*args, **kwargs)
 
 
-def prompt_rename_file():
-    state.path_field.components["readonly"] = False
-    state.path_field.components["ink"] = INK
-    state.ui.focus(state.path_field)
-    state.path_field.buffer.anchor = 0
-    state.path_field.buffer.cursor = len(state.path_field.buffer.text)
-    state.path_field.on_commit = commit_rename_file
-    message(f"Type new name for '{state.path_field.buffer.text}' and press Enter (Esc to cancel)")
+def prompt_rename_file(*args, **kwargs):
+    callback = getattr(state, "prompt_rename_file", None)
+    if callback is not None:
+        return callback(*args, **kwargs)
 
 
-def commit_rename_file():
-    new_name = state.path_field.buffer.text.strip()
-    state.path_field.components["readonly"] = True
-    state.path_field.components["ink"] = (160, 180, 205)
-    state.path_field.on_commit = None
-    old_text = state._saved_source[0] if state._saved_source else state.path_field.buffer.text
-    if not new_name or new_name == old_text:
-        state.path_field.buffer = TextBuffer(old_text)
-        return
-    try:
-        rename_file(new_name, old_name=old_text)
-    except Exception as e:
-        message(f"Rename failed: {e}")
-        state.path_field.buffer = TextBuffer(old_text)
+def commit_rename_file(*args, **kwargs):
+    callback = getattr(state, "commit_rename_file", None)
+    if callback is not None:
+        return callback(*args, **kwargs)
 
 
-def rename_file(new_name, old_name=None):
-    new_name = new_name.strip()
-    if not new_name.endswith('.py'):
-        new_name += '.py'
-    old_path = source_path() if old_name is None else (state.project / old_name).resolve()
-    destination = (state.project / new_name).resolve()
-    if not destination.is_relative_to(state.project):
-        raise ValueError('Rename destination must be inside the project folder')
-    if old_path.exists():
-        state.files.relocate(old_path, destination, save=save_editor_project)
-    else:
-        if destination.exists():
-            raise FileExistsError(destination)
-        # Naming a new unsaved buffer does not claim its contents were written.
-    update_open_source_location(old_path, destination)
-    inspector_sync()
-    message(f"Renamed {old_path.name} to {destination.name}")
-    return destination
+def rename_file(*args, **kwargs):
+    callback = getattr(state, "rename_file", None)
+    if callback is not None:
+        return callback(*args, **kwargs)
 
 
-def update_open_source_location(source, destination):
-    open_path = Path(state.code.components.get("source_path", source_path())).resolve()
-    if open_path == source or open_path.is_relative_to(source):
-        new_path = destination / open_path.relative_to(source) if open_path != source else destination
-        relative = new_path.relative_to(state.project).as_posix()
-        state.path_field.buffer = TextBuffer(relative)
-        if state._saved_source:
-            state._saved_source = (relative, state._saved_source[1])
-        state.code.source_path = str(new_path)
-        if state.code.components.get("system_name") == open_path.stem:
-            state.code.system_name = new_path.stem
+def update_open_source_location(*args, **kwargs):
+    callback = getattr(state, "update_open_source_location", None)
+    if callback is not None:
+        return callback(*args, **kwargs)
 
-def open_system(owner, name):
-    if not confirm_discard((owner.id, name)):
-        return
-    instance = owner.systems[name]
-    path = Path(instance.definition.path)
-    if path.is_relative_to(state.project):
-        state.path_field.buffer = TextBuffer(str(path.relative_to(state.project)))
-    else:
-        state.path_field.buffer = TextBuffer(f'{name}.py')
-    state.code.buffer = TextBuffer(instance.definition.source)
-    state._saved_source = (state.path_field.buffer.text, state.code.buffer.text)
-    state.code.system_name = name
-    state.code.relations['owner'] = owner
-    message(f"{name} | {('running' if instance.running else 'stopped')} | {', '.join(instance.lifecycle)}")
+def open_system(*args, **kwargs):
+    callback = getattr(state, "open_system", None)
+    if callback is not None:
+        return callback(*args, **kwargs)
 
-def confirm_discard(action):
-    dirty = state._saved_source is not None and state._saved_source[1] != state.code.buffer.text
-    if dirty and state._pending_discard != (action, state.code.buffer.text):
-        state._pending_discard = (action, state.code.buffer.text)
-        message('Unsaved source. Save first, or repeat the action to discard edits.')
-        return False
-    state._pending_discard = None
-    return True
+def confirm_discard(*args, **kwargs):
+    callback = getattr(state, "confirm_discard", None)
+    if callback is not None:
+        return callback(*args, **kwargs)
 
 def get_project_entities():
     return list(state.project_graph.entities)
@@ -1551,40 +1003,15 @@ def save_project_action():
     message("Saved project state and editor layout")
 
 
-def save():
-    path = source_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', newline='\n', dir=path.parent, delete=False, suffix='.tmp') as stream:
-        stream.write(state.code.buffer.text)
-        temporary = Path(stream.name)
-    temporary.replace(path)
-    state._saved_source = (state.path_field.buffer.text, state.code.buffer.text)
-    definition = state.runtime.assets.system(path)
-    count = 0
-    for entity in state.runtime.entities:
-        for name, instance in tuple(entity.systems.items()):
-            if Path(instance.definition.path) == path:
-                updated = entity.systems.reload(name, definition)
-                if updated.definition is not definition or not updated.running:
-                    raise RuntimeError(f"{name}: {(updated.errors[-1].message if updated.errors else 'reload failed')}")
-                count += 1
-    save_editor_project()
-    message(f'Saved {path.name}; reloaded {count} attachment(s)')
+def save(*args, **kwargs):
+    callback = getattr(state, "save", None)
+    if callback is not None:
+        return callback(*args, **kwargs)
 
-def attach():
-    save()
-    path = source_path()
-    definition = state.runtime.assets.system(path)
-    if path.stem in selected().systems:
-        instance = selected().systems.reload(path.stem, definition)
-    else:
-        instance = selected().systems.attach(path.stem, definition)
-    if not instance.running:
-        raise RuntimeError(instance.errors[-1].message)
-    state.code.system_name = path.stem
-    state.code.relations['owner'] = selected()
-    save_editor_project()
-    message(f"Attached {path.stem} to {selected().components.get('name', selected().id)}")
+def attach(*args, **kwargs):
+    callback = getattr(state, "attach", None)
+    if callback is not None:
+        return callback(*args, **kwargs)
 
 def inspect_system():
     owner = state.code.relations.get('owner')
@@ -2005,123 +1432,46 @@ def assign_entity_sprite(ent, item):
 
 
 
-def refresh_project_files():
-    reg = getattr(state.runtime.assets, "registry", None)
-    if reg:
-        reg.scan(state.project)
-    state.file_tree_key = None
-    if hasattr(state, "file_explorer_sync"):
-        state.file_explorer_sync()
-    message("Refreshed project files")
+def refresh_project_files(*args, **kwargs):
+    callback = getattr(state, "refresh_project_files", None)
+    if callback is not None:
+        return callback(*args, **kwargs)
 
 
-def new_source_in_dir(folder_path):
-    if not confirm_discard(("new", str(folder_path))):
-        return
-    f_path = Path(folder_path).resolve()
-    rel_folder = f_path.relative_to(state.project) if f_path.is_relative_to(state.project) else f_path.name
-    i = 1
-    while (f_path / f"system_{i}.py").exists():
-        i += 1
-    new_name = str(rel_folder / f"system_{i}.py").replace("\\", "/")
-    state.path_field.buffer = TextBuffer(new_name)
-    state.code.buffer = TextBuffer("def update(dt):\n    pass\n")
-    state._saved_source = (new_name, state.code.buffer.text)
-    state.code.source_path = str(state.project / new_name)
-    state.code.components["system_name"] = f"system_{i}"
-    save()
-    refresh_project_files()
-    message(f"Created {new_name}")
+def new_source_in_dir(*args, **kwargs):
+    callback = getattr(state, "new_source_in_dir", None)
+    if callback is not None:
+        return callback(*args, **kwargs)
 
 
-def prompt_rename_file_item(item):
-    if item["type"] == "system":
-        open_specific_file(item["path"])
-        prompt_rename_file()
-    else:
-        path = Path(item['path']).resolve()
-        original = state.path_field.buffer.text
-        state.path_field.buffer = TextBuffer(path.name)
-        prompt_rename_file()
-
-        def commit():
-            name = state.path_field.buffer.text.strip()
-            state.path_field.buffer = TextBuffer(original)
-            state.path_field.readonly = True
-            state.path_field.on_commit = None
-            if not name or Path(name).name != name or name in ('.', '..'):
-                raise ValueError('Enter a file or folder name without a directory')
-            destination = path.with_name(name)
-            state.files.relocate(path, destination, save=save_editor_project)
-            update_open_source_location(path, destination)
-            refresh_project_files()
-            message(f"Renamed '{path.name}' to '{name}'")
-
-        state.path_field.on_commit = commit
+def prompt_rename_file_item(*args, **kwargs):
+    callback = getattr(state, "prompt_rename_file_item", None)
+    if callback is not None:
+        return callback(*args, **kwargs)
 
 
-def delete_file_item(item):
-    path = Path(item["path"]).resolve()
-    open_path = Path(state.code.components.get("source_path", source_path())).resolve()
-    is_open = open_path == path or open_path.is_relative_to(path)
-    if is_open and not confirm_discard(('delete', str(path))):
-        return
-    state.files.delete(path, save=save_editor_project)
-    if is_open:
-        state.path_field.buffer = TextBuffer('new_system.py')
-        state.code.buffer = TextBuffer('def update(dt):\n    pass\n')
-        state.code.source_path = str(state.project / 'new_system.py')
-        state._saved_source = None
-        state.code.components.pop('system_name', None)
-        state.code.relations.pop('owner', None)
-    refresh_project_files()
-    message(f"Deleted '{path.name}'; references remain recoverable")
+def delete_file_item(*args, **kwargs):
+    callback = getattr(state, "delete_file_item", None)
+    if callback is not None:
+        return callback(*args, **kwargs)
 
 
-def create_new_folder(parent_dir=None):
-    pdir = Path(parent_dir) if parent_dir else Path(state.project).resolve()
-    base_name = "New Folder"
-    candidate = pdir / base_name
-    idx = 1
-    while candidate.exists():
-        candidate = pdir / f"{base_name} ({idx})"
-        idx += 1
-    try:
-        candidate.mkdir(parents=True, exist_ok=True)
-        refresh_project_files()
-        message(f"Created folder '{candidate.name}'")
-    except Exception as e:
-        message(f"Failed to create folder: {e}")
+def create_new_folder(*args, **kwargs):
+    callback = getattr(state, "create_new_folder", None)
+    if callback is not None:
+        return callback(*args, **kwargs)
 
 
-def move_file_or_folder(src_path, dst_folder):
-    source = Path(src_path).resolve()
-    destination = Path(dst_folder).resolve() / source.name
-    state.files.relocate(source, destination, save=save_editor_project)
-    update_open_source_location(source, destination)
-    refresh_project_files()
-    message(f"Moved '{source.name}' to '{destination.parent.name}'")
+def move_file_or_folder(*args, **kwargs):
+    callback = getattr(state, "move_file_or_folder", None)
+    if callback is not None:
+        return callback(*args, **kwargs)
 
 
-def open_move_file_menu(src_path):
-    pdir = Path(state.project).resolve()
-    dirs = [pdir]
-    for root, dirnames, _ in os.walk(pdir):
-        dirnames[:] = [d for d in dirnames if not d.startswith(".") and d not in ("__pycache__", "venv", ".venv")]
-        for d in dirnames:
-            dirs.append(Path(root) / d)
-
-    actions = []
-    for d in sorted(dirs, key=lambda p: str(p).lower()):
-        rel = "." if d == pdir else str(d.relative_to(pdir)).replace("\\", "/")
-        label = f"📁 /{rel}" if rel != "." else "📁 / (Project root)"
-        actions.append(dict(
-            label=label,
-            run=lambda _, target_dir=d: move_file_or_folder(src_path, target_dir)
-        ))
-    mouse = getattr(state.ui, "mouse_pos", None)
-    x, y = mouse if mouse else (200, 200)
-    open_menu(state.ui, state.file_explorer, x, y, actions=actions)
+def open_move_file_menu(*args, **kwargs):
+    callback = getattr(state, "open_move_file_menu", None)
+    if callback is not None:
+        return callback(*args, **kwargs)
 
 
 def keyboard(event):
@@ -2494,6 +1844,9 @@ def context_actions(target):
         else:
             if item['type'] == 'system':
                 actions.append(dict(label=f"Open '{item['name']}' in editor", run=lambda _: open_specific_file(item['path'])))
+                identity = item.get("asset_id") or assets.registry.get_id(item["path"])
+                if identity is not None:
+                    actions.append(dict(label="Highlight affected entities", run=lambda _, uid=identity: state.highlight_system(uid)))
                 sel = selected()
                 if sel:
                     sel_name = str(sel.components.get('name', sel.id))

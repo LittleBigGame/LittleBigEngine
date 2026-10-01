@@ -525,6 +525,8 @@ def load_project(window, graphics, input_state, directory, *, template=None, ent
     runtime.services["space"] = SpatialIndex(runtime)
     from .activity import ActivityLog
     runtime.services['log'] = ActivityLog(runtime)
+    from .effects import SystemEffects
+    runtime.services['effects'] = SystemEffects(runtime)
     app_id = None
     if project_data:
         if "application_id" in project_data and project_data["application_id"]:

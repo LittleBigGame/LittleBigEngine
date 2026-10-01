@@ -319,7 +319,9 @@ class Query:
             candidates = self._runtime.entities
         else:
             candidates = self._owner.descendants if self._recursive else self._owner.children
-        return iter(tuple(e for e in candidates if _matches(e, self._components, self._tags)))
+        results = tuple(e for e in candidates if _matches(e, self._components, self._tags))
+        self._runtime.events._observe('query.result', (results,), {})
+        return iter(results)
 
 
 class Runtime:
