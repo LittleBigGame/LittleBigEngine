@@ -394,7 +394,8 @@ def initialize():
             state.game.systems.attach("render", assets.system(project / "render.py"))
 
     state.camera = create(parent=entity, name="Camera", x=0.0, y=0.0, zoom=48.0)
-    state.viewport = state.ui.create(entity, "Viewport", "surface", color=(12, 18, 25), layer=0)
+    state.viewport_panel = state.ui.create(entity, "ViewportPanel", "panel", color=PANEL, layer=0)
+    state.viewport = state.ui.create(state.viewport_panel, "Viewport", "surface", color=(12, 18, 25), layer=0)
     space.configure(scope=state.game, bounds_fn=world_bounds)
     state.game.relations["camera"] = state.camera
     state.game.relations["viewport"] = state.viewport
@@ -736,13 +737,18 @@ def layout():
         pass
     elif "viewport" in panel_rects:
         vx, vy, vw, vh = panel_rects["viewport"]
-        zoom_y = top_y + 12 if (hasattr(state, "dock_tree") and state.dock_tree.is_default()) else vy + 6
-        put(state.zoom_label, visible=True, x=vx + 4, y=zoom_y, w=max(0, vw - 8), h=20,
+        group = state.dock_tree.find_tab_group_with_panel('viewport')
+        px, py, pw, ph = group.rect
+        content_y = max(vy, group.tab_bar_rect[1] + group.tab_bar_rect[3]) + 6
+        content_bottom = py + ph - 26
+        put(state.viewport_panel, visible=True, x=px, y=py, w=pw, h=ph)
+        put(state.zoom_label, visible=True, x=px + 8, y=py + ph - 22, w=max(0, pw - 16), h=18,
             text=f'WORLD  /  {state.camera.zoom:.0f} px per metre  /  drag to pan  /  scroll to zoom')
-        put(state.viewport, visible=True, x=vx, y=vy, w=vw, h=vh)
+        put(state.viewport, visible=True, x=px + 6, y=content_y, w=max(0, pw - 12), h=max(0, content_bottom-content_y))
     else:
         put(state.zoom_label, visible=False)
         put(state.viewport, visible=False)
+        put(state.viewport_panel, visible=False)
 
     if state.code_panel.components.get("dock") == "float":
         pass
@@ -790,7 +796,7 @@ def layout():
 
     if hasattr(state, "close_viewport_btn"):
         if "viewport" in panel_rects and state.viewport.components.get("visible", True):
-            vx, vy, vw, vh = panel_rects["viewport"]
+            vx, vy, vw, vh = state.dock_tree.find_tab_group_with_panel('viewport').tab_bar_rect
             put(state.close_viewport_btn, visible=True, x=vx + vw - 24, y=vy + 4, w=18, h=18)
         else:
             put(state.close_viewport_btn, visible=False)
@@ -803,6 +809,12 @@ def layout():
             put(state.close_code_btn, visible=False)
 
     # Dynamic Tab Buttons for all panel groups (title bars + tab selectors)
+    panel_border = (38, 55, 75)
+    for name,panel in (('hierarchy',state.hierarchy), ('files',state.file_explorer),
+                       ('inspector',state.inspector), ('viewport',state.viewport_panel), ('code_panel',state.code_panel)):
+        group = state.dock_tree.find_tab_group_with_panel(name)
+        inset = max(0, group.tab_bar_rect[1]+group.tab_bar_rect[3]-panel.y) if group else 0
+        put(panel, border_color=panel_border, border_width=2, border_inset=(inset,0,0,0), bevel=False)
     tab_btn_idx = 0
     if hasattr(state, "dock_tree") and hasattr(state, "dock_tab_buttons"):
         for group in state.dock_tree.all_tab_groups():
@@ -834,18 +846,14 @@ def layout():
                 btn.on_click = lambda c, ev, a=act: a()
                 btn.on_drag = _make_drag(p_name)
 
-                if len(group.panels) == 1:
-                    tab_bg = (30, 42, 58)
-                    tab_hover = (42, 58, 78)
-                    tab_ink = INK
-                else:
-                    tab_bg = (38, 55, 75) if is_active else PANEL
-                    tab_hover = (50, 75, 105) if is_active else (45, 60, 80)
-                    tab_ink = INK if is_active else MUTED
-
-                # Don't set 'color' — let normal_color/hover_color drive it to avoid flashing
+                tab_ink = INK if is_active else MUTED
+                tab_bg = panel_border if is_active else PANEL
+                tab_hover = panel_border if is_active else (45, 60, 80)
+                mouse = getattr(state.ui, 'mouse_pos', (-1, -1))
+                hovered = tx <= mouse[0] < tx+tw and ty <= mouse[1] < ty+th
                 put(btn, visible=True, x=tx, y=ty, w=tw, h=th, text=p_display,
-                    normal_color=tab_bg, hover_color=tab_hover, ink=tab_ink, layer=4)
+                    normal_color=tab_bg, hover_color=tab_hover, ink=tab_ink, layer=4,
+                    color=tab_hover if hovered else tab_bg, bevel=False, accent_color=None)
 
         for i in range(tab_btn_idx, len(state.dock_tab_buttons)):
             put(state.dock_tab_buttons[i], visible=False)
@@ -2429,7 +2437,7 @@ def context_actions(target):
                 dict(label=f"Add child to '{leaf_name}'", ink=leaf_color, run=lambda _: context_add_child(leaf_ent)),
                 dict(label=f"Duplicate '{leaf_name}'", ink=leaf_color, run=lambda _: (select(leaf_ent), inspector_duplicate_entity())),
             ])
-            protected = (state.app, state.background, state.viewport, state.header, state.hierarchy, state.inspector)
+            protected = (state.app, state.background, state.viewport_panel, state.viewport, state.header, state.hierarchy, state.inspector)
             if leaf_ent not in protected:
                 actions.append(dict(label=f"Delete '{leaf_name}'", ink=leaf_color, run=lambda _: (select(leaf_ent), inspector_delete_entity())))
 
@@ -2455,7 +2463,7 @@ def context_actions(target):
                 dict(label="Add child entity", run=lambda _: context_add_child(ent)),
                 dict(label="Duplicate entity", run=lambda _: (select(ent), inspector_duplicate_entity())),
             ]
-            protected = (state.app, state.background, state.viewport, state.header, state.hierarchy, state.inspector)
+            protected = (state.app, state.background, state.viewport_panel, state.viewport, state.header, state.hierarchy, state.inspector)
             if ent not in protected:
                 actions.append(dict(label=f"Delete '{ent_name}'", run=lambda _: (select(ent), inspector_delete_entity())))
         return actions
@@ -2583,7 +2591,7 @@ def context_actions(target):
                 dict(label=f"Add child to '{val_name}'", run=lambda _: context_add_child(val)),
                 dict(label=f"Duplicate Entity '{val_name}'", run=lambda _: (select(val), inspector_duplicate_entity())),
             ])
-            protected = (state.app, state.background, state.viewport, state.header, state.hierarchy, state.inspector)
+            protected = (state.app, state.background, state.viewport_panel, state.viewport, state.header, state.hierarchy, state.inspector)
             if val not in protected:
                 actions.append(dict(label=f"Delete Entity '{val_name}'", run=lambda _: (select(val), inspector_delete_entity())))
         return actions

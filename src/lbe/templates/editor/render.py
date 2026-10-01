@@ -2,6 +2,9 @@
 
 
 def draw():
+    viewport = entity.relations['viewport']
+    if not viewport.components.get('visible', True) or viewport.w <= 0 or viewport.h <= 0:
+        return
     with graphics.view(entity.relations["camera"], entity.relations["viewport"]):
         camera = entity.relations.get("camera")
         viewport = entity.relations.get("viewport")

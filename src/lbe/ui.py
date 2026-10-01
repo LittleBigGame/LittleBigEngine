@@ -341,6 +341,8 @@ class UI:
 
     def create(self, parent, name, kind, **values):
         defaults = dict(name=name, x=0, y=0, w=0, h=0, visible=True, layer=2, color=PANEL)
+        if kind == 'panel':
+            defaults.update(border_color=(38,55,75), border_width=2, bevel=False)
         defaults.update(values)
         return self.runtime.create(parent=parent, tags=["ui", kind], **defaults)
 
@@ -1023,6 +1025,26 @@ class UI:
             layer = control.components.get("layer", 2)
             if "label" not in control.tags:
                 graphics.rect(control.x, control.y, control.w, control.h, control.color, key=control.id, layer=layer)
+                framed = any(tag in control.tags for tag in ('panel', 'field')) or ('button' in control.tags and control.color != PANEL)
+                if control.components.get('bevel', framed):
+                    graphics.rect(control.x, control.y, control.w, 1, (*INK[:3], 35), key=(control.id, 'bevel_top'), layer=layer+1)
+                    graphics.rect(control.x, control.y+control.h-1, control.w, 1, (*BG, 180), key=(control.id, 'bevel_bottom'), layer=layer+1)
+                accent = control.components.get('accent_color')
+                border = control.components.get('border_color')
+                if border is not None:
+                    top,right,bottom,left = parse_box(control.components.get('border_inset', 0))
+                    bx,by = control.x+left,control.y+top
+                    bw,bh = max(0,control.w-left-right),max(0,control.h-top-bottom)
+                    thickness = max(1, control.components.get('border_width', 1))
+                    if bw and bh:
+                        thickness = min(thickness,bw,bh)
+                        for edge, (x,y,w,h) in enumerate(((bx,by,bw,thickness),
+                                (bx,by+bh-thickness,bw,thickness),
+                                (bx,by,thickness,bh),
+                                (bx+bw-thickness,by,thickness,bh))):
+                            graphics.rect(x,y,w,h,border,key=(control.id,'border',edge),layer=layer+1)
+                if accent is not None:
+                    graphics.rect(control.x, control.y+control.h-2, control.w, 2, accent, key=(control.id, 'accent'), layer=layer+1)
             if "field" in control.tags:
                 pitch = control.components.get("pitch", self.pitch)
                 buffer = control.buffer

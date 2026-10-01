@@ -179,6 +179,12 @@ Dockable panels remain work in progress. Custom dock trees retain their own spli
 ratios; the default layout still supports the existing scalar split controls during
 migration. Completing panel drag/drop is separate from project stabilization.
 
+## Viewport panels
+
+The viewport is a framed panel containing a separate game surface. Its tabs
+and bottom caption occupy reserved space outside that surface. Closing the
+viewport stops its rendering; restore it through the View menu.
+
 ## System activity log
 
 Open **View → System Log** or press **Ctrl+L**. The panel is an ordinary editor
