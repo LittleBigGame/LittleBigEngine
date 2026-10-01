@@ -177,3 +177,14 @@ class UITests(unittest.TestCase):
         self.assertEqual(graphics._groups[99].order, 99)
         graphics.close()
 
+
+    def test_modal_panel_blocks_drag_from_reaching_underlying_viewport(self):
+        runtime = Runtime()
+        root = runtime.create()
+        ui = UI(root, self.window, self.graphics, self.input)
+        calls = []
+        ui.create(root, 'Viewport', 'surface', x=0,y=0,w=400,h=300,layer=0,on_drag=lambda c,e:calls.append(e))
+        ui.create(root, 'Overlay', 'panel', x=20,y=20,w=200,h=200,layer=4,modal=True)
+        ui.dispatch(('drag', 40, 40, 1, 0, 10, 10))
+        self.assertFalse(calls)
+        runtime.close()

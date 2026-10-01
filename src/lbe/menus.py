@@ -23,7 +23,8 @@ def open_menu(ui, target, x, y, actions=None):
             provider = getattr(owner, "components", {}).get("context_actions")
             if provider:
                 actions.extend(provider(target))
-    actions = list(actions)
+    actions = [dict(a, enabled=a.get('enabled', True) and callable(a.get('run'))) if a is not None else None
+               for a in actions]
     if not actions:
         return None
     width = min(ui.window.width, max(160, max(len(a["label"]) * ui.pitch + 24 for a in actions if a) if any(actions) else 160))

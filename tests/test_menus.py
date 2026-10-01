@@ -108,3 +108,13 @@ class MenuTests(unittest.TestCase):
         self.ui.dispatch(("click", dis_item.x + 5, dis_item.y + 5, 1, 0))
         self.assertEqual(ran, [])
 
+
+    def test_informational_menu_items_cannot_execute(self):
+        menu = open_menu(self.ui, object(), 10, 10, [dict(label='No assets', run=None)])
+        item = menu.children[0]
+        self.assertFalse(item.menu_action['enabled'])
+        self.ui.dispatch(('click', item.x+2, item.y+2, 1, 0))
+        self.ui.dispatch(('key', 'DOWN', False, False))
+        self.ui.dispatch(('key', 'ENTER', False, False))
+        self.assertEqual(menu.active, -1)
+        self.assertTrue(menu.alive)

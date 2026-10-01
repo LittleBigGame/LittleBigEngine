@@ -6,7 +6,7 @@ from copy import deepcopy
 from uuid import UUID, uuid4
 from math import isfinite
 
-from .events import Changes, Events
+from .events import Changes, Events, ABSENT
 
 _MISSING = object()
 
@@ -24,13 +24,14 @@ class Components(MutableMapping):
         self._entity._check()
         if not isinstance(key, str) or not key:
             raise ValueError("Component names must be nonempty strings")
+        previous = self._values.get(key, ABSENT)
         self._values[key] = value
-        self._entity._changed("component.set", key)
+        self._entity._changed("component.set", key, old=previous, new=value)
 
     def __delitem__(self, key):
         self._entity._check()
-        del self._values[key]
-        self._entity._changed("component.remove", key)
+        previous = self._values.pop(key)
+        self._entity._changed("component.remove", key, old=previous)
 
     def __iter__(self):
         self._entity._check()
@@ -42,8 +43,7 @@ class Components(MutableMapping):
 
     def touch(self, key):
         """Notify observers after externally mutating an arbitrary object."""
-        self[key]
-        self._entity._changed("component.mutate", key)
+        self._entity._changed("component.mutate", key, new=self[key])
 
     @contextmanager
     def edit(self, key):
@@ -76,13 +76,13 @@ class Tags(MutableSet):
             raise ValueError("Tags must be nonempty strings")
         if value not in self._values:
             self._values.add(value)
-            self._entity._changed("tag.add", value)
+            self._entity._changed("tag.add", value, old=False, new=True)
 
     def discard(self, value):
         self._entity._check()
         if value in self._values:
             self._values.remove(value)
-            self._entity._changed("tag.remove", value)
+            self._entity._changed("tag.remove", value, old=True, new=False)
 
 
 class Relations(MutableMapping):
@@ -113,7 +113,7 @@ class Relations(MutableMapping):
                     runtime._incoming.pop(previous, None)
         self._values[key] = target
         runtime._incoming.setdefault(target, set()).add((self._entity, key))
-        self._entity._changed("relation.set", key)
+        self._entity._changed("relation.set", key, old=previous, new=target)
 
     def __delitem__(self, key):
         self._entity._check()
@@ -123,7 +123,7 @@ class Relations(MutableMapping):
             incoming.discard((self._entity, key))
             if not incoming:
                 self._entity.runtime._incoming.pop(target, None)
-        self._entity._changed("relation.remove", key)
+        self._entity._changed("relation.remove", key, old=target)
 
     def __iter__(self):
         self._entity._check()
@@ -166,8 +166,8 @@ class Entity:
         if not self._alive:
             raise ReferenceError(f"Entity {self.id} has been destroyed")
 
-    def _changed(self, kind, key=None):
-        self.runtime.changes.publish(kind, self, key)
+    def _changed(self, kind, key=None, **details):
+        self.runtime.changes.publish(kind, self, key, **details)
 
     def __getattr__(self, name):
         try:
@@ -219,12 +219,13 @@ class Entity:
                 current = current._parent
         if parent is self._parent:
             return
+        previous = self._parent
         if self._parent is not None:
             self._parent._children.remove(self)
         object.__setattr__(self, "_parent", parent)
         if parent is not None:
             parent._children.append(self)
-        self._changed("hierarchy.parent")
+        self._changed("hierarchy.parent", old=previous, new=parent)
 
     @property
     def children(self):
@@ -433,3 +434,4 @@ class Runtime:
         for entity in self.entities:
             if entity.alive:
                 self.destroy(entity)
+        self.events.emit('runtime.close')

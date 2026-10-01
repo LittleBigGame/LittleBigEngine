@@ -396,6 +396,7 @@ class UI:
             except Exception as error:
                 message = f"{type(error).__name__}: {error}"
                 self.root.components["ui_error"] = message
+                self.runtime.events.emit('ui.error', message)
                 callback = self.root.components.get("on_ui_error")
                 if callback:
                     callback(message)
@@ -427,6 +428,7 @@ class UI:
                 except Exception as error:
                     message = f"{type(error).__name__}: {error}"
                     self.root.components["ui_error"] = message
+                    self.runtime.events.emit('ui.error', message)
                     callback = self.root.components.get("on_ui_error")
                     if callback:
                         callback(message)
@@ -548,6 +550,8 @@ class UI:
                 if cb:
                     if cb(control, event) is not False:
                         return
+                if control.components.get('modal', False):
+                    return
             return
         if kind in ("click", "scroll"):
             if kind == "click":
@@ -582,6 +586,7 @@ class UI:
                         return
                     continue
                 if "button" in control.tags:
+                    self.runtime.events.emit('ui.action', control, getattr(control.action, '__qualname__', type(control.action).__name__))
                     control.action()
                     return
                 if "field" in control.tags and not control.components.get("readonly", False):

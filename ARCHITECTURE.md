@@ -113,3 +113,13 @@ replace the asset reference, copy its UUID, or remove the reference.
 Because references are bound by persistent UUIDs, files can be renamed on disk and in the
 registry without modifying script source code or component values, updating all visual pills
 and inspector chips automatically.
+
+## Activity observation
+
+The runtime publishes bounded value descriptions and source context with changes.
+Named-event observers and generic system lifecycle emissions support derived
+activity tooling. `ActivityLog` subscribes above Core, retains bounded immutable
+records, and excludes its presentation subtree to prevent logging feedback. The
+editor's `system_log.py` composes ordinary UI entities; no log panel concepts enter
+Core. Observation preserves direct-child queries, independent system namespaces,
+listener failure isolation, and all-update-before-all-draw ordering.
