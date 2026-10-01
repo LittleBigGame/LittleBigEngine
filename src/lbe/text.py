@@ -326,8 +326,8 @@ class TextBuffer:
 
         self.text = "\n".join(new_lines)
         if start == end:
-            line_start_idx = self.text.rfind("\n", 0, self.cursor) + 1 if self.cursor > 0 else 0
-            cur_col = max(0, start - line_start_idx)
+            line_start_idx = sum(len(line) + 1 for line in lines[:start_row])
+            cur_col = start - line_start_idx
             self.cursor = self.anchor = self.index(start_row, max(0, cur_col + first_line_shift))
         else:
             new_start = sum(len(new_lines[i]) + 1 for i in range(start_row))

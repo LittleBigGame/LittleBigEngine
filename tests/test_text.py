@@ -4,6 +4,15 @@ from lbe.text import TextBuffer
 
 
 class TextTests(unittest.TestCase):
+    def test_dedent_keeps_caret_on_original_character_before_a_newline(self):
+        buffer = TextBuffer('    x\n    y')
+        buffer.cursor = buffer.anchor = 5
+        buffer.indent(dedent=True)
+        self.assertEqual(buffer.text, 'x\n    y')
+        self.assertEqual(buffer.position, (0, 1))
+        buffer.undo()
+        self.assertEqual((buffer.text,buffer.cursor,buffer.anchor), ('    x\n    y',5,5))
+
     def test_deletion_undo_restores_original_caret_and_selection(self):
         for word in (False, True):
             for backward in (False, True):
