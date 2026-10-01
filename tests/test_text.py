@@ -4,6 +4,16 @@ from lbe.text import TextBuffer
 
 
 class TextTests(unittest.TestCase):
+    def test_replacing_contents_clamps_selection_before_next_edit(self):
+        buffer = TextBuffer('long document')
+        buffer.cursor, buffer.anchor = 13, 5
+        buffer.text = 'x'
+        self.assertEqual((buffer.cursor,buffer.anchor), (1,1))
+        buffer.insert('y')
+        self.assertEqual(buffer.text, 'xy')
+        buffer.undo()
+        self.assertEqual((buffer.text,buffer.cursor,buffer.anchor), ('x',1,1))
+
     def test_range_replacement_validation_and_atomic_undo(self):
         buffer = TextBuffer('abcdef')
         buffer.cursor = buffer.anchor = 3

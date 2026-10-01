@@ -110,6 +110,9 @@ class TextBuffer:
     def text(self, value):
         self._text = value.replace("\r\n", "\n").replace("\r", "\n") if value else ""
         self._lines = None
+        for name in ('cursor', 'anchor'):
+            if hasattr(self, name):
+                setattr(self, name, max(0, min(getattr(self, name), len(self._text))))
 
     @property
     def lines(self):

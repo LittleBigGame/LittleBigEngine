@@ -135,3 +135,5 @@ as one undoable edit. It preserves the original caret and selection in undo
 history, without requiring callers to select the replacement range first.
 `insert(text)` continues to replace the current selection. Invalid ranges raise
 `ValueError` without changing text or undo history.
+Assigning `buffer.text` clamps the existing caret and selection to the new text
+length, so subsequent editing remains valid after contents are shortened.
