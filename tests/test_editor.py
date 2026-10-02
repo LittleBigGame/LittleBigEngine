@@ -17,6 +17,22 @@ except ImportError:
 
 
 class EditorTests(unittest.TestCase):
+    def test_deleting_renderer_stops_draw_and_undo_restores_it(self):
+        ed=self.editor
+        path=Path(ed.game.systems['render'].definition.path)
+        target=ed.game.children[0]
+        ed.delete_file_item(dict(path=path))
+        self.assertFalse(ed.game.systems['render'].running)
+        self.graphics.rectangles.clear()
+        self.runtime.step(0)
+        self.assertFalse(any(kwargs.get('key')==target.id for args,kwargs in self.graphics.rectangles))
+        ed.ui.focus(None)
+        self.send(('key','Z',True,False))
+        self.assertTrue(ed.game.systems['render'].running)
+        self.graphics.rectangles.clear()
+        self.runtime.step(0)
+        self.assertTrue(any(kwargs.get('key')==target.id for args,kwargs in self.graphics.rectangles))
+
     def test_frame_game_recovers_distant_camera_and_nested_focus(self):
         ed = self.editor
         ed.camera.x,ed.camera.y = 9999,9999

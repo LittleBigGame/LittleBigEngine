@@ -37,6 +37,32 @@ class FileHistoryTests(unittest.TestCase):
             files.history.undo(redo=True)
             self.assertTrue(created.is_dir())
 
+    def test_deleted_folder_stops_attached_updates_and_undo_resumes(self):
+        with tempfile.TemporaryDirectory() as folder:
+            folder=Path(folder)
+            runtime=Runtime()
+            self.addCleanup(runtime.close)
+            runtime.assets.registry=AssetRegistry(folder)
+            directory=folder/'systems'
+            directory.mkdir()
+            path=directory/'counter.py'
+            path.write_text('def update(dt):\n    entity.count += 1',encoding='utf-8')
+            entity=runtime.create(count=0)
+            entity.systems.attach('counter',runtime.assets.system(path))
+            files=ProjectFiles(runtime,folder)
+            runtime.step(0)
+            self.assertEqual(entity.count,1)
+            files.delete(directory,save=lambda:None)
+            runtime.step(0)
+            self.assertEqual(entity.count,1)
+            self.assertFalse(entity.systems['counter'].running)
+            files.history.undo()
+            runtime.step(0)
+            self.assertEqual(entity.count,2)
+            files.history.undo(redo=True)
+            runtime.step(0)
+            self.assertEqual(entity.count,2)
+
     def test_failed_undo_keeps_command_and_restored_file_can_be_retried(self):
         with tempfile.TemporaryDirectory() as folder:
             folder=Path(folder)

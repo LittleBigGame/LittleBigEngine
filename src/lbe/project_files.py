@@ -44,6 +44,7 @@ class ProjectFiles:
         self._replaying = False
         from .history import History
         self.history = History()
+        self._suspended = {}
 
     def _path(self, path):
         path = Path(path)
@@ -129,7 +130,27 @@ class ProjectFiles:
         except Exception:
             recover_file_operation(self.directory)
             raise
+        self._sync_sources(source, restore=False)
         self._record(('delete', source, destination), save)
+
+    def _sync_sources(self, path, *, restore):
+        if not restore:
+            for entity in self.runtime.entities:
+                for name, instance in tuple(entity.systems.items()):
+                    source = Path(instance.definition.path).resolve() if instance.definition.path else None
+                    if source is not None and (source == path or source.is_relative_to(path)) and instance.running:
+                        self._suspended[(entity.id,name)] = instance
+                        instance.stop()
+                        self.runtime.assets.invalidate(source)
+        else:
+            for (identity,name), instance in tuple(self._suspended.items()):
+                source = Path(instance.definition.path).resolve()
+                if source != path and not source.is_relative_to(path):
+                    continue
+                entity = self.runtime.resolve(identity)
+                if entity is not None and entity.systems.get(name) is instance and source.is_file():
+                    entity.systems.reload(name,self.runtime.assets.system(source))
+                self._suspended.pop((identity,name),None)
 
     def _record(self, command, save):
         if not self._replaying:
@@ -169,6 +190,7 @@ class ProjectFiles:
                 except Exception:
                     recover_file_operation(self.directory)
                     raise
+                self._sync_sources(original, restore=restore)
                 result = original
             source_stack.pop()
             target_stack.append(command)

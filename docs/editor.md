@@ -281,3 +281,10 @@ If the viewport appears empty after panning or moving objects, use
 look small when fitting the entire scene. Focus camera uses hierarchy-relative
 world position. Systems defined inline or outside the project remain inspectable
 without claiming a project asset UUID.
+
+
+Deleting a system source through Project Files stops its live attachments
+immediately, including sources inside a deleted folder. Undo restores the files
+and reloads attachments that have not been replaced or detached in the meantime.
+Reload runs the normal initialization/start lifecycle; script-local state is
+reinitialized while entity components remain authoritative. Redo stops them again.
