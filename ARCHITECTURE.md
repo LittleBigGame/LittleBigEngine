@@ -133,3 +133,10 @@ Registry identities and current attachment paths remain authoritative. Editor
 colouring, menu actions and overlays are ordinary template system behavior above
 Core; the runtime does not know about inspection colours or panels. Nested
 template files retain per-file upgrade provenance and recovery.
+
+
+Hierarchy view scope is an ordinary panel `view_root` relation; file view scope
+is a project-relative `view_root` component on the file panel. Template systems
+derive rows from those scopes and promote them to containing ancestors when
+revealing outside selections. Actual hierarchy, project paths and asset identity
+remain authoritative and unchanged. View scope defaults are applied each session.

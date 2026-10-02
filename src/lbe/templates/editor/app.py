@@ -234,6 +234,7 @@ def initialize():
     state.save_editor_project = save_editor_project
     entity.systems.attach("docking", assets["31c71ace-2c53-52f9-9164-56b175f5d969"])
     entity.systems.attach("effects", assets["d6929c06-9cca-576e-b179-d577c2da8312"])
+    (state.project / "systems/game").mkdir(parents=True, exist_ok=True)
     state.files = ProjectFiles(state.runtime, state.project)
     state.ui = UI(entity, window, graphics, input)
     state.background = state.ui.create(entity, "Background", "rect", color=BG, layer=0)
@@ -495,6 +496,7 @@ def initialize():
         open_system(state.game, "render")
     elif state.game.systems:
         open_system(state.game, next(iter(state.game.systems)))
+    state.ready = True
 
 
 def layout(*args, **kwargs):
@@ -590,6 +592,8 @@ def locate_in_file_explorer(target):
             rel_path = str(target).replace("\\", "/")
 
     if rel_path:
+        if hasattr(state, "reveal_file"):
+            state.reveal_file(state.project / rel_path)
         parts = rel_path.split("/")
         fe = getattr(state, "file_explorer", None)
         if fe:
@@ -1835,6 +1839,10 @@ def context_actions(target):
         item = target['file_item']
         actions = []
         if item['is_dir']:
+            actions.append(dict(label="View as root folder", run=lambda _: state.set_file_root(item['path'])))
+            root = (state.project / state.file_explorer.components.get('view_root','systems/game')).resolve()
+            if item['path'].resolve() == root and root != state.project:
+                actions.append(dict(label="Set parent as root folder", run=lambda _: state.set_file_root(root.parent)))
             actions.append(dict(label=f"+ New folder in '{item['name']}'...", run=lambda _: create_new_folder(item['path'])))
             actions.append(dict(label=f"+ New script in '{item['name']}'...", run=lambda _: new_source_in_dir(item['path'])))
             actions.append(dict(label="Move folder to...", run=lambda _: open_move_file_menu(item['path'])))
@@ -1964,6 +1972,7 @@ def context_actions(target):
         return []
 
     actions = [
+        dict(label='View as root entity', run=lambda e: state.set_hierarchy_root(e)),
         dict(label='Select', run=select),
         dict(label='Rename', run=context_rename),
         dict(label='Inspect entity', run=lambda e: open_panel(target=e)),
@@ -1972,6 +1981,8 @@ def context_actions(target):
         dict(label="+ Add Component...", run=lambda e: (select(e), open_add_component_menu())),
     ]
 
+    if target is state.hierarchy.relations.get('view_root') and target.parent is not None:
+        actions.append(dict(label='Set parent as root entity', run=lambda e: state.set_hierarchy_root(e.parent)))
     sel = selected()
     if target is not sel and sel is not None and sel.alive:
         tgt_name = str(target.components.get('name', str(target.id)[:8]))

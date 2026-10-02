@@ -621,6 +621,8 @@ class AssetSystemTests(unittest.TestCase):
         self.runtime.step(0)
 
         # Find enemy.py row in file explorer
+        ed.reveal_file(self.enemy_script)
+        ed.file_explorer_sync()
         row = next(r for r in ed.file_explorer_rows if r.visible and "enemy.py" in r.components.get("text", ""))
 
         # 1. Single click on enemy.py row
@@ -655,6 +657,8 @@ class AssetSystemTests(unittest.TestCase):
         self.runtime.step(0)
 
         # Start dragging enemy.py from File Explorer
+        ed.reveal_file(self.enemy_script)
+        ed.file_explorer_sync()
         row = next(r for r in ed.file_explorer_rows if r.visible and "enemy.py" in r.components.get("text", ""))
         # Mouse press initiates drag on enemy.py
         self.send(("drag", row.x + 20, row.y + 10, 1, 0, 10, 0))

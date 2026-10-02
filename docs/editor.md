@@ -235,3 +235,17 @@ The editor template supports nested system files. Docking, effects presentation
 and source/file operations are separate attachments under `systems/editor/`.
 They can be detached and replaced using the standard system API. Further editor
 systems currently remain in the template root during the folder migration.
+
+
+## Panel roots
+
+Hierarchy opens at **Game** and Project Files opens at **systems/game**.
+Right-click an entity or folder and choose **View as root entity/folder** to
+focus that panel on its subtree. Right-click the current root to choose
+**Set parent as root entity/folder**, where a parent is available. Files remain
+inside the project directory.
+
+Selecting an entity or locating/opening a file outside the current view widens
+the corresponding root to the nearest containing ancestor, expands its path,
+and scrolls to the selection. Each panel has an independent session scope;
+these controls do not reparent entities, move files or alter asset UUIDs.

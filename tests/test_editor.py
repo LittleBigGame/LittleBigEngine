@@ -17,6 +17,40 @@ except ImportError:
 
 
 class EditorTests(unittest.TestCase):
+    def test_panel_roots_default_to_game_and_promote_for_external_selection(self):
+        reopened = load_project(self.window, RecordingGraphics(), Input(), self.directory.name + '-roots', template=template_path('editor'))
+        self.addCleanup(reopened.close)
+        import shutil
+        self.addCleanup(lambda: shutil.rmtree(self.directory.name + '-roots', ignore_errors=True))
+        reopened.step(0)
+        ed = reopened.entities[0].application_state
+        self.assertIs(ed.hierarchy.relations['view_root'], ed.game)
+        self.assertEqual(ed.file_explorer.components.get('view_root','systems/game'),'systems/game')
+        target = reopened.create(parent=ed.game,name='Scoped')
+        ed.set_hierarchy_root(target)
+        self.assertIs(ed.hierarchy.relations['view_root'],target)
+        ed.select(ed.camera)
+        ed.hierarchy_sync()
+        self.assertIs(ed.hierarchy.relations['view_root'],ed.app)
+        self.assertTrue(any(r.visible and r.relations.get('target') is ed.camera for r in ed.hierarchy_rows))
+        actions = ed.app.systems['app'].namespace['context_actions'](ed.app)
+        self.assertNotIn('Set parent as root entity',[a['label'] for a in actions if a])
+        ed.set_hierarchy_root(target)
+        reopened.destroy(target)
+        ed.hierarchy_sync()
+        self.assertIs(ed.hierarchy.relations['view_root'],ed.game)
+        ed.switch_left_tab('files')
+        ed.set_file_root(ed.project/'systems/game')
+        ed.reveal_file(ed.project/'inspector.py')
+        ed.file_explorer_sync()
+        self.assertEqual(ed.file_explorer.view_root,'.')
+        self.assertTrue(any(r.visible and r.file_item['path'] == ed.project/'inspector.py' for r in ed.file_explorer_rows))
+        ed.set_file_root(ed.project/'systems/game')
+        item=ed.file_explorer.visible_items[0]
+        actions=ed.app.systems['app'].namespace['context_actions']({'file_item':item})
+        next(a for a in actions if a and a['label']=='Set parent as root folder')['run'](None)
+        self.assertEqual(ed.file_explorer.view_root,'systems')
+
     def test_moved_editor_system_starts_from_its_preserved_uuid(self):
         ed = self.editor
         source = ed.project / 'ui.py'
@@ -144,6 +178,8 @@ class EditorTests(unittest.TestCase):
         self.runtime = load_project(self.window, self.graphics, self.input, self.directory.name, template=template_path("editor"))
         self.addCleanup(self.runtime.close)
         self.editor = self.runtime.entities[0].components["application_state"]
+        self.editor.hierarchy.relations['view_root'] = self.editor.app
+        self.editor.file_explorer.components['view_root'] = '.'
         self.runtime.step(0)
         self.assert_healthy()
 

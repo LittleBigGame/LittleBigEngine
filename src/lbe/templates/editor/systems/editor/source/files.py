@@ -76,6 +76,7 @@ def open_specific_file(path):
         state.code.relations['owner'] = sel
     else:
         state.code.relations.pop('owner', None)
+    state.reveal_file(path)
     message(f"Opened {rel_name}")
 
 def open_file_menu(x=None, y=None):
@@ -177,6 +178,8 @@ def open_system(owner, name):
     state._saved_source = (state.path_field.buffer.text, state.code.buffer.text)
     state.code.system_name = name
     state.code.relations['owner'] = owner
+    if getattr(state, 'ready', False) and path.is_relative_to(state.project):
+        state.reveal_file(path)
     message(f"{name} | {('running' if instance.running else 'stopped')} | {', '.join(instance.lifecycle)}")
 
 def confirm_discard(action):

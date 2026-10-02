@@ -13,7 +13,7 @@ selected = lambda: state.selected()
 message = lambda text: state.message(text)
 
 
-def build_file_tree(project_dir, expanded_folders):
+def build_file_tree(project_dir, expanded_folders, view_root=None):
     """Build a flattened list of visible files and directories based on expanded state."""
     if not project_dir or not Path(project_dir).exists():
         return []
@@ -68,8 +68,54 @@ def build_file_tree(project_dir, expanded_folders):
                     "asset_id": asset_id,
                 })
 
-    scan_dir(pdir, 0)
+    root = Path(view_root).resolve() if view_root is not None else pdir
+    relative = root.relative_to(pdir).as_posix()
+    items.append(dict(path=root,rel_path=relative,name=root.name,is_dir=True,
+                      depth=0,expanded=relative in expanded_folders,icon="📂",type="folder"))
+    if relative in expanded_folders:
+        scan_dir(root, 1)
     return items
+
+
+def file_view_root():
+    relative = entity.components.get("view_root", "systems/game")
+    root = (state.project / relative).resolve()
+    if not root.is_relative_to(state.project) or not root.is_dir():
+        root = state.project
+        entity.components["view_root"] = "."
+    return root
+
+
+def set_file_root(path):
+    path = Path(path).resolve()
+    if not path.is_relative_to(state.project) or not path.is_dir():
+        return
+    entity.components["view_root"] = path.relative_to(state.project).as_posix()
+    entity.components["selected_file"] = path.relative_to(state.project).as_posix()
+    entity.components.setdefault("expanded", set()).add(path.relative_to(state.project).as_posix())
+    entity.components["scroll"] = 0
+    state.file_tree_key = None
+    file_explorer_sync()
+
+
+def reveal_file(path):
+    path = Path(path).resolve()
+    if not path.is_relative_to(state.project):
+        return
+    root = file_view_root()
+    while not path.is_relative_to(root) and root != state.project:
+        root = root.parent
+    entity.components["view_root"] = root.relative_to(state.project).as_posix()
+    expanded = entity.components.setdefault("expanded", set())
+    parent = path if path.is_dir() else path.parent
+    while parent.is_relative_to(root):
+        expanded.add(parent.relative_to(state.project).as_posix())
+        if parent == root:
+            break
+        parent = parent.parent
+    entity.components["selected_file"] = path.relative_to(state.project).as_posix()
+    entity.components["scroll"] = 0
+    state.file_tree_key = None
 
 
 def file_explorer_sync():
@@ -86,15 +132,26 @@ def file_explorer_sync():
         return
 
     expanded = fe.components.setdefault("expanded", set())
-    key = (tuple(sorted(expanded)), state.runtime.assets.registry.revision, int(monotonic()))
+    selection = fe.components.get('selected_file')
+    if selection and fe.components.get('revealed_selection') != selection:
+        fe.components['revealed_selection'] = selection
+        reveal_file(state.project / selection)
+    root = file_view_root()
+    expanded.add(root.relative_to(state.project).as_posix())
+    key = (str(root), tuple(sorted(expanded)), state.runtime.assets.registry.revision, int(monotonic()))
     if getattr(state, "file_tree_key", None) != key:
-        state.file_tree_items = build_file_tree(state.project, expanded)
+        state.file_tree_items = build_file_tree(state.project, expanded, root)
         state.file_tree_key = key
     visible_items = state.file_tree_items
     fe.components["visible_items"] = visible_items
 
     capacity = int(max(0, (fe.h - 34)) // 22)
     max_scroll = max(0, len(visible_items) - capacity)
+    if selection and fe.components.get('scrolled_selection') != selection:
+        fe.components['scrolled_selection'] = selection
+        index = next((i for i,item in enumerate(visible_items) if item['rel_path'] == selection),0)
+        fe.scroll = max(0,index-capacity+1)
+
     fe.scroll = max(0, min(fe.components.get("scroll", 0), max_scroll))
 
     rows = getattr(state, "file_explorer_rows", None)
@@ -262,6 +319,8 @@ def start():
     global _release
     _release = bind_callbacks(system, state, {
         "file_explorer_sync": file_explorer_sync,
+        "set_file_root": set_file_root,
+        "reveal_file": reveal_file,
         "file_scroll_drag": file_scroll_drag,
         "file_track_click": file_track_click,
     })
