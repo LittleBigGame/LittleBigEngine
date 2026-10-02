@@ -179,6 +179,10 @@ def launch(build, *, headless=False, frames=None, screenshot=None):
             runtime = None
         graphics.close()
         input_state.pending.clear()
+        if directory is None:
+            from .launcher import create_launcher_runtime
+            runtime = create_launcher_runtime(window, graphics, input_state, switch_project)
+            return
         from .project import load_project, template_path
         if template:
             if isinstance(template, str) and not Path(template).exists():
@@ -189,6 +193,7 @@ def launch(build, *, headless=False, frames=None, screenshot=None):
             tpl_p = None
         try:
             runtime = load_project(window, graphics, input_state, directory, template=tpl_p)
+            runtime.services["switch_project"] = switch_project
         except Exception as err:
             print(f"Error switching project to {directory}: {err}", file=sys.stderr)
             import traceback

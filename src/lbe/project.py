@@ -539,6 +539,8 @@ def template_path(name):
 def load_project(window, graphics, input_state, directory, *, template=None, entry="app.py"):
     directory = Path(directory).resolve()
     directory.mkdir(parents=True, exist_ok=True)
+    from .user_state import save_last_project
+    save_last_project(directory)
     from .project_files import recover_file_operation
     recover_file_operation(directory)
     from .project_templates import recover_template_upgrade

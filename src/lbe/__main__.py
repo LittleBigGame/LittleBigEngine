@@ -13,6 +13,7 @@ def main() -> None:
     parser.add_argument("--upgrade-template", action="store_true", help="Upgrade unchanged managed template files and preserve custom edits")
     parser.add_argument("--demo", action="store_true", help="Show only the two-entity rendering demo")
     parser.add_argument("--template", default="editor", help="Template used to initialize a new project (editor, demo, counter)")
+    parser.add_argument("--launcher", action="store_true", help="Open the Project Manager GUI instead of auto-opening the last project")
     args = parser.parse_args()
     if args.check:
         from . import Runtime
@@ -41,6 +42,7 @@ def main() -> None:
         parser.error('Desktop support requires: python -m pip install -e ".[desktop]"')
     from .desktop import launch
     from .project import load_project, template_path
+    from .user_state import get_last_project
 
     if args.project:
         name = "demo" if args.demo else args.template
@@ -49,6 +51,12 @@ def main() -> None:
     elif args.demo:
         template = template_path("demo")
         build = lambda w, g, i: load_project(w, g, i, "workspace-demo", template=template)
+    elif not args.launcher:
+        last_proj = get_last_project()
+        if last_proj is not None:
+            build = lambda w, g, i: load_project(w, g, i, last_proj)
+        else:
+            build = None
     else:
         build = None
 

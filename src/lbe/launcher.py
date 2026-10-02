@@ -33,13 +33,12 @@ def create_launcher_runtime(window, graphics, input_state, on_select_project):
     title = ui.create(container, "Title", "label", text="LittleBigEngine - Project Manager (LBE v1)", size=16, w=1100, h=26, color=(69, 182, 199, 255))
     subtitle = ui.create(container, "Subtitle", "label", text="Editor Version: LBE v1 | Full File Manager & Project Launcher", size=10, w=1100, h=18, color=(145, 163, 183, 255))
 
-    # Browser state (Default starting dir in user Documents)
-    user_docs = Path.home() / "Documents"
-    if not user_docs.exists():
-        user_docs = Path.home()
+    # Browser state (Default starting dir from user state or Documents)
+    from .user_state import get_last_directory
+    start_dir = get_last_directory()
 
     state = type("BrowserState", (), {})()
-    state.current_dir = user_docs.resolve()
+    state.current_dir = start_dir.resolve()
     state.page = 0
     state.items_per_page = 10
     state.last_dir = None

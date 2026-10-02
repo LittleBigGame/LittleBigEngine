@@ -176,9 +176,17 @@ def reset_default_layout(*args, **kwargs):
         return callback(*args, **kwargs)
 
 
+def open_launcher_project():
+    switch = state.runtime.services.get("switch_project")
+    if switch:
+        switch(None)
+
+
 def open_file_menu_dropdown(button):
     actions = [
         {"label": "Save Project (Ctrl+S)", "run": lambda _: save_project_action()},
+        {"label": "Project Manager / Switch...", "run": lambda _: open_launcher_project()},
+        None,
         {"label": "New System...", "run": lambda _: new_source()},
         {"label": "Open System...", "run": lambda _: open_path()},
     ]
