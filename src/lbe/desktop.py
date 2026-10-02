@@ -2,6 +2,7 @@
 
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+from pathlib import Path
 import sys
 
 from .space import world_to_screen
@@ -165,7 +166,46 @@ def launch(build, *, headless=False, frames=None, screenshot=None):
     is_active = True
     graphics = Graphics(window)
     input_state = Input()
-    runtime = build(window, graphics, input_state)
+    runtime = None
+    pending_switch = None
+
+    def _execute_switch(directory, template=None):
+        nonlocal runtime
+        if runtime is not None:
+            space = runtime.services.get("space")
+            if space is not None:
+                space.close()
+            runtime.close()
+            runtime = None
+        graphics.close()
+        input_state.pending.clear()
+        from .project import load_project, template_path
+        if template:
+            if isinstance(template, str) and not Path(template).exists():
+                tpl_p = template_path(template)
+            else:
+                tpl_p = Path(template).resolve()
+        else:
+            tpl_p = None
+        try:
+            runtime = load_project(window, graphics, input_state, directory, template=tpl_p)
+        except Exception as err:
+            print(f"Error switching project to {directory}: {err}", file=sys.stderr)
+            import traceback
+            traceback.print_exc()
+            from .launcher import create_launcher_runtime
+            runtime = create_launcher_runtime(window, graphics, input_state, switch_project)
+
+    def switch_project(directory, template=None):
+        nonlocal pending_switch
+        pending_switch = (directory, template)
+
+    if build is None:
+        from .launcher import create_launcher_runtime
+        runtime = create_launcher_runtime(window, graphics, input_state, switch_project)
+    else:
+        runtime = build(window, graphics, input_state)
+
     elapsed = 0.0
     rendered = 0
     closed = False
@@ -198,13 +238,21 @@ def launch(build, *, headless=False, frames=None, screenshot=None):
 
     @window.event
     def on_draw():
-        nonlocal elapsed, rendered
+        nonlocal elapsed, rendered, runtime, pending_switch
+        if pending_switch is not None:
+            target_dir, tpl = pending_switch
+            pending_switch = None
+            _execute_switch(target_dir, tpl)
+
         window.clear()
         graphics.begin()
-        runtime.step(min(elapsed, 0.1))
-        for entity in runtime.entities:
-            for instance in entity.systems.values():
-                failures.update((error.source, error.message) for error in instance.errors)
+        cur = runtime
+        if cur is not None:
+            cur.step(min(elapsed, 0.1))
+            if cur is not None:
+                for entity in cur.entities:
+                    for instance in entity.systems.values():
+                        failures.update((error.source, error.message) for error in instance.errors)
         elapsed = 0.0
         graphics.finish()
         rendered += 1

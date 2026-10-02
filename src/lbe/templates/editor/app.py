@@ -1007,6 +1007,14 @@ def get_editor_layout():
 
 
 def save_editor_project():
+    if not hasattr(state, "project") or state.project is None:
+        return
+    try:
+        from lbe.project import template_path
+        if state.project.resolve() == template_path("editor").resolve():
+            return
+    except Exception:
+        pass
     entities_to_save = get_project_entities()
     reg = getattr(state.runtime.assets, "registry", None)
     app_id = getattr(getattr(state, "app", None), "id", None)

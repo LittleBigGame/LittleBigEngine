@@ -176,7 +176,7 @@ class UITests(unittest.TestCase):
             path = Path(directory)/"app.py"
             path.write_text("entity.answer = 42", encoding="utf-8")
             runtime = load_project(self.window, self.graphics, self.input, directory,
-                                   template=template_path("editor"))
+                                   template=template_path("counter"))
             self.assertEqual(runtime.entities[0].answer, 42)
             self.assertEqual({p.name for p in Path(directory).iterdir()}, {"app.py"})
             runtime.close()

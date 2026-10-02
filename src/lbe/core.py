@@ -370,6 +370,19 @@ class Runtime:
         self.assets = Assets()
         self.services = {}
         self._stepping = False
+        self._incoming_relations = {}
+
+    def _track_relation(self, source, key, target):
+        if target not in self._incoming_relations:
+            self._incoming_relations[target] = set()
+        self._incoming_relations[target].add((source, key))
+
+    def _untrack_relation(self, source, key, target):
+        incoming = self._incoming_relations.get(target)
+        if incoming:
+            incoming.discard((source, key))
+            if not incoming:
+                del self._incoming_relations[target]
 
     @property
     def entities(self):
@@ -455,14 +468,28 @@ class Runtime:
         self._stepping = True
         try:
             instances = tuple(instance for entity in self.entities for instance in entity.systems.values())
+            pause_cache = {}
             for phase in ("update", "draw"):
                 for instance in instances:
                     if instance.running:
                         if phase == "update":
-                            paused = instance.entity.closest("paused")
-                            if paused is not None and paused.components.get("paused"):
-                                continue
-                            if instance.entity.closest(tags=("paused",)) is not None:
+                            ent = instance.entity
+                            if ent not in pause_cache:
+                                is_p = False
+                                curr = ent
+                                while curr is not None:
+                                    if "paused" in curr.tags or (curr.components.get("paused") is True):
+                                        is_p = True
+                                        break
+                                    if curr in pause_cache:
+                                        is_p = pause_cache[curr]
+                                        break
+                                    curr = curr._parent
+                                c_fill = ent
+                                while c_fill is not None and c_fill not in pause_cache:
+                                    pause_cache[c_fill] = is_p
+                                    c_fill = c_fill._parent
+                            if pause_cache[ent]:
                                 continue
                         instance.call(phase, dt) if phase == "update" else instance.call(phase)
         finally:

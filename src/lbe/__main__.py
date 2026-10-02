@@ -41,10 +41,17 @@ def main() -> None:
         parser.error('Desktop support requires: python -m pip install -e ".[desktop]"')
     from .desktop import launch
     from .project import load_project, template_path
-    name = "demo" if args.demo else args.template
-    template = template_path(name)
-    directory = args.project or ("workspace" if name == "editor" else f"workspace-{name}")
-    build = lambda w, g, i: load_project(w, g, i, directory, template=template)
+
+    if args.project:
+        name = "demo" if args.demo else args.template
+        template = template_path(name)
+        build = lambda w, g, i: load_project(w, g, i, args.project, template=template)
+    elif args.demo:
+        template = template_path("demo")
+        build = lambda w, g, i: load_project(w, g, i, "workspace-demo", template=template)
+    else:
+        build = None
+
     launch(build, headless=args.headless, frames=args.frames, screenshot=args.screenshot)
 
 

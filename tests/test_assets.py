@@ -625,9 +625,8 @@ class AssetSystemTests(unittest.TestCase):
         """Single click selects file in file explorer; double click opens it in code editor."""
         ed = self.editor
 
-        # Switch to files tab
-        self.click(ed.tab_files)
-        self.assertEqual(ed.active_left_tab, "files")
+        # Locate enemy.py in file explorer
+        ed.locate_in_file_explorer("enemy.py")
         self.runtime.step(0)
 
         # Ensure a base file is open in editor
@@ -663,8 +662,8 @@ class AssetSystemTests(unittest.TestCase):
         reg = self.runtime.assets.registry
         enemy_id = reg.get_id(self.enemy_script)
 
-        # Switch to files tab
-        self.click(ed.tab_files)
+        # Locate enemy.py in file explorer
+        ed.locate_in_file_explorer("enemy.py")
         self.runtime.step(0)
 
         # Main script open in code editor

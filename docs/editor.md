@@ -122,10 +122,10 @@ with the mouse wheel.
   If the component's value is an `Entity`, the context menu automatically presents contextual
   entity sub-actions (`> Select Entity`, `Inspect Entity`, `Rename Entity`, `+ Add Component to Entity`,
   `Add child`, `Duplicate Entity`, `Delete Entity`).
-- **Continuous Ctrl Stack Highlighting**: Holding `Ctrl` at any time continuously highlights the
+- **Continuous Alt Stack Highlighting**: Holding `Alt` at any time continuously highlights the
   entity or UI control under the mouse and its entire ancestor stack in distinct hierarchy colors
   (Cyan for leaf, Emerald Green for parent, Amber for grandparent, Fuchsia, Coral).
-  Right-clicking while holding `Ctrl` opens a deep inspection context menu containing color-coded
+  Right-clicking while holding `Alt` opens a deep inspection context menu containing color-coded
   selection options for every entity in the stack, along with editing actions for the leaf.
 
 These actions are defined by the editor project's `app.py`, `hierarchy.py`, and `inspector.py`

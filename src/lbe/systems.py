@@ -110,13 +110,19 @@ class SystemInstance:
         self._started = False
         self._stopped = False
         self._subscriptions = []
-        self._injected = frozenset()
+        self._injected = {}
 
     @property
     def globals(self):
-        """User-defined public globals, excluding injected services."""
-        return {key: value for key, value in self.namespace.items()
-                if not key.startswith("_") and key not in self._injected}
+        """User-defined public globals, excluding injected services unless rebound."""
+        res = {}
+        for key, value in self.namespace.items():
+            if key.startswith("_"):
+                continue
+            if key in self._injected and value is self._injected[key]:
+                continue
+            res[key] = value
+        return res
 
     @property
     def lifecycle(self):
@@ -150,7 +156,7 @@ class SystemInstance:
             "assets": runtime.assets,
             "asset": runtime.assets.resolve,
         })
-        self._injected = frozenset(self.namespace)
+        self._injected = dict(self.namespace)
         try:
             with runtime.changes.context(self.entity, self.name, 'initialize'):
                 runtime.events.emit('system.call', self.entity, self.name, 'initialize')

@@ -70,7 +70,7 @@ LBE provides pure entity layout helpers that operate without introducing transfo
 - `Layout`: Attached entity system that automatically evaluates layout rules on update.
 - `ui.splitter(parent, name, axis="x", thickness=6, on_drag=...)`: Interactive draggable divider control.
 
-Holding `Ctrl` displays continuous entity hierarchy overlays via the root's `highlight_provider(mx, my)` callback,
+Holding `Alt` displays continuous entity hierarchy overlays via the root's `highlight_provider(mx, my)` callback,
 highlighting the hover target and each ancestor in distinct colors (`STACK_COLORS`).
 
 ## Systems and composition

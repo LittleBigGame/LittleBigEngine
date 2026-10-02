@@ -141,24 +141,39 @@ def stack(parent, children=None, *, axis="y", gap=None, padding=None, align=None
     flex_children = [c for c in children if hasattr(c, "components") and c.components.get("flex", 0) > 0]
     if flex_children:
         total_flex = sum(c.components.get("flex", 1) for c in flex_children)
-        if axis == "x" and content_w > 0:
-            fixed = sum(c.w + parse_box(c.components.get("margin", 0))[3] + parse_box(c.components.get("margin", 0))[1]
-                        for c in children if c not in flex_children)
-            total_gaps = (len(children) - 1) * gap_val
-            flex_margins = sum(parse_box(c.components.get("margin", 0))[3] + parse_box(c.components.get("margin", 0))[1]
-                               for c in flex_children)
-            rem = max(0, content_w - fixed - total_gaps - flex_margins)
-            for c in flex_children:
-                put(c, w=max(0, int(rem * (c.components.get("flex", 1) / total_flex))))
-        elif axis == "y" and content_h > 0:
-            fixed = sum(c.h + parse_box(c.components.get("margin", 0))[0] + parse_box(c.components.get("margin", 0))[2]
-                        for c in children if c not in flex_children)
-            total_gaps = (len(children) - 1) * gap_val
-            flex_margins = sum(parse_box(c.components.get("margin", 0))[0] + parse_box(c.components.get("margin", 0))[2]
-                               for c in flex_children)
-            rem = max(0, content_h - fixed - total_gaps - flex_margins)
-            for c in flex_children:
-                put(c, h=max(0, int(rem * (c.components.get("flex", 1) / total_flex))))
+        if total_flex > 0:
+            if axis == "x" and content_w > 0:
+                fixed = sum(c.w + parse_box(c.components.get("margin", 0))[3] + parse_box(c.components.get("margin", 0))[1]
+                            for c in children if c not in flex_children)
+                total_gaps = (len(children) - 1) * gap_val
+                flex_margins = sum(parse_box(c.components.get("margin", 0))[3] + parse_box(c.components.get("margin", 0))[1]
+                                   for c in flex_children)
+                rem = max(0, content_w - fixed - total_gaps - flex_margins)
+                weights = [c.components.get("flex", 1) for c in flex_children]
+                exact = [rem * w / total_flex for w in weights]
+                base = [int(s) for s in exact]
+                leftover = rem - sum(base)
+                fractional = sorted(range(len(flex_children)), key=lambda i: (exact[i] - base[i]), reverse=True)
+                for i in range(leftover):
+                    base[fractional[i]] += 1
+                for c, size in zip(flex_children, base):
+                    put(c, w=max(0, size))
+            elif axis == "y" and content_h > 0:
+                fixed = sum(c.h + parse_box(c.components.get("margin", 0))[0] + parse_box(c.components.get("margin", 0))[2]
+                            for c in children if c not in flex_children)
+                total_gaps = (len(children) - 1) * gap_val
+                flex_margins = sum(parse_box(c.components.get("margin", 0))[0] + parse_box(c.components.get("margin", 0))[2]
+                                   for c in flex_children)
+                rem = max(0, content_h - fixed - total_gaps - flex_margins)
+                weights = [c.components.get("flex", 1) for c in flex_children]
+                exact = [rem * w / total_flex for w in weights]
+                base = [int(s) for s in exact]
+                leftover = rem - sum(base)
+                fractional = sorted(range(len(flex_children)), key=lambda i: (exact[i] - base[i]), reverse=True)
+                for i in range(leftover):
+                    base[fractional[i]] += 1
+                for c, size in zip(flex_children, base):
+                    put(c, h=max(0, size))
 
     offset = pad_left if axis == "x" else pad_top
     for child in children:
@@ -334,6 +349,8 @@ class UI:
             self.root.relations["focus"] = control
 
     def controls(self):
+        if not getattr(self.root, "alive", False):
+            return ()
         return self.root.query(tags="ui", recursive=True)
 
     def visible(self, control):
@@ -392,16 +409,26 @@ class UI:
             field.buffer = TextBuffer(text)
 
     def process(self):
+        if not getattr(self.root, "alive", False):
+            return
         for event in self.input.drain():
+            if not getattr(self.root, "alive", False):
+                return
             try:
                 self.dispatch(event)
             except Exception as error:
+                if not getattr(self.root, "alive", False):
+                    return
                 message = f"{type(error).__name__}: {error}"
                 self.root.components["ui_error"] = message
                 self.runtime.events.emit('ui.error', message)
                 callback = self.root.components.get("on_ui_error")
                 if callback:
                     callback(message)
+            if not getattr(self.root, "alive", False):
+                return
+        if not getattr(self.root, "alive", False):
+            return
         # Continuous selection drag autoscroll when mouse is held outside multiline control
         text_drag = self.root.relations.get("text_drag")
         if text_drag is not None and self.visible(text_drag) and hasattr(self, "mouse_pos"):
@@ -424,10 +451,14 @@ class UI:
                 text_drag.buffer.reveal(rows, cols)
                 text_drag.components.touch("buffer")
         for control in tuple(self.controls()):
+            if not getattr(self.root, "alive", False):
+                return
             if "multiline" in control.tags and self.visible(control):
                 try:
                     self._sync_text(control)
                 except Exception as error:
+                    if not getattr(self.root, "alive", False):
+                        return
                     message = f"{type(error).__name__}: {error}"
                     self.root.components["ui_error"] = message
                     self.runtime.events.emit('ui.error', message)
@@ -441,20 +472,27 @@ class UI:
         if kind == "motion":
             if len(event) > 3 and isinstance(event[3], int):
                 self.ctrl_held = bool(event[3] & 2)
+                self.alt_held = bool(event[3] & 4)
         elif kind in ("click", "release"):
             if len(event) > 4 and isinstance(event[4], int):
                 self.ctrl_held = bool(event[4] & 2)
+                self.alt_held = bool(event[4] & 4)
         elif kind == "drag":
             if len(event) > 4 and isinstance(event[4], int):
                 self.ctrl_held = bool(event[4] & 2)
+                self.alt_held = bool(event[4] & 4)
         elif kind == "key":
             if len(event) > 1 and event[1] in ("LCTRL", "RCTRL", "CTRL"):
                 self.ctrl_held = True
+            elif len(event) > 1 and event[1] in ("LALT", "RALT", "ALT"):
+                self.alt_held = True
             elif len(event) > 2 and isinstance(event[2], bool):
                 self.ctrl_held = event[2]
         elif kind == "key_up":
             if len(event) > 1 and event[1] in ("LCTRL", "RCTRL", "CTRL"):
                 self.ctrl_held = False
+            elif len(event) > 1 and event[1] in ("LALT", "RALT", "ALT"):
+                self.alt_held = False
             elif len(event) > 2 and isinstance(event[2], bool):
                 self.ctrl_held = event[2]
 
@@ -1020,68 +1058,75 @@ class UI:
     def draw(self):
         graphics = self.graphics
         for control in self.controls():
-            if not self.visible(control):
-                continue
-            layer = control.components.get("layer", 2)
-            if "label" not in control.tags:
-                graphics.rect(control.x, control.y, control.w, control.h, control.color, key=control.id, layer=layer)
-                framed = any(tag in control.tags for tag in ('panel', 'field')) or ('button' in control.tags and control.color != PANEL)
-                if control.components.get('bevel', framed):
-                    graphics.rect(control.x, control.y, control.w, 1, (*INK[:3], 35), key=(control.id, 'bevel_top'), layer=layer+1)
-                    graphics.rect(control.x, control.y+control.h-1, control.w, 1, (*BG, 180), key=(control.id, 'bevel_bottom'), layer=layer+1)
-                accent = control.components.get('accent_color')
-                border = control.components.get('border_color')
-                if border is not None:
-                    top,right,bottom,left = parse_box(control.components.get('border_inset', 0))
-                    bx,by = control.x+left,control.y+top
-                    bw,bh = max(0,control.w-left-right),max(0,control.h-top-bottom)
-                    thickness = max(1, control.components.get('border_width', 1))
-                    if bw and bh:
-                        thickness = min(thickness,bw,bh)
-                        for edge, (x,y,w,h) in enumerate(((bx,by,bw,thickness),
-                                (bx,by+bh-thickness,bw,thickness),
-                                (bx,by,thickness,bh),
-                                (bx+bw-thickness,by,thickness,bh))):
-                            graphics.rect(x,y,w,h,border,key=(control.id,'border',edge),layer=layer+1)
-                if accent is not None:
-                    graphics.rect(control.x, control.y+control.h-2, control.w, 2, accent, key=(control.id, 'accent'), layer=layer+1)
-            if "field" in control.tags:
-                pitch = control.components.get("pitch", self.pitch)
-                buffer = control.buffer
-                width = max(1, int((control.w-12)//pitch))
-                if self.focused is control:
-                    buffer.reveal(1, width)
-                    start, end = buffer.selection
-                    start, end = max(0, start-buffer.horizontal), min(width, end-buffer.horizontal)
-                    if end > start:
-                        graphics.rect(control.x+6+start*pitch, control.y+3, (end-start)*pitch, control.h-6,
-                                      SELECTION, key=(control.id, "selection"), layer=layer+1)
-                    graphics.rect(control.x, control.y+control.h-2, control.w, 2, ACCENT, key=(control.id, "focus"), layer=layer+1)
-                    graphics.rect(control.x+6+(buffer.cursor-buffer.horizontal)*pitch, control.y+4, 1, control.h-8,
-                                   ACCENT, key=(control.id, "caret"), layer=layer+2)
-                text = buffer.text.replace("\n", " ")[buffer.horizontal:buffer.horizontal+width]
-                text = text or control.components.get("hint", "")[:width]
-                ink = INK if self.focused is control else control.components.get("ink", INK)
-                graphics.text(text, control.x+6, control.y+5, color=ink, key=(control.id, "text"), layer=layer+2)
-            elif "text" in control.components:
-                pitch = control.components.get("pitch", self.pitch)
-                inset = 8 if "panel" in control.tags or "button" in control.tags else 0
-                width = max(1, int((control.w-inset*2)//pitch))
-                spans = control.components.get("spans")
-                if spans:
-                    x_cursor = control.x + inset
-                    col = 0
-                    for span_idx, (chunk, ink) in enumerate(spans):
-                        if col >= width:
-                            break
-                        chunk_str = str(chunk)[:width - col]
-                        graphics.text(chunk_str, x_cursor, control.y+(8 if "panel" in control.tags else 4),
-                                      color=ink, key=(control.id, "span", span_idx), layer=layer+1)
-                        x_cursor += len(chunk_str) * pitch
-                        col += len(chunk_str)
-                else:
-                    graphics.text(str(control.text)[:width], control.x+inset, control.y+(8 if "panel" in control.tags else 4),
-                                  color=control.components.get("ink", INK), key=(control.id, "text"), layer=layer+1)
+            try:
+                if not self.visible(control):
+                    continue
+                layer = control.components.get("layer", 2)
+                if "label" not in control.tags:
+                    graphics.rect(control.x, control.y, control.w, control.h, control.color, key=control.id, layer=layer)
+                    framed = any(tag in control.tags for tag in ('panel', 'field')) or ('button' in control.tags and control.color != PANEL)
+                    if control.components.get('bevel', framed):
+                        graphics.rect(control.x, control.y, control.w, 1, (*INK[:3], 35), key=(control.id, 'bevel_top'), layer=layer+1)
+                        graphics.rect(control.x, control.y+control.h-1, control.w, 1, (*BG, 180), key=(control.id, 'bevel_bottom'), layer=layer+1)
+                    accent = control.components.get('accent_color')
+                    border = control.components.get('border_color')
+                    if border is not None:
+                        top,right,bottom,left = parse_box(control.components.get('border_inset', 0))
+                        bx,by = control.x+left,control.y+top
+                        bw,bh = max(0,control.w-left-right),max(0,control.h-top-bottom)
+                        thickness = max(1, control.components.get('border_width', 1))
+                        if bw and bh:
+                            thickness = min(thickness,bw,bh)
+                            for edge, (x,y,w,h) in enumerate(((bx,by,bw,thickness),
+                                    (bx,by+bh-thickness,bw,thickness),
+                                    (bx,by,thickness,bh),
+                                    (bx+bw-thickness,by,thickness,bh))):
+                                graphics.rect(x,y,w,h,border,key=(control.id,'border',edge),layer=layer+1)
+                    if accent is not None:
+                        graphics.rect(control.x, control.y+control.h-2, control.w, 2, accent, key=(control.id, 'accent'), layer=layer+1)
+                if "field" in control.tags:
+                    pitch = control.components.get("pitch", self.pitch)
+                    buffer = control.buffer
+                    width = max(1, int((control.w-12)//pitch))
+                    if self.focused is control:
+                        buffer.reveal(1, width)
+                        start, end = buffer.selection
+                        start, end = max(0, start-buffer.horizontal), min(width, end-buffer.horizontal)
+                        if end > start:
+                            graphics.rect(control.x+6+start*pitch, control.y+3, (end-start)*pitch, control.h-6,
+                                          SELECTION, key=(control.id, "selection"), layer=layer+1)
+                        graphics.rect(control.x, control.y+control.h-2, control.w, 2, ACCENT, key=(control.id, "focus"), layer=layer+1)
+                        graphics.rect(control.x+6+(buffer.cursor-buffer.horizontal)*pitch, control.y+4, 1, control.h-8,
+                                       ACCENT, key=(control.id, "caret"), layer=layer+2)
+                    text = buffer.text.replace("\n", " ")[buffer.horizontal:buffer.horizontal+width]
+                    text = text or control.components.get("hint", "")[:width]
+                    ink = INK if self.focused is control else control.components.get("ink", INK)
+                    graphics.text(text, control.x+6, control.y+5, color=ink, key=(control.id, "text"), layer=layer+2)
+                elif "text" in control.components:
+                    pitch = control.components.get("pitch", self.pitch)
+                    inset = 8 if "panel" in control.tags or "button" in control.tags else 0
+                    width = max(1, int((control.w-inset*2)//pitch))
+                    spans = control.components.get("spans")
+                    if spans:
+                        x_cursor = control.x + inset
+                        col = 0
+                        for span_idx, (chunk, ink) in enumerate(spans):
+                            if col >= width:
+                                break
+                            chunk_str = str(chunk)[:width - col]
+                            graphics.text(chunk_str, x_cursor, control.y+(8 if "panel" in control.tags else 4),
+                                          color=ink, key=(control.id, "span", span_idx), layer=layer+1)
+                            x_cursor += len(chunk_str) * pitch
+                            col += len(chunk_str)
+                    else:
+                        graphics.text(str(control.text)[:width], control.x+inset, control.y+(8 if "panel" in control.tags else 4),
+                                      color=control.components.get("ink", INK), key=(control.id, "text"), layer=layer+1)
+            except Exception as error:
+                message = f"{type(error).__name__} in UI.draw: {error}"
+                self.root.components["ui_error"] = message
+                callback = self.root.components.get("on_ui_error")
+                if callback:
+                    callback(message)
 
         is_ctrl = bool(getattr(self.input, "ctrl", False) or getattr(self, "ctrl_held", False))
         if is_ctrl:
