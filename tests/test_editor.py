@@ -17,6 +17,24 @@ except ImportError:
 
 
 class EditorTests(unittest.TestCase):
+    def test_moved_editor_system_starts_from_its_preserved_uuid(self):
+        ed = self.editor
+        source = ed.project / 'ui.py'
+        identity = self.runtime.assets.registry.get_id(source)
+        destination = ed.project / 'systems/editor/ui/ui.py'
+        destination.parent.mkdir(parents=True)
+        ed.files.relocate(source, destination, save=ed.save_editor_project)
+        reopened = load_project(self.window, RecordingGraphics(), Input(), ed.project)
+        self.addCleanup(reopened.close)
+        reopened.step(0)
+        app = reopened.entities[0]
+        self.assertEqual(reopened.assets.registry.get_id(destination), identity)
+        self.assertEqual(Path(app.systems['ui'].definition.path), destination)
+        self.assertFalse([(name, list(instance.errors)) for e in reopened.entities
+                          for name, instance in e.systems.items() if instance.errors])
+        actions = app.systems['app'].namespace['context_actions'](app.application_state.game)
+        self.assertIn('View affecting systems', [a['label'] for a in actions if a])
+
     def test_system_effect_file_menu_and_inspector_use_asset_identity(self):
         from lbe import SystemDefinition
         ed = self.editor

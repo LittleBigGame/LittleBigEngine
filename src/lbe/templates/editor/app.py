@@ -248,8 +248,8 @@ def initialize():
         state.game = create(parent=entity, name="Game", tags=["root"])
         create(parent=state.game, name="Entity A", x=-3.0, y=-1.0, w=2.0, h=2.0, color=(75, 185, 210))
         create(parent=state.game, name="Entity B", x=1.0, y=0.0, w=1.5, h=1.5, color=(232, 165, 80))
-        if (project / "render.py").exists():
-            state.game.systems.attach("render", assets.system(project / "render.py"))
+        if (assets.registry.get_path("cd53cb27-f893-5a6b-a3d2-52f550f7d35d") is not None and assets.registry.get_path("cd53cb27-f893-5a6b-a3d2-52f550f7d35d").exists()):
+            state.game.systems.attach("render", assets["cd53cb27-f893-5a6b-a3d2-52f550f7d35d"])
 
     state.camera = create(parent=entity, name="Camera", x=0.0, y=0.0, zoom=48.0)
     state.viewport_panel = state.ui.create(entity, "ViewportPanel", "panel", color=PANEL, layer=0)
@@ -458,16 +458,16 @@ def initialize():
     state.inspector.on_drag = lambda c, ev: start_panel_dock_drag("inspector", ev) if len(ev) > 2 and ev[2] <= c.y + 30 else None
     state.code_panel.on_drag = lambda c, ev: start_panel_dock_drag("code_panel", ev) if len(ev) > 2 and ev[2] <= c.y + 30 else None
     state.zoom_label.on_drag = lambda c, ev: start_panel_dock_drag("viewport", ev)
-    if (project / 'code_editor.py').exists():
+    if (assets.registry.get_path("97c33cfb-4f26-5e7a-bd0b-d689a72be2f5") is not None and assets.registry.get_path("97c33cfb-4f26-5e7a-bd0b-d689a72be2f5").exists()):
         if 'code_editor' not in state.code_panel.systems:
-            state.code_panel.systems.attach('code_editor', assets.system(project / 'code_editor.py'))
+            state.code_panel.systems.attach('code_editor', assets["97c33cfb-4f26-5e7a-bd0b-d689a72be2f5"])
         if 'code_editor' not in state.code.systems:
-            state.code.systems.attach('code_editor', assets.system(project / 'code_editor.py'))
-    if (project / 'text_area.py').exists():
+            state.code.systems.attach('code_editor', assets["97c33cfb-4f26-5e7a-bd0b-d689a72be2f5"])
+    if (assets.registry.get_path("62f6264e-f862-5aa2-9561-5e782dedd755") is not None and assets.registry.get_path("62f6264e-f862-5aa2-9561-5e782dedd755").exists()):
         if 'text_area' in state.code.systems:
-            state.code.systems.reload('text_area', assets.system(project / 'text_area.py'))
+            state.code.systems.reload('text_area', assets["62f6264e-f862-5aa2-9561-5e782dedd755"])
         else:
-            state.code.systems.attach('text_area', assets.system(project / 'text_area.py'))
+            state.code.systems.attach('text_area', assets["62f6264e-f862-5aa2-9561-5e782dedd755"])
     state.selected = selected
     state.inspected = inspected
     state.select = select
@@ -483,12 +483,12 @@ def initialize():
     state.open_specific_file = open_specific_file
     state.switch_left_tab = switch_left_tab
     state.locate_in_file_explorer = locate_in_file_explorer
-    if (project / 'hierarchy.py').exists() and 'hierarchy' not in state.hierarchy.systems:
-        state.hierarchy.systems.attach('hierarchy', assets.system(project / 'hierarchy.py'))
-    if (project / 'file_explorer.py').exists() and 'file_explorer' not in state.file_explorer.systems:
-        state.file_explorer.systems.attach('file_explorer', assets.system(project / 'file_explorer.py'))
-    if (project / 'inspector.py').exists() and 'inspector' not in state.inspector.systems:
-        state.inspector.systems.attach('inspector', assets.system(project / 'inspector.py'))
+    if (assets.registry.get_path("333b5454-9934-566b-90c6-19ddb72f2da1") is not None and assets.registry.get_path("333b5454-9934-566b-90c6-19ddb72f2da1").exists()) and 'hierarchy' not in state.hierarchy.systems:
+        state.hierarchy.systems.attach('hierarchy', assets["333b5454-9934-566b-90c6-19ddb72f2da1"])
+    if (assets.registry.get_path("ed74702d-a604-5ce0-ae65-6b79c63918ee") is not None and assets.registry.get_path("ed74702d-a604-5ce0-ae65-6b79c63918ee").exists()) and 'file_explorer' not in state.file_explorer.systems:
+        state.file_explorer.systems.attach('file_explorer', assets["ed74702d-a604-5ce0-ae65-6b79c63918ee"])
+    if (assets.registry.get_path("88190356-1ae0-55a2-af97-f45905e5910b") is not None and assets.registry.get_path("88190356-1ae0-55a2-af97-f45905e5910b").exists()) and 'inspector' not in state.inspector.systems:
+        state.inspector.systems.attach('inspector', assets["88190356-1ae0-55a2-af97-f45905e5910b"])
     entity.systems.attach("source_files", assets["1e1ba739-27d5-552a-a816-91b1fa7081b3"])
     state.project_graph = PersistentGraph(state.runtime, tuple(restored.values()) + state.game.descendants if project_data and project_data.get("entities") else (state.game,) + state.game.descendants, application=state.app)
     if "render" in state.game.systems:
@@ -1579,7 +1579,7 @@ def start():
     bind_actions()
     entity.tags.add('editor')
     if "ui" not in entity.systems:
-        state.ui.install(definition=assets.system(project / "ui.py"))
+        state.ui.install(definition=assets["20fe7e55-f05e-5d02-9ed0-a36a56f66c5d"])
 
 
 def open_system_log():
@@ -1591,7 +1591,7 @@ def open_system_log():
                             x=max(0, state.window.width-840), y=80, w=820, h=360,
                             layer=20, modal=True, dock='float', movable=True, resizable=True)
     state.app.relations['system_log_panel'] = panel
-    panel.systems.attach('system_log', assets.system(project / 'system_log.py'))
+    panel.systems.attach('system_log', assets["6df949df-402f-5552-bc5e-c4566531ee40"])
 
 
 def update(dt):
@@ -1967,6 +1967,7 @@ def context_actions(target):
         dict(label='Select', run=select),
         dict(label='Rename', run=context_rename),
         dict(label='Inspect entity', run=lambda e: open_panel(target=e)),
+        dict(label='View affecting systems', run=lambda e: (inspect_entity(e), inspector_sync())),
         None,
         dict(label="+ Add Component...", run=lambda e: (select(e), open_add_component_menu())),
     ]

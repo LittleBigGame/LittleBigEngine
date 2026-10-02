@@ -221,9 +221,11 @@ entities**. Blue outlines show entities returned by its queries; green outlines
 show entities it changed through LBE component, tag, relation or hierarchy APIs.
 Green takes priority when both apply. The inspector also lists systems attached
 to other owners that affected the selected entity, using the same colours.
+Right-click an entity and choose **View affecting systems** to inspect this list.
 Click a system row to open its source. Names resolve from the asset registry;
 selection uses the stable asset UUID.
 
+Run the game with **F5** to collect activity from paused game systems.
 Effects describe the most recent update and subsequent draw/event activity for
 each attachment, rather than predictions about code that has not run. Component
 assignments count as observed writes, including assigning the existing value.
