@@ -273,3 +273,11 @@ last for the current editor session. This does not yet cover every entity, tag,
 relation or inspector operation. Deletion through the editor rejects paths that
 contain scripts currently required by its own attachments. External filesystem
 deletion bypasses this safeguard.
+
+
+If the viewport appears empty after panning or moving objects, use
+**View → Frame all game entities** to fit the drawable scene, or
+**View → Frame selected entity** for a close-up. Widely separated objects may
+look small when fitting the entire scene. Focus camera uses hierarchy-relative
+world position. Systems defined inline or outside the project remain inspectable
+without claiming a project asset UUID.

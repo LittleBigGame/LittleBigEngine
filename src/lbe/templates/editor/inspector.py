@@ -352,7 +352,10 @@ def inspector_sync():
                 put(e_btn, visible=shown)
                 if shown:
                     owner, name, instance, effect_colour = systems[index]
-                    identity = assets.registry.get_id(instance.definition.path) if instance.definition.path else None
+                    try:
+                        identity = assets.registry.get_id(instance.definition.path) if instance.definition.path else None
+                    except ValueError:
+                        identity = None
                     entry = assets.registry.get(identity) if identity else None
                     s_title = (entry["name"] if entry else name) + (' !' if instance.errors else '')
                     s_ink = (255, 120, 120) if instance.errors else (effect_colour or INK)

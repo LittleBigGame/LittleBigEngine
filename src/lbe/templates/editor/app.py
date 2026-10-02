@@ -212,6 +212,8 @@ def open_view_menu_dropdown(button):
         {"label": f"{'[x]' if panels_open['viewport'] else '[  ]'} Viewport", "run": lambda _: toggle_panel_view("viewport")},
         {"label": f"{'[x]' if panels_open['code_panel'] else '[  ]'} System Source", "run": lambda _: toggle_panel_view("code_panel")},
         None,
+        {"label": "Frame all game entities", "run": lambda _: frame_game()},
+        {"label": "Frame selected entity", "run": lambda _: context_focus_camera(selected())},
         {"label": "Reset Default Layout", "run": lambda _: reset_default_layout()},
     ]
     open_menu(state.ui, button, button.x, button.y + button.h + 2, actions=actions)
@@ -2029,4 +2031,27 @@ def context_add_child(target):
 
 
 def context_focus_camera(target):
-    state.camera.x, state.camera.y = target.x, target.y
+    x,y = world_position(target, state.game)
+    w,h = target.components.get('w',0),target.components.get('h',0)
+    state.camera.x, state.camera.y = x+w/2,y+h/2
+    state.camera.zoom = max(0.1,min(48,max(1,state.viewport.w-48)/max(1,w),max(1,state.viewport.h-48)/max(1,h)))
+    save_editor_project()
+
+
+def frame_game():
+    if not state.dock_tree.find_tab_group_with_panel('viewport'):
+        toggle_panel_view('viewport')
+    group = state.dock_tree.find_tab_group_with_panel('viewport')
+    group.active = group.panels.index('viewport')
+    layout()
+    boxes = [world_bounds(e) for e in state.game.descendants if e.components.get('color') is not None]
+    boxes = [box for box in boxes if box is not None]
+    if not boxes:
+        message('No drawable game entities to frame')
+        return
+    left,bottom = min(b[0] for b in boxes),min(b[1] for b in boxes)
+    right,top = max(b[2] for b in boxes),max(b[3] for b in boxes)
+    state.camera.x, state.camera.y = (left+right)/2,(bottom+top)/2
+    state.camera.zoom = max(0.1,min(max(1,state.viewport.w-48)/max(1,right-left),max(1,state.viewport.h-48)/max(1,top-bottom),256))
+    save_editor_project()
+    message('Framed drawable game entities')

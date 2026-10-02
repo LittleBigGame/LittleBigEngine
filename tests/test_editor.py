@@ -17,6 +17,36 @@ except ImportError:
 
 
 class EditorTests(unittest.TestCase):
+    def test_frame_game_recovers_distant_camera_and_nested_focus(self):
+        ed = self.editor
+        ed.camera.x,ed.camera.y = 9999,9999
+        namespace=ed.app.systems['app'].namespace
+        namespace['frame_game']()
+        for target in ed.game.children:
+            if target.components.get('color') is not None:
+                sx,sy=world_to_screen(ed.camera,ed.viewport,target.x,target.y)
+                self.assertGreaterEqual(sx,ed.viewport.x)
+                self.assertLessEqual(sx,ed.viewport.x+ed.viewport.w)
+                self.assertGreaterEqual(sy,ed.viewport.y)
+                self.assertLessEqual(sy,ed.viewport.y+ed.viewport.h)
+        parent=self.runtime.create(parent=ed.game,x=10,y=20)
+        child=self.runtime.create(parent=parent,x=2,y=3)
+        namespace['context_focus_camera'](child)
+        self.assertEqual((ed.camera.x,ed.camera.y),(12,23))
+
+    def test_external_system_source_is_inspectable_without_project_asset(self):
+        from lbe import SystemDefinition
+        ed = self.editor
+        target = ed.game.children[0]
+        path = str(Path(self.directory.name).parent/'external-lbe-system.py')
+        target.systems.attach('external',SystemDefinition('def update(dt):\n    entity.x += dt',path))
+        self.runtime.step(1)
+        ed.select(target)
+        ed.inspector_sync()
+        self.assertTrue(any(r.visible and r.components.get('system_key')==(target.id,'external') for r in ed.system_rows))
+        self.assertTrue(any(r.asset is None and r.system=='external' for r in self.runtime.services['effects'].affecting(target)))
+        self.assertFalse([list(i.errors) for e in self.runtime.entities for i in e.systems.values() if i.errors])
+
     def test_component_commit_undo_is_one_enter_transaction(self):
         ed = self.editor
         target = ed.game.children[0]

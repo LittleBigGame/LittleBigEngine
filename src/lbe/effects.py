@@ -66,7 +66,10 @@ class SystemEffects:
             if owner is None or name not in owner.systems:
                 continue
             path = owner.systems[name].definition.path
-            asset = registry.get_id(path) if registry is not None and path else None
+            try:
+                asset = registry.get_id(path) if registry is not None and path else None
+            except ValueError:
+                asset = None  # Inline/external definitions have no project asset identity.
             records.append(Effect(identity,name,asset,frozenset(queried),frozenset(changed)))
         return tuple(records)
 
