@@ -17,6 +17,38 @@ except ImportError:
 
 
 class EditorTests(unittest.TestCase):
+    def test_component_commit_undo_is_one_enter_transaction(self):
+        ed = self.editor
+        target = ed.game.children[0]
+        ed.select(target)
+        field = next(f for _,f in ed.component_rows if f.visible and f.components.get('component_key')=='x')
+        before = target.x
+        ed.ui.focus(field)
+        field.buffer.anchor = 0
+        field.buffer.cursor = len(field.buffer.text)
+        self.send(('text','1'),('text','2'),('text','3'),('key','ENTER',False,False))
+        self.assertEqual(target.x,123)
+        self.send(('key','Z',True,False))
+        self.assertEqual(target.x,before)
+        self.send(('key','Z',True,True))
+        self.assertEqual(target.x,123)
+
+    def test_editor_dependencies_cannot_be_deleted_but_game_file_undo_works(self):
+        ed = self.editor
+        with self.assertRaisesRegex(ValueError,'Required editor source'):
+            ed.delete_file_item(dict(path=ed.project/'systems/editor'))
+        path = ed.project/'systems/game/deletable.py'
+        path.write_text('def update(dt): pass',encoding='utf-8')
+        identity = self.runtime.assets.registry.register(path)
+        ed.delete_file_item(dict(path=path))
+        self.assertFalse(path.exists())
+        ed.ui.focus(None)
+        self.send(('key','Z',True,False))
+        self.assertTrue(path.exists())
+        self.assertEqual(self.runtime.assets.registry.get_id(path),identity)
+        self.send(('key','Z',True,True))
+        self.assertFalse(path.exists())
+
     def test_scoped_creation_menu_creates_visible_folder_and_system(self):
         ed = self.editor
         folder = ed.project / 'systems/game'
@@ -38,6 +70,12 @@ class EditorTests(unittest.TestCase):
         next(a for a in actions if a['label']=='+ New system script...')['run'](None)
         self.assertTrue((folder/'system_2.py').is_file())
         self.assertFalse((ed.project/'system_1.py').exists())
+        ed.ui.focus(ed.code)
+        self.send(('key','Z',True,False))
+        self.assertFalse((folder/'system_2.py').exists())
+        self.send(('key','Z',True,True))
+        self.assertTrue((folder/'system_2.py').exists())
+
         ed.dock_tree.remove_panel('code_panel')
         ed.prompt_rename_file_item(dict(type='folder', path=created))
         self.assertTrue(ed.code_panel.visible)

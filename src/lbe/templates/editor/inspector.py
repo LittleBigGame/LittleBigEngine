@@ -501,7 +501,23 @@ def commit_component(field):
     target, key = (field.relations['target'], field.component_key)
     if field.buffer.text == safe_repr(target.components[key]):
         return
-    target.components[key] = parse_value(field.buffer.text)
+    before = target.components[key]
+    after = parse_value(field.buffer.text)
+    identity = target.id
+    def apply(value):
+        current = state.runtime.resolve(identity)
+        if current is None or not current.alive:
+            raise ValueError('Edited entity no longer exists')
+        current.components[key] = value
+        for _, control in state.component_rows:
+            if control.relations.get('target') is current and control.components.get('component_key') == key:
+                control.buffer = TextBuffer(safe_repr(value))
+                control.committed_text = control.buffer.text
+        inspector_sync()
+    target.components[key] = after
+    field.buffer = TextBuffer(safe_repr(after))
+    field.committed_text = field.buffer.text
+    state.files.history.record(lambda:apply(before),lambda:apply(after),'change '+key)
     message(f'Updated {key}')
     inspector_sync()
 

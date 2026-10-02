@@ -30,7 +30,7 @@ def recover_file_operation(directory):
             project.unlink(missing_ok=True)
         else:
             write_json(project, record['project'])
-    elif record['operation'] == 'delete' and destination.exists():
+    elif record['operation'] == 'delete' and not record.get('retain') and destination.exists():
         shutil.rmtree(destination) if destination.is_dir() else destination.unlink()
     journal.unlink()
 
@@ -39,6 +39,11 @@ class ProjectFiles:
     def __init__(self, runtime, directory):
         self.runtime = runtime
         self.directory = Path(directory).resolve()
+        self._undo = []
+        self._redo = []
+        self._replaying = False
+        from .history import History
+        self.history = History()
 
     def _path(self, path):
         path = Path(path)
@@ -103,23 +108,73 @@ class ProjectFiles:
         for _, _, _, old_path, new_path in changes:
             self.runtime.assets.invalidate(old_path)
             self.runtime.assets.invalidate(new_path)
+        self._record(('relocate', source, destination), save)
         return destination
 
     def delete(self, path, *, save):
         source = self._path(path)
         if not source.exists():
             raise FileNotFoundError(source)
-        # Keep UUID declarations for references to missing files; replacing the file recovers them.
-        with tempfile.TemporaryDirectory(prefix='.lbe-delete-', dir=self.directory) as scratch:
-            destination = Path(scratch) / source.name
-            journal = self._prepare(source, destination, 'delete')
-            try:
-                source.rename(destination)
-                save()
-                self._commit(journal)
-            except Exception:
-                recover_file_operation(self.directory)
-                raise
+        # Retain source contents outside the visible asset tree for reversible edits.
+        from uuid import uuid4
+        destination = self.directory / '.lbe-trash' / str(uuid4()) / source.name
+        destination.parent.mkdir(parents=True)
+        journal = self._prepare(source, destination, 'delete')
+        journal['retain'] = True
+        write_json(self.directory / JOURNAL, journal)
+        try:
+            source.rename(destination)
+            save()
+            self._commit(journal)
+        except Exception:
+            recover_file_operation(self.directory)
+            raise
+        self._record(('delete', source, destination), save)
+
+    def _record(self, command, save):
+        if not self._replaying:
+            self._undo.append(command)
+            self._redo.clear()
+            self.history.record(lambda:self.undo(save=save), lambda:self.undo(save=save,redo=True), command[0]+" project file")
+
+    def record_create(self, path, *, save=lambda:None):
+        from uuid import uuid4
+        path = self._path(path)
+        destination = self.directory / '.lbe-trash' / str(uuid4()) / path.name
+        self._record(('create', path, destination), save)
+
+    def undo(self, *, save, redo=False):
+        source_stack, target_stack = (self._redo,self._undo) if redo else (self._undo,self._redo)
+        if not source_stack:
+            return None
+        command = source_stack[-1]
+        kind, original, destination = command
+        self._replaying = True
+        try:
+            if kind == 'relocate':
+                self.relocate(original if redo else destination, destination if redo else original, save=save)
+                result = destination if redo else original
+            else:
+                restore = (kind == 'delete' and not redo) or (kind == 'create' and redo)
+                source, target = (destination,original) if restore else (original,destination)
+                source, target = self._path(source), self._path(target)
+                if target.exists():
+                    raise FileExistsError(target)
+                target.parent.mkdir(parents=True,exist_ok=True)
+                journal = self._prepare(source,target,'relocate')
+                try:
+                    source.rename(target)
+                    save()
+                    self._commit(journal)
+                except Exception:
+                    recover_file_operation(self.directory)
+                    raise
+                result = original
+            source_stack.pop()
+            target_stack.append(command)
+            return result
+        finally:
+            self._replaying = False
 
     def _prepare(self, source, destination, operation):
         recover_file_operation(self.directory)

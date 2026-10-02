@@ -140,3 +140,11 @@ is a project-relative `view_root` component on the file panel. Template systems
 derive rows from those scopes and promote them to containing ancestors when
 revealing outside selections. Actual hierarchy, project paths and asset identity
 remain authoritative and unchanged. View scope defaults are applied each session.
+
+
+`History` stores reversible session commands above Core. ProjectFiles registers
+transactional file actions; inspector systems record explicit component commits,
+rather than treating runtime simulation writes as user edits. Components remain
+authoritative. Retained deletion uses the existing file-operation journal and a
+hidden trash location. Required editor-source checks are template policy, not
+Core entity or filesystem semantics.

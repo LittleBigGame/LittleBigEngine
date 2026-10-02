@@ -263,6 +263,7 @@ def new_source_in_dir(folder_path):
     state.code.components["system_name"] = f"system_{i}"
     state.code.relations.pop('owner', None)
     save()
+    state.files.record_create(f_path / f"system_{i}.py", save=save_editor_project)
     state.reveal_file(f_path / f"system_{i}.py")
     show_source_panel()
     refresh_project_files()
@@ -296,6 +297,13 @@ def prompt_rename_file_item(item):
 
 def delete_file_item(item):
     path = Path(item["path"]).resolve()
+    for owner in state.runtime.entities:
+        if owner is state.game or state.game in owner.ancestors:
+            continue
+        for instance in owner.systems.values():
+            required = Path(instance.definition.path).resolve() if instance.definition.path else None
+            if required is not None and (required == path or required.is_relative_to(path)):
+                raise ValueError(f"Required editor source cannot be deleted: {required.name}")
     open_path = Path(state.code.components.get("source_path", source_path())).resolve()
     is_open = open_path == path or open_path.is_relative_to(path)
     if is_open and not confirm_discard(('delete', str(path))):
@@ -323,6 +331,7 @@ def create_new_folder(parent_dir=None):
         idx += 1
     try:
         candidate.mkdir()
+        state.files.record_create(candidate, save=save_editor_project)
         state.reveal_file(candidate)
         refresh_project_files()
         message(f"Created folder '{candidate.name}'")

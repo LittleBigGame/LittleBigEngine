@@ -257,3 +257,19 @@ creates a numbered Python file in that folder and reveals it in the source panel
 Folder-specific creation uses the clicked folder. Rename actions restore the
 source panel for name entry if it was closed. Unsaved source protection still
 applies when changing the open file.
+
+
+## Undo and recoverable deletion
+
+Component value changes committed with Enter are single undo transactions.
+Ctrl+Z restores the previous component value and Ctrl+Shift+Z reapplies it.
+Uncommitted typing uses text-buffer undo. When the focused buffer has no text
+history, undo falls back to session project history.
+
+Project history covers file/folder creation, deletion, rename and move. Deleted
+contents are retained under the hidden `.lbe-trash` directory rather than
+immediately destroyed; registry UUID declarations stay intact. Undo/redo stacks
+last for the current editor session. This does not yet cover every entity, tag,
+relation or inspector operation. Deletion through the editor rejects paths that
+contain scripts currently required by its own attachments. External filesystem
+deletion bypasses this safeguard.

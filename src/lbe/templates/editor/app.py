@@ -1479,6 +1479,20 @@ def open_move_file_menu(*args, **kwargs):
 
 
 def keyboard(event):
+    if event[1] == 'Z' and event[2]:
+        focus = state.ui.focused
+        committed = focus is not None and 'buffer' in focus.components and focus.components.get('committed_text') == focus.buffer.text
+        text_history = focus is not None and 'buffer' in focus.components and focus.buffer.can_undo(redo=bool(event[3]))
+        if committed or not text_history or focus is None or not state.ui.visible(focus) or 'buffer' not in focus.components:
+            label = state.files.history.undo(redo=bool(event[3]))
+            result = state.files.history.result
+            if label is not None:
+                if isinstance(result, Path) and result.exists():
+                    state.reveal_file(result)
+                state.file_tree_key = None
+                state.file_explorer_sync()
+                message(('Redid ' if event[3] else 'Undid ')+label)
+            return True
     if event[1] == 'L' and event[2]:
         open_system_log()
         return True
