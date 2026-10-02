@@ -191,7 +191,6 @@ def open_edit_menu_dropdown(button):
         {"label": "Inspect Selection", "run": lambda _: open_panel()},
         None,
         {"label": "Reset Default Layout", "run": lambda _: reset_default_layout()},
-        {"label": "System Log (Ctrl+L)", "run": lambda _: open_system_log()},
     ]
     open_menu(state.ui, button, button.x, button.y + button.h + 2, actions=actions)
 
@@ -211,6 +210,8 @@ def open_view_menu_dropdown(button):
         {"label": f"{'[x]' if panels_open['inspector'] else '[  ]'} Inspector", "run": lambda _: toggle_panel_view("inspector")},
         {"label": f"{'[x]' if panels_open['viewport'] else '[  ]'} Viewport", "run": lambda _: toggle_panel_view("viewport")},
         {"label": f"{'[x]' if panels_open['code_panel'] else '[  ]'} System Source", "run": lambda _: toggle_panel_view("code_panel")},
+        None,
+        {"label": "System Log (Ctrl+L)", "run": lambda _: open_system_log()},
         None,
         {"label": "Frame all game entities", "run": lambda _: frame_game()},
         {"label": "Frame selected entity", "run": lambda _: context_focus_camera(selected())},
@@ -1366,7 +1367,7 @@ def open_replace_asset_menu(pill_control):
     cur_id = pill_control.components.get("asset_id")
     actions = []
     for uid, entry in sorted(reg.entries(), key=lambda x: (x[1]["type"], x[1]["name"].lower())):
-        icon = ASSET_ICONS.get(entry["type"], "📦")
+        icon = reg.icon(uid)
         is_cur = (str(uid) == str(cur_id))
         pref = "> " if is_cur else "   "
         actions.append(dict(

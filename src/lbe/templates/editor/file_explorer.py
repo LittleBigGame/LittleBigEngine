@@ -4,7 +4,7 @@ import os
 from time import monotonic
 from pathlib import Path
 from lbe.ui import bind_callbacks, put, contains, PANEL, FIELD, INK, MUTED, ACCENT
-from lbe.assets import ASSET_ICONS, AssetRef
+from lbe.assets import ASSET_ICONS, AssetRef, asset_icon
 from lbe.menus import open_menu
 
 
@@ -53,7 +53,7 @@ def build_file_tree(project_dir, expanded_folders, view_root=None):
             else:
                 ext = entry.suffix.lower()
                 atype = state.runtime.assets.registry.infer_type(entry)
-                icon = ASSET_ICONS.get(atype, "📄")
+                icon = asset_icon(entry, atype)
                 reg = getattr(state.runtime.assets, "registry", None)
                 asset_id = reg.get_id(entry) if reg else None
                 items.append({

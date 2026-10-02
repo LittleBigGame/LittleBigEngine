@@ -2,6 +2,8 @@
 
 from dataclasses import dataclass
 import os
+import ast
+from functools import lru_cache
 from pathlib import Path
 import uuid
 from uuid import UUID
@@ -30,6 +32,37 @@ ASSET_ICONS = {
     "folder": "📁",
     "asset": "📦",
 }
+
+
+@lru_cache(maxsize=512)
+def _source_functions(path, modified, size):
+    """Inspect declarations without executing source; stat keys invalidate edits."""
+    try:
+        body = ast.parse(Path(path).read_text(encoding="utf-8-sig")).body
+    except (OSError, SyntaxError, UnicodeError):
+        return None
+    return frozenset(node.name for node in body if isinstance(node, ast.FunctionDef))
+
+
+def source_functions(path):
+    path = Path(path)
+    try:
+        stat = path.stat()
+    except OSError:
+        return None
+    return _source_functions(str(path.resolve()), stat.st_mtime_ns, stat.st_size)
+
+
+def asset_icon(path, asset_type=None):
+    """Code badges identify available entry points, including mixed capabilities."""
+    path = Path(path)
+    if path.suffix.lower() != '.py':
+        return ASSET_ICONS.get(asset_type or ASSET_EXTENSIONS.get(path.suffix.lower()), '📦')
+    functions = source_functions(path)
+    if functions is None:
+        return '{?}'
+    marks = ''.join(symbol for name, symbol in (('run', '▶'), ('update', '↻'), ('draw', '◇')) if name in functions)
+    return '{' + ('*' if marks == '▶↻◇' else marks or '·') + '}'
 
 
 @dataclass(frozen=True)
@@ -82,15 +115,16 @@ class AssetRegistry:
     @staticmethod
     def infer_type(path):
         path=Path(path)
-        if path.suffix.lower()=='.py' and path.is_file():
-            import ast
-            try:
-                body=ast.parse(path.read_text(encoding='utf-8')).body
-                if any(isinstance(n,ast.FunctionDef) and n.name=='run' for n in body):
-                    return 'script'
-            except (OSError,SyntaxError,UnicodeError):
-                pass
+        if path.suffix.lower()=='.py' and 'run' in (source_functions(path) or ()):
+            return 'script'
         return ASSET_EXTENSIONS.get(path.suffix.lower(), "asset")
+
+    def icon(self, asset_id):
+        entry = self.get(asset_id)
+        if entry is None:
+            return '📦'
+        path = self.project_dir / entry['path'] if self.project_dir else entry['path']
+        return asset_icon(path, entry['type'])
 
     def entries(self):
         return tuple((uid, dict(entry)) for uid, entry in self._entries.items())

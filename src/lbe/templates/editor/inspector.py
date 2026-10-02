@@ -247,7 +247,7 @@ def inspector_sync():
             field_w = max(40, ip.w - 12 - lbl_w - 6 - sb_w - 12)
             put(label, x=ip.x + 12, y=y + 1, w=lbl_w, h=23)
             if is_asset:
-                icon = ASSET_ICONS.get(value.type, "📦")
+                icon = state.runtime.assets.registry.icon(value.id)
                 display_val = f" {icon} {value.type.capitalize()}: {(state.runtime.assets.registry.get(value.id) or {}).get('name', value.name or 'Asset')} "
                 put(field, x=ip.x + 12 + lbl_w + 6, y=y, w=field_w, h=23, readonly=True,
                     color=(35, 55, 75), normal_color=(35, 55, 75), hover_color=(50, 80, 110),
@@ -365,7 +365,7 @@ def inspector_sync():
                     except ValueError:
                         identity = None
                     entry = assets.registry.get(identity) if identity else None
-                    s_title = (entry["name"] if entry else name) + (' !' if instance.errors else '')
+                    s_title = ((assets.registry.icon(identity) + " " + entry["name"]) if entry else name) + (' !' if instance.errors else '')
                     s_ink = (255, 120, 120) if instance.errors else (effect_colour or INK)
                     put(s_btn, x=ip.x + 12, y=cur_y, w=s_w, h=24, text=s_title, ink=s_ink)
                     put(e_btn, x=ip.x + 12 + s_w + 4, y=cur_y, w=btn_edit_w, h=24, text='Edit')
@@ -1196,7 +1196,7 @@ def open_asset_picker_menu(ent, comp):
     actions = []
     if reg:
         for uid, entry in sorted(reg.entries(), key=lambda x: (x[1]["type"], x[1]["name"].lower())):
-            icon = ASSET_ICONS.get(entry["type"], "📦")
+            icon = reg.icon(uid)
             is_active = (isinstance(current_val, AssetRef) and current_val.id == uid)
             pref = "> " if is_active else "   "
             actions.append(dict(

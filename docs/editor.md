@@ -288,3 +288,24 @@ immediately, including sources inside a deleted folder. Undo restores the files
 and reloads attachments that have not been replaced or detached in the meantime.
 Reload runs the normal initialization/start lifecycle; script-local state is
 reinitialized while entity components remain authoritative. Redo stops them again.
+
+
+### Source capability badges
+
+Open **View → System Log** (or Ctrl+L) to inspect runtime activity.
+Python files use code-shaped badges in Project Files, attachment rows and asset
+references. Their symbols come from top-level functions in the current source:
+
+| Badge | Available functions |
+| --- | --- |
+| `{▶}` | `run` (explicit script call) |
+| `{↻}` | `update` (frame updates) |
+| `{◇}` | `draw` (render phase) |
+| `{▶↻}`, `{▶◇}`, `{↻◇}` | The indicated pair |
+| `{*}` | All three |
+| `{·}` | No `run`, `update` or `draw` declaration |
+| `{?}` | Source unavailable or invalid Python |
+
+The badge describes capabilities; it does not automatically attach a file or
+change how an existing attachment is scheduled. Functions inside classes or
+other functions do not count as module entry points.
