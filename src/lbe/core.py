@@ -137,11 +137,12 @@ class Relations(MutableMapping):
 class Entity:
     __slots__ = (
         "_runtime", "_id", "_alive", "_destroying", "_parent", "_children",
-        "_components", "_tags", "_relations", "_systems",
+        "_components", "_tags", "_relations", "_systems", "_scripts",
     )
 
     def __init__(self, runtime, identity):
         from .systems import Systems
+        from .scripts import Scripts
 
         object.__setattr__(self, "_runtime", runtime)
         object.__setattr__(self, "_id", identity)
@@ -153,6 +154,7 @@ class Entity:
         object.__setattr__(self, "_tags", Tags(self))
         object.__setattr__(self, "_relations", Relations(self))
         object.__setattr__(self, "_systems", Systems(self))
+        object.__setattr__(self, "_scripts", Scripts(self))
 
     id = property(lambda self: self._id)
     alive = property(lambda self: self._alive)
@@ -161,6 +163,10 @@ class Entity:
     tags = property(lambda self: self._tags)
     relations = property(lambda self: self._relations)
     systems = property(lambda self: self._systems)
+    scripts = property(lambda self: self._scripts)
+
+    def run(self, reference, *args, **kwargs):
+        return self.scripts.run(reference,*args,**kwargs)
 
     def _check(self):
         if not self._alive:
@@ -299,9 +305,38 @@ class Entity:
         self.runtime.destroy(self)
 
 
+def _matches_requirement(entity, requirement):
+    if isinstance(requirement,str):
+        return requirement in entity.components
+    from .systems import SystemDefinition
+    from .assets import AssetRef
+    if isinstance(requirement,(tuple,list)):
+        return all(_matches_requirement(entity,k) for k in requirement)
+    if isinstance(requirement, Entity):
+        return requirement in entity.children
+    if isinstance(requirement,(SystemDefinition,AssetRef,UUID)):
+        from .scripts import identity
+        uid=identity(entity,requirement)
+        if uid is None:
+            return False
+        if str(uid) in entity.scripts or str(uid) in entity.systems:
+            return True
+        registry=entity.runtime.assets.registry
+        for instance in entity.systems.values():
+            if instance.definition.asset_id == uid:
+                return True
+            try:
+                if registry is not None and instance.definition.path and registry.get_id(instance.definition.path)==uid:
+                    return True
+            except ValueError:
+                pass
+        return False
+    return requirement in entity.components
+
+
 def _matches(entity, components, tags):
     tags = (tags,) if isinstance(tags, str) else tags
-    return entity.alive and all(k in entity.components for k in components) and all(t in entity.tags for t in tags)
+    return entity.alive and all(_matches_requirement(entity,k) for k in components) and all(t in entity.tags for t in tags)
 
 
 class Query:
@@ -400,6 +435,7 @@ class Runtime:
             if not node.alive:
                 continue
             node.systems.clear()
+            node.scripts.clear()
             for other, key in tuple(self._incoming.pop(node, ())):
                 if other.alive and other.relations.get(key) is node:
                     del other.relations[key]

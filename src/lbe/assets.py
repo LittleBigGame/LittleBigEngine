@@ -22,6 +22,7 @@ ASSET_EXTENSIONS = {
 
 ASSET_ICONS = {
     "system": "⚡",
+    "script": "⚡",
     "image": "🖼️",
     "audio": "🔊",
     "data": "📄",
@@ -80,7 +81,16 @@ class AssetRegistry:
 
     @staticmethod
     def infer_type(path):
-        return ASSET_EXTENSIONS.get(Path(path).suffix.lower(), "asset")
+        path=Path(path)
+        if path.suffix.lower()=='.py' and path.is_file():
+            import ast
+            try:
+                body=ast.parse(path.read_text(encoding='utf-8')).body
+                if any(isinstance(n,ast.FunctionDef) and n.name=='run' for n in body):
+                    return 'script'
+            except (OSError,SyntaxError,UnicodeError):
+                pass
+        return ASSET_EXTENSIONS.get(path.suffix.lower(), "asset")
 
     def entries(self):
         return tuple((uid, dict(entry)) for uid, entry in self._entries.items())
@@ -99,7 +109,7 @@ class AssetRegistry:
             while uid in self._entries:
                 uid = uuid.uuid4()
         previous = self._entries.get(existing, {})
-        entry = {"path": relative, "type": asset_type or previous.get("type", self.infer_type(relative)),
+        entry = {"path": relative, "type": asset_type or previous.get("type", self.infer_type(self.project_dir / relative if self.project_dir else relative)),
                  "name": name or previous.get("name", Path(relative).name)}
         if existing is not None and existing != uid:
             self._entries.pop(existing)
@@ -119,7 +129,7 @@ class AssetRegistry:
             raise ValueError(f"Asset destination already registered: {relative}")
         previous = self._entries[uid]
         self._path_to_id.pop(self._key(previous["path"]))
-        self._entries[uid] = dict(previous, path=relative, name=Path(relative).name, type=self.infer_type(relative))
+        self._entries[uid] = dict(previous, path=relative, name=Path(relative).name, type=self.infer_type(self.project_dir / relative if self.project_dir else relative))
         self._path_to_id[self._key(relative)] = uid
         self.revision += 1
         return True

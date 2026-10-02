@@ -49,7 +49,16 @@ class ActivityLog:
             return 'external'
         entity = self._runtime._entities.get(source[0])
         name = entity.components._values.get('name', '') if entity else ''
-        return f'{snapshot(name)}:{str(source[0])[:8]}.{source[1]}.{source[2]}'
+        label=source[1]
+        registry=self._runtime.assets.registry
+        if registry is not None:
+            try:
+                entry=registry.get(label)
+                if entry:
+                    label=entry['name']
+            except (ValueError,TypeError):
+                pass
+        return f'{snapshot(name)}:{str(source[0])[:8]}.{label}.{source[2]}'
 
     @staticmethod
     def _target(entity):
@@ -74,10 +83,13 @@ class ActivityLog:
         if change.kind.startswith(('component.', 'relation.', 'tag.')) or change.kind == 'hierarchy.parent':
             old = 'unknown prior value' if change.kind == 'component.mutate' else change.old
             detail += f': {old} -> {change.new}'
-        if change.kind == 'system.error':
-            instance = entity.systems._values.get(change.key)
+        if change.kind in ('system.error','script.error'):
+            collection = entity.scripts if change.kind == 'script.error' else entity.systems
+            instance = collection._values.get(change.key)
             if instance and instance.errors:
                 detail += ': '+instance.errors[-1].message
+                if change.kind == 'script.error':
+                    detail += '\n'+instance.errors[-1].traceback
             else:
                 detail += ': '+str(change.new)
         self.write(change.kind, detail, target=self._target(entity), source=self._source(change.source), editor=editor)

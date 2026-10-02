@@ -148,3 +148,14 @@ rather than treating runtime simulation writes as user edits. Components remain
 authoritative. Retained deletion uses the existing file-operation journal and a
 hidden trash location. Required editor-source checks are template policy, not
 Core entity or filesystem semantics.
+
+
+Attached scripts (`lbe.scripts`) reuse generic definition and instance execution
+semantics, declare required components, and expose per-entity `run` calls. Core
+queries accept stable asset references to match script/system attachments, or
+explicit requirement tuples to match data. Systems orchestrate these calls;
+script exceptions are caught at the backend boundary and emitted as
+`script.error` changes with source attribution. Editor templates consume those
+records to open the log panel. Persistence retains script UUIDs and source paths.
+The runtime does not schedule scripts automatically or add domain-specific
+rendering semantics. Legacy named system attachments remain compatible.

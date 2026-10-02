@@ -25,6 +25,7 @@ class EntityRef:
 
 @dataclass
 class Restoration:
+    scripts: dict = field(default_factory=dict)
     systems: dict = field(default_factory=dict)
     system_order: dict = field(default_factory=dict)
     relations: dict = field(default_factory=dict)
@@ -222,6 +223,18 @@ def serialize_entity(entity, *, project_dir=None, on_unsupported="error", known_
         else:
             declaration = {"source": definition.source, "path": definition.path}
         data["systems"][name] = declaration
+    data['scripts'] = {}
+    for name,instance in entity.scripts.items():
+        definition=instance.definition
+        path=Path(definition.path)
+        try:
+            relative=path.resolve().relative_to(Path(project_dir).resolve())
+            declaration={'path':relative.as_posix()}
+        except (ValueError,TypeError):
+            declaration={'source':definition.source,'path':definition.path}
+        data['scripts'][name]=declaration
+    for name,declaration in pending.scripts.get(entity.id,{}).items():
+        data['scripts'].setdefault(name,dict(declaration))
     for name, declaration in pending.systems.get(entity.id, {}).items():
         data["systems"].setdefault(name, dict(declaration))
     order = pending.system_order.get(entity.id, ())
@@ -283,6 +296,7 @@ def deserialize_entities(entity_data_list, runtime, *, default_parent=None, proj
                 except KeyError:
                     pending.relations.setdefault(eid, {})[key] = identity
                     pending.diagnostics.append(Diagnostic("project.relation", f"Missing target {identity} for {eid}.{key}"))
+            pending.scripts[eid] = dict(record.get("scripts", {}))
             pending.systems[eid] = dict(record.get("systems", {}))
             pending.system_order[eid] = list(record.get("systems", {}))
         # Rebuild sibling order independently of creation/scheduler order.
@@ -297,6 +311,7 @@ def deserialize_entities(entity_data_list, runtime, *, default_parent=None, proj
                 entity.destroy()
         for eid in created:
             pending.systems.pop(eid, None)
+            pending.scripts.pop(eid, None)
             pending.system_order.pop(eid, None)
             pending.relations.pop(eid, None)
             pending.parents.pop(eid, None)
@@ -337,6 +352,27 @@ def activate_entities(entities, runtime, *, project_dir=None):
                     pending.diagnostics.extend(instance.errors)
             except (OSError, ValueError, TypeError, SyntaxError) as error:
                 pending.diagnostics.append(Diagnostic("project.system", f"{entity.id}.{name}: {error}"))
+        for identity,declaration in tuple(pending.scripts.get(entity.id,{}).items()):
+            if identity in entity.scripts:
+                pending.scripts[entity.id].pop(identity,None)
+                continue
+            try:
+                from uuid import UUID
+                if 'source' in declaration:
+                    definition=SystemDefinition(declaration['source'],declaration.get('path','<script>'),UUID(identity))
+                else:
+                    path=(Path(project_dir)/declaration['path']).resolve()
+                    if not path.is_relative_to(Path(project_dir).resolve()):
+                        raise ValueError('Script path must stay inside the project')
+                    definition=SystemDefinition.from_file(path)
+                    from dataclasses import replace
+                    definition=replace(definition,asset_id=UUID(identity))
+                instance=entity.scripts.attach(definition)
+                pending.scripts[entity.id].pop(identity,None)
+                if not instance.running:
+                    pending.diagnostics.extend(instance.errors)
+            except (OSError,ValueError,TypeError,SyntaxError) as error:
+                pending.diagnostics.append(Diagnostic('project.script',f'{entity.id}.{identity}: {error}'))
         pending.loading += 1
         try:
             names = [name for name in pending.system_order.get(entity.id, ()) if name in entity.systems]

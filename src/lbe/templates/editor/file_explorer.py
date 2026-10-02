@@ -197,7 +197,7 @@ def file_explorer_sync():
         normal_col = (45, 95, 125) if is_selected else PANEL
         hover_col = (55, 105, 135) if is_selected else (35, 48, 65)
         bg_color = hover_col if is_hovered else normal_col
-        ink_color = (255, 255, 255) if is_selected else ((130, 200, 255) if item["type"] == "system" else ((255, 200, 100) if item["is_dir"] else INK))
+        ink_color = (255, 255, 255) if is_selected else ((130, 200, 255) if item["type"] in ("system","script") else ((255, 200, 100) if item["is_dir"] else INK))
 
         put(row, visible=True, x=fe.x + 8 + indent, y=row_y,
             w=max(40, row_w - indent), h=20, text=label,
@@ -242,7 +242,7 @@ def file_row_click(row, event):
     click_count = event[5] if len(event) >= 6 else 1
     fe.components["selected_file"] = item["rel_path"]
     if click_count >= 2:
-        if item["type"] == "system":
+        if item["type"] in ("system","script"):
             # Open in code editor
             state.open_specific_file(item["path"])
             message(f"Opened {item['name']}")

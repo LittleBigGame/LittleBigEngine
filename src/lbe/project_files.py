@@ -72,24 +72,26 @@ class ProjectFiles:
         candidate.relocate(source, destination)
         changes = []
         for entity in self.runtime.entities:
-            for name, instance in entity.systems.items():
+            for collection in (entity.systems,entity.scripts):
+              for name, instance in collection.items():
                 path = Path(instance.definition.path).resolve()
                 if path == source or path.is_relative_to(source):
                     new_path = destination / path.relative_to(source) if path != source else destination
                     new_name = new_path.stem if name == path.stem else name
-                    if new_name != name and new_name in entity.systems:
+                    if new_name != name and new_name in collection:
                         raise ValueError(f'System name collision: {new_name}')
-                    changes.append((entity, name, new_name, path, new_path))
+                    changes.append((entity, collection, name, new_name, path, new_path))
         pending = restoration(self.runtime)
+        script_declarations = {eid: {name: dict(data) for name,data in scripts.items()} for eid,scripts in pending.scripts.items()}
         declarations = {eid: {name: dict(data) for name, data in systems.items()}
                         for eid, systems in pending.systems.items()}
         journal = self._prepare(source, destination, 'relocate')
         try:
             source.rename(destination)
             registry.from_dict(candidate.to_dict())
-            for entity, name, new_name, _, path in changes:
-                entity.systems.relocate(name, path, new_name=new_name)
-            for systems in pending.systems.values():
+            for entity, collection, name, new_name, _, path in changes:
+                collection.relocate(name, path, new_name=new_name)
+            for systems in tuple(pending.systems.values())+tuple(pending.scripts.values()):
                 for declaration in systems.values():
                     if 'source' not in declaration and declaration.get('path'):
                         path = (self.directory / declaration['path']).resolve()
@@ -99,14 +101,15 @@ class ProjectFiles:
             save()
             self._commit(journal)
         except Exception:
-            for entity, name, new_name, path, _ in reversed(changes):
-                if entity.alive and new_name in entity.systems:
-                    entity.systems.relocate(new_name, path, new_name=name)
+            for entity, collection, name, new_name, path, _ in reversed(changes):
+                if entity.alive and new_name in collection:
+                    collection.relocate(new_name, path, new_name=name)
             registry.from_dict(before)
             pending.systems = declarations
+            pending.scripts = script_declarations
             recover_file_operation(self.directory)
             raise
-        for _, _, _, old_path, new_path in changes:
+        for _, _, _, _, old_path, new_path in changes:
             self.runtime.assets.invalidate(old_path)
             self.runtime.assets.invalidate(new_path)
         self._record(('relocate', source, destination), save)
@@ -136,21 +139,22 @@ class ProjectFiles:
     def _sync_sources(self, path, *, restore):
         if not restore:
             for entity in self.runtime.entities:
-                for name, instance in tuple(entity.systems.items()):
+              for collection in (entity.systems,entity.scripts):
+                for name, instance in tuple(collection.items()):
                     source = Path(instance.definition.path).resolve() if instance.definition.path else None
                     if source is not None and (source == path or source.is_relative_to(path)) and instance.running:
-                        self._suspended[(entity.id,name)] = instance
+                        self._suspended[(entity.id,name,id(collection))] = (collection,instance)
                         instance.stop()
                         self.runtime.assets.invalidate(source)
         else:
-            for (identity,name), instance in tuple(self._suspended.items()):
+            for (identity,name,role), (collection,instance) in tuple(self._suspended.items()):
                 source = Path(instance.definition.path).resolve()
                 if source != path and not source.is_relative_to(path):
                     continue
                 entity = self.runtime.resolve(identity)
-                if entity is not None and entity.systems.get(name) is instance and source.is_file():
-                    entity.systems.reload(name,self.runtime.assets.system(source))
-                self._suspended.pop((identity,name),None)
+                if entity is not None and collection.get(name) is instance and source.is_file():
+                    collection.reload(name,self.runtime.assets.system(source))
+                self._suspended.pop((identity,name,role),None)
 
     def _record(self, command, save):
         if not self._replaying:

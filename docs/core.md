@@ -131,3 +131,47 @@ save the same project's graph. Interrupted operations recover at project startup
 Deletion retains missing asset identities so restoring a resource recovers links.
 This protects process interruption and ordinary write failures; it is not a
 multi-process transaction or a substitute for backups against disk failure.
+
+
+## Attached scripts and orchestration
+
+A script declares its required component names and a callable:
+
+```python
+components = ("x", "y", "vx", "vy")
+
+def run(entity, dt):
+    entity.x += entity.vx * dt
+    entity.y += entity.vy * dt
+```
+
+Resolve the file using its asset UUID (shown as a filename pill in the editor):
+
+```python
+movement = assets["<asset UUID>"]
+player.scripts.attach(movement)
+```
+
+An orchestration system can run that script on matching descendants:
+
+```python
+def update(dt):
+    for child in query(movement, *movement.components, recursive=True):
+        child.run(movement, dt)
+```
+
+`query(movement)` selects entities with that attachment.
+`query(*movement.components)` selects by component presence. Combining the two
+requires both. An entity reference in a query selects entities containing that
+specific direct child. Systems can also attach with `entity.systems.attach(pill)`;
+the UUID supplies their identity without a registration alias. Existing named
+system attachments remain supported for older projects.
+
+The backend checks requirements and catches each script call's exception. It
+records a source-attributed `script.error` and lets orchestration continue to
+other entities. The editor opens System Log on such failures; Ctrl+L also opens
+it. Calls do not roll back writes made before an exception, and trusted Python
+can still modify shared state. This is failure containment, not a sandbox.
+
+Script attachments persist through project save/load and asset moves. Deleting
+their source through Project Files stops them; undo restores the attachment.

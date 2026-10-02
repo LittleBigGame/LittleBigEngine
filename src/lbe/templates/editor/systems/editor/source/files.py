@@ -178,7 +178,7 @@ def update_open_source_location(source, destination):
 def open_system(owner, name):
     if not confirm_discard((owner.id, name)):
         return
-    instance = owner.systems[name]
+    instance = owner.systems.get(name) or owner.scripts[name]
     path = Path(instance.definition.path)
     if path.is_relative_to(state.project):
         state.path_field.buffer = TextBuffer(str(path.relative_to(state.project)))
@@ -212,9 +212,10 @@ def save():
     definition = state.runtime.assets.system(path)
     count = 0
     for entity in state.runtime.entities:
-        for name, instance in tuple(entity.systems.items()):
+        for collection in (entity.systems,entity.scripts):
+          for name, instance in tuple(collection.items()):
             if Path(instance.definition.path) == path:
-                updated = entity.systems.reload(name, definition)
+                updated = collection.reload(name, definition)
                 if updated.definition is not definition or not updated.running:
                     raise RuntimeError(f"{name}: {(updated.errors[-1].message if updated.errors else 'reload failed')}")
                 count += 1
@@ -245,7 +246,9 @@ def refresh_project_files():
         state.file_explorer_sync()
     message("Refreshed project files")
 
-def new_source_in_dir(folder_path):
+def new_source_in_dir(folder_path, *, kind="system"):
+    if kind not in ("system","script"):
+        raise ValueError("Choose script or system")
     if not confirm_discard(("new", str(folder_path))):
         return
     f_path = Path(folder_path).resolve()
@@ -253,24 +256,25 @@ def new_source_in_dir(folder_path):
         raise ValueError('Choose an existing folder inside the project')
     rel_folder = f_path.relative_to(state.project) if f_path.is_relative_to(state.project) else f_path.name
     i = 1
-    while (f_path / f"system_{i}.py").exists():
+    while (f_path / f"{kind}_{i}.py").exists():
         i += 1
-    new_name = str(rel_folder / f"system_{i}.py").replace("\\", "/")
+    new_name = str(rel_folder / f"{kind}_{i}.py").replace("\\", "/")
     state.path_field.buffer = TextBuffer(new_name)
-    state.code.buffer = TextBuffer("def update(dt):\n    pass\n")
+    text = "components = ()\n\ndef run(entity):\n    pass\n" if kind=="script" else "def update(dt):\n    pass\n"
+    state.code.buffer = TextBuffer(text)
     state._saved_source = (new_name, state.code.buffer.text)
     state.code.source_path = str(state.project / new_name)
-    state.code.components["system_name"] = f"system_{i}"
+    state.code.components["system_name"] = f"{kind}_{i}"
     state.code.relations.pop('owner', None)
     save()
-    state.files.record_create(f_path / f"system_{i}.py", save=save_editor_project)
-    state.reveal_file(f_path / f"system_{i}.py")
+    state.files.record_create(f_path / f"{kind}_{i}.py", save=save_editor_project)
+    state.reveal_file(f_path / f"{kind}_{i}.py")
     show_source_panel()
     refresh_project_files()
     message(f"Created {new_name}")
 
 def prompt_rename_file_item(item):
-    if item["type"] == "system":
+    if item["type"] in ("system","script"):
         if not open_specific_file(item["path"]):
             return
         prompt_rename_file()
@@ -300,7 +304,7 @@ def delete_file_item(item):
     for owner in state.runtime.entities:
         if owner is state.game or state.game in owner.ancestors:
             continue
-        for instance in owner.systems.values():
+        for instance in tuple(owner.systems.values())+tuple(owner.scripts.values()):
             required = Path(instance.definition.path).resolve() if instance.definition.path else None
             if required is not None and (required == path or required.is_relative_to(path)):
                 raise ValueError(f"Required editor source cannot be deleted: {required.name}")

@@ -263,6 +263,14 @@ def initialize():
     if project_data and project_data.get("entities"):
         activate_entities(restored.values(), state.runtime, project_dir=project)
 
+    drawing = assets["f084e424-d2d9-5fd1-8624-63580396274c"]
+    outline = assets["dbc0d180-5a28-56a1-bc9c-85d63174e431"]
+    for target in state.game.descendants:
+        if 'color' in target.components and drawing not in target.scripts:
+            target.scripts.attach(drawing)
+        if 'color' in target.components and outline not in target.scripts:
+            target.scripts.attach(outline)
+
     state.hierarchy_rows = []
     state.component_rows = []
     state.system_rows = []
@@ -1609,12 +1617,20 @@ def open_system_log():
         return
     panel = state.ui.create(state.app, 'SystemLogPanel', 'panel', text='SYSTEM LOG',
                             x=max(0, state.window.width-840), y=80, w=820, h=360,
-                            layer=20, modal=True, dock='float', movable=True, resizable=True)
+                            layer=20, modal=False, dock='float', movable=True, resizable=True)
     state.app.relations['system_log_panel'] = panel
     panel.systems.attach('system_log', assets["6df949df-402f-5552-bc5e-c4566531ee40"])
 
 
 def update(dt):
+    failures=[r for r in log.records if r.kind=='script.error' and r.sequence>getattr(state,'last_script_error',0)]
+    if failures:
+        state.last_script_error=failures[-1].sequence
+        panel=state.app.relations.get('system_log_panel')
+        if panel is None:
+            open_system_log()
+        else:
+            panel.visible=True
     owner = state.code.relations.get('owner', selected())
     context_key = (state.project_graph.schema_revision, owner.id, tuple((key, type(value)) for key, value in owner.components.items()))
     if getattr(state, "completion_context_key", None) != context_key:
@@ -1860,21 +1876,24 @@ def context_actions(target):
             if item['path'].resolve() == root and root != state.project:
                 actions.append(dict(label="Set parent as root folder", run=lambda _: state.set_file_root(root.parent)))
             actions.append(dict(label=f"+ New folder in '{item['name']}'...", run=lambda _: create_new_folder(item['path'])))
-            actions.append(dict(label=f"+ New script in '{item['name']}'...", run=lambda _: new_source_in_dir(item['path'])))
+            actions.append(dict(label=f"+ New script in '{item['name']}'...", run=lambda _: new_source_in_dir(item['path'], kind="script")))
             actions.append(dict(label="Move folder to...", run=lambda _: open_move_file_menu(item['path'])))
             actions.append(dict(label=f"Rename folder '{item['name']}'...", run=lambda _: prompt_rename_file_item(item)))
             actions.append(None)
             actions.append(dict(label=f"Delete folder '{item['name']}'", run=lambda _: delete_file_item(item)))
         else:
-            if item['type'] == 'system':
+            if item['type'] in ('system','script'):
                 actions.append(dict(label=f"Open '{item['name']}' in editor", run=lambda _: open_specific_file(item['path'])))
                 identity = item.get("asset_id") or assets.registry.get_id(item["path"])
                 if identity is not None:
                     actions.append(dict(label="Highlight affected entities", run=lambda _, uid=identity: state.highlight_system(uid)))
                 sel = selected()
                 if sel:
+                    if item['type']=='script':
+                        actions.append(dict(label="Attach script to selected entity", run=lambda _: sel.scripts.attach(assets[identity])))
                     sel_name = str(sel.components.get('name', sel.id))
-                    actions.append(dict(label=f"Attach to '{sel_name}'", run=lambda _: attach_system_to_entity(sel, item['path'])))
+                    if item['type']=='system':
+                        actions.append(dict(label=f"Attach to '{sel_name}'", run=lambda _: attach_system_to_entity(sel, item['path'])))
             elif item['type'] == 'image':
                 sel = selected()
                 if sel:
@@ -1893,6 +1912,7 @@ def context_actions(target):
         return [
             dict(label="+ New folder...", run=lambda _: create_new_folder(state.project / state.file_explorer.components.get("view_root", "systems/game"))),
             dict(label="+ New system script...", run=lambda _: new_source_in_dir(state.project / state.file_explorer.components.get("view_root", "systems/game"))),
+            dict(label="+ New script...", run=lambda _: new_source_in_dir(state.project / state.file_explorer.components.get("view_root", "systems/game"), kind="script")),
             dict(label="Refresh project files", run=lambda _: refresh_project_files()),
         ]
 

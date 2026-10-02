@@ -61,37 +61,12 @@ def draw():
                 graphics.rect(cell_x + cell_size - t, cell_y, t, cell_size, color=border_color, key=(key_b, "r"), layer=0)
                 graphics.rect(cell_x + t, cell_y + t, cell_size - 2 * t, cell_size - 2 * t, color=fill_color, key=(key_b, "f"), layer=0)
 
-        # Draw child entities (with viewport culling)
-        def draw_tree(node, px=0.0, py=0.0):
-            x = px + node.components.get("x", 0.0)
-            y = py + node.components.get("y", 0.0)
-            color = node.components.get("color")
-            if color is not None:
-                w = node.components.get("w", 1.0)
-                h = node.components.get("h", 1.0)
-                # Only draw if on-screen (viewport culling)
-                if (max(x, x + w) >= view_min_x and min(x, x + w) <= view_max_x and
-                    max(y, y + h) >= view_min_y and min(y, y + h) <= view_max_y):
-                    layer = node.components.get("layer", 1)
-                    graphics.rect(x, y, w, h, color=color, key=node.id, layer=layer)
-            for child in node.children:
-                draw_tree(child, x, y)
-
-        for child in entity.children:
-            draw_tree(child)
+        # The system orchestrates; each target script call is backend-isolated.
+        drawing = assets["f084e424-d2d9-5fd1-8624-63580396274c"]
+        for target in query(drawing, *drawing.components, recursive=True):
+            target.run(drawing)
 
         selected = entity.relations.get("selection")
-        if selected is not None and selected.alive and "x" in selected.components and "y" in selected.components:
-            x, y = 0.0, 0.0
-            curr = selected
-            while curr is not None and curr is not entity:
-                x += curr.components.get("x", 0.0)
-                y += curr.components.get("y", 0.0)
-                curr = curr.parent
-            w = selected.components.get("w", 0.5)
-            h = selected.components.get("h", 0.5)
-            t = max(0.01, 2.0 / zoom)
-            graphics.rect(x - t, y - t, w + 2 * t, t, color=(69, 182, 199), key=(selected.id, "sel_bot"), layer=2)
-            graphics.rect(x - t, y + h, w + 2 * t, t, color=(69, 182, 199), key=(selected.id, "sel_top"), layer=2)
-            graphics.rect(x - t, y, t, h, color=(69, 182, 199), key=(selected.id, "sel_left"), layer=2)
-            graphics.rect(x + w, y, t, h, color=(69, 182, 199), key=(selected.id, "sel_right"), layer=2)
+        outline = assets["dbc0d180-5a28-56a1-bc9c-85d63174e431"]
+        if selected is not None and selected.alive and outline in selected.scripts:
+            selected.run(outline, entity, zoom)

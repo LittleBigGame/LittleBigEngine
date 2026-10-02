@@ -17,6 +17,29 @@ except ImportError:
 
 
 class EditorTests(unittest.TestCase):
+    def test_script_failure_opens_visible_log_without_stopping_other_draws(self):
+        ed=self.editor
+        target=ed.game.children[0]
+        other=ed.game.children[1]
+        target.x='bad geometry'
+        self.runtime.step(0)
+        self.runtime.step(0)
+        panel=ed.app.relations.get('system_log_panel')
+        self.assertIsNotNone(panel)
+        self.assertTrue(panel.visible)
+        self.assertFalse(panel.modal)
+        self.assertTrue(ed.game.systems['render'].running)
+        records=[r for r in self.runtime.services['log'].records if r.kind=='script.error']
+        self.assertTrue(any(str(target.id) in r.target and 'draw_rectangle.py' in r.source for r in records))
+        self.graphics.rectangles.clear()
+        self.runtime.step(0)
+        self.assertTrue(any(kw.get('key')==other.id for _,kw in self.graphics.rectangles))
+        target.x=-3
+        del target.y
+        self.graphics.rectangles.clear()
+        self.runtime.step(0)
+        self.assertFalse(any(kw.get('key')==target.id for _,kw in self.graphics.rectangles))
+
     def test_deleting_renderer_stops_draw_and_undo_restores_it(self):
         ed=self.editor
         path=Path(ed.game.systems['render'].definition.path)

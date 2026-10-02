@@ -120,13 +120,14 @@ def inspector_sync():
 
     entity = inspected()
     items = tuple(entity.components.items())
-    systems = [(entity, name, instance, None) for name, instance in entity.systems.items()]
+    systems = [(entity, name, instance, None) for name, instance in tuple(entity.systems.items())+tuple(entity.scripts.items())]
     for effect in effects.affecting(entity):
         owner = next((e for e in runtime.entities if e.id == effect.owner), None)
-        if owner is None or effect.system not in owner.systems:
+        if owner is None or (effect.system not in owner.systems and effect.system not in owner.scripts):
             continue
         colour = (90, 195, 125) if entity.id in effect.changed else (85, 155, 230)
-        row = (owner, effect.system, owner.systems[effect.system], colour)
+        instance = owner.systems.get(effect.system) or owner.scripts.get(effect.system)
+        row = (owner, effect.system, instance, colour)
         existing = next((i for i, r in enumerate(systems) if r[0] is owner and r[1] == effect.system), None)
         if existing is None:
             systems.append(row)
@@ -205,6 +206,13 @@ def inspector_sync():
         comp_start_y = cur_y
         avail_comp_h = max(25, ip.h - (comp_start_y - ip.y) - bottom_h)
         capacity = max(1, int(avail_comp_h // 25))
+        focused=state.ui.focused
+        geometry=(ip.w,ip.h)
+        if (focused is not None and focused.relations.get('target') is entity
+                and focused.components.get('component_key') in entity.components
+                and ip.components.get('edit_geometry')==geometry):
+            capacity=ip.components.get('capacity',capacity)
+        ip.components['edit_geometry']=geometry
         max_scroll = max(0, len(items) - capacity)
         state.inspector.item_count = len(items)
         state.inspector.capacity = capacity
@@ -295,7 +303,7 @@ def inspector_sync():
     # SECTION 2: SYSTEMS (Collapsible)
     show_sys_title = (cur_y + 22 <= max_bottom)
     put(state.system_label, visible=show_sys_title, x=ip.x + 12, y=cur_y, w=max(80, ip.w - 24 - 80), h=22,
-        text=f"{'▶' if sys_collapsed else '▼'} SYSTEMS ({len(systems)})")
+        text=f"{'▶' if sys_collapsed else '▼'} SYSTEMS / SCRIPTS ({len(systems)})")
     sys_btn_w = len('+ Attach') * state.ui.pitch + 16
     put(state.add_system_button, visible=show_sys_title, x=ip.x + ip.w - 12 - sys_btn_w, y=cur_y, w=sys_btn_w, h=22, text='+ Attach')
     cur_y += 26
@@ -753,6 +761,15 @@ def unlink_relation(name):
 
 
 def focus_component_value(key):
+    keys=tuple(inspected().components)
+    if key in keys:
+        index=keys.index(key)
+        capacity=max(1,state.inspector.components.get('capacity',1))
+        scroll=state.inspector.scroll
+        if index < scroll or index >= scroll+capacity-1:
+            neighbour=min(len(keys)-1,index+1)
+            state.inspector.scroll=max(0,neighbour-capacity+1)
+            inspector_sync()
     for lbl, fld in state.component_rows:
         if fld.visible and getattr(fld, 'component_key', None) == key:
             state.ui.focus(fld)
@@ -1025,7 +1042,8 @@ def detach_system_from_entity(ent, name):
         message('The active editor cannot detach itself')
         return
     try:
-        del ent.systems[name]
+        collection = ent.systems if name in ent.systems else ent.scripts
+        del collection[name]
         if state.code.relations.get('owner') is ent and state.code.components.get('system_name') == name:
             del state.code.relations['owner']
             state.code.components.pop('system_name', None)

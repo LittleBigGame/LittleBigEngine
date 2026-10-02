@@ -50,7 +50,7 @@ class SystemEffects:
                     bucket[0].discard(identity)
                     bucket[1].discard(identity)
             return
-        if change.kind == 'system.detach':
+        if change.kind in ('system.detach','script.detach'):
             self._observations.pop((identity,change.key), None)
             return
         if change.kind.startswith(('component.','tag.','relation.')) or change.kind == 'hierarchy.parent':
@@ -63,9 +63,10 @@ class SystemEffects:
         registry = self.runtime.assets.registry
         for (identity,name),(queried,changed) in tuple(self._observations.items()):
             owner = self.runtime._entities.get(identity)
-            if owner is None or name not in owner.systems:
+            if owner is None or (name not in owner.systems and name not in owner.scripts):
                 continue
-            path = owner.systems[name].definition.path
+            instance = owner.systems.get(name) or owner.scripts.get(name)
+            path = instance.definition.path
             try:
                 asset = registry.get_id(path) if registry is not None and path else None
             except ValueError:
