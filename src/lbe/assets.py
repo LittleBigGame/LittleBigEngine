@@ -2,6 +2,8 @@
 
 from dataclasses import dataclass
 import os
+import ast
+from functools import lru_cache
 from pathlib import Path
 import uuid
 from uuid import UUID
@@ -22,6 +24,7 @@ ASSET_EXTENSIONS = {
 
 ASSET_ICONS = {
     "system": "⚡",
+    "script": "⚡",
     "image": "🖼️",
     "audio": "🔊",
     "data": "📄",
@@ -29,6 +32,37 @@ ASSET_ICONS = {
     "folder": "📁",
     "asset": "📦",
 }
+
+
+@lru_cache(maxsize=512)
+def _source_functions(path, modified, size):
+    """Inspect declarations without executing source; stat keys invalidate edits."""
+    try:
+        body = ast.parse(Path(path).read_text(encoding="utf-8-sig")).body
+    except (OSError, SyntaxError, UnicodeError):
+        return None
+    return frozenset(node.name for node in body if isinstance(node, ast.FunctionDef))
+
+
+def source_functions(path):
+    path = Path(path)
+    try:
+        stat = path.stat()
+    except OSError:
+        return None
+    return _source_functions(str(path.resolve()), stat.st_mtime_ns, stat.st_size)
+
+
+def asset_icon(path, asset_type=None):
+    """Code badges identify available entry points, including mixed capabilities."""
+    path = Path(path)
+    if path.suffix.lower() != '.py':
+        return ASSET_ICONS.get(asset_type or ASSET_EXTENSIONS.get(path.suffix.lower()), '📦')
+    functions = source_functions(path)
+    if functions is None:
+        return '{?}'
+    marks = ''.join(symbol for name, symbol in (('run', '▶'), ('update', '↻'), ('draw', '◇')) if name in functions)
+    return '{' + ('*' if marks == '▶↻◇' else marks or '·') + '}'
 
 
 @dataclass(frozen=True)
@@ -80,7 +114,17 @@ class AssetRegistry:
 
     @staticmethod
     def infer_type(path):
-        return ASSET_EXTENSIONS.get(Path(path).suffix.lower(), "asset")
+        path=Path(path)
+        if path.suffix.lower()=='.py' and 'run' in (source_functions(path) or ()):
+            return 'script'
+        return ASSET_EXTENSIONS.get(path.suffix.lower(), "asset")
+
+    def icon(self, asset_id):
+        entry = self.get(asset_id)
+        if entry is None:
+            return '📦'
+        path = self.project_dir / entry['path'] if self.project_dir else entry['path']
+        return asset_icon(path, entry['type'])
 
     def entries(self):
         return tuple((uid, dict(entry)) for uid, entry in self._entries.items())
@@ -99,7 +143,7 @@ class AssetRegistry:
             while uid in self._entries:
                 uid = uuid.uuid4()
         previous = self._entries.get(existing, {})
-        entry = {"path": relative, "type": asset_type or previous.get("type", self.infer_type(relative)),
+        entry = {"path": relative, "type": asset_type or previous.get("type", self.infer_type(self.project_dir / relative if self.project_dir else relative)),
                  "name": name or previous.get("name", Path(relative).name)}
         if existing is not None and existing != uid:
             self._entries.pop(existing)
@@ -119,7 +163,7 @@ class AssetRegistry:
             raise ValueError(f"Asset destination already registered: {relative}")
         previous = self._entries[uid]
         self._path_to_id.pop(self._key(previous["path"]))
-        self._entries[uid] = dict(previous, path=relative, name=Path(relative).name, type=self.infer_type(relative))
+        self._entries[uid] = dict(previous, path=relative, name=Path(relative).name, type=self.infer_type(self.project_dir / relative if self.project_dir else relative))
         self._path_to_id[self._key(relative)] = uid
         self.revision += 1
         return True

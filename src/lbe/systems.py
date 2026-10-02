@@ -2,7 +2,7 @@
 
 from collections import deque
 from collections.abc import MutableMapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from types import CodeType
 import traceback
@@ -14,10 +14,19 @@ from .events import Diagnostic
 class SystemDefinition:
     source: str
     path: str = "<system>"
+    asset_id: object = None
+    components: tuple = field(init=False, default=())
     code: CodeType = field(init=False, repr=False, compare=False)
 
     def __post_init__(self):
         object.__setattr__(self, "code", compile(self.source, self.path, "exec"))
+        import ast
+        for statement in ast.parse(self.source).body:
+            if isinstance(statement, ast.Assign) and any(isinstance(t,ast.Name) and t.id=='components' for t in statement.targets):
+                requirements=ast.literal_eval(statement.value)
+                if not isinstance(requirements,(tuple,list)) or not all(isinstance(k,str) and k for k in requirements):
+                    raise ValueError('Script components must be a list/tuple of component names')
+                object.__setattr__(self,'components',tuple(requirements))
 
     @classmethod
     def from_file(cls, path):
@@ -65,7 +74,13 @@ class Assets:
                     raise KeyError(uid)
                 if not p.exists():
                     raise FileNotFoundError(p)
-                return self.system(p) if p.suffix.lower() == ".py" else p
+                if p.suffix.lower() != '.py':
+                    return p
+                definition=self.system(p)
+                if definition.asset_id != uid:
+                    definition=replace(definition,asset_id=uid)
+                    self._systems[p]=definition
+                return definition
             if uid is not None:
                 raise KeyError(uid)
         p = Path(key)
@@ -225,7 +240,15 @@ class Systems(MutableMapping):
         instance.stop()
         self._entity._changed("system.detach", name)
 
-    def attach(self, name, definition):
+    def attach(self, name, definition=None):
+        if definition is None:
+            definition = self._entity.runtime.assets.resolve(name) if not isinstance(name,SystemDefinition) else name
+            identity = definition.asset_id
+            if identity is None and self._entity.runtime.assets.registry is not None:
+                identity = self._entity.runtime.assets.registry.get_id(definition.path)
+            if identity is None:
+                raise ValueError('UUID attachment requires a registered system asset')
+            name = str(identity)
         self._entity._check()
         if self._entity._destroying:
             raise RuntimeError("Cannot attach systems during entity destruction")
@@ -289,7 +312,7 @@ class Systems(MutableMapping):
         new_name = new_name or name
         if new_name != name and new_name in self._values:
             raise ValueError(f"System {new_name!r} is already attached")
-        definition = SystemDefinition(instance.definition.source, str(path))
+        definition = SystemDefinition(instance.definition.source, str(path), instance.definition.asset_id)
         self._values = {new_name if key == name else key: value for key, value in self._values.items()}
         instance.name = new_name
         instance.definition = definition

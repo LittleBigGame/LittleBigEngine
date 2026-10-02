@@ -15,6 +15,22 @@ from test_scene import RecordingGraphics
 
 
 class AssetSystemTests(unittest.TestCase):
+    def test_source_badges_follow_entry_points_and_edits(self):
+        from lbe.assets import asset_icon
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "behavior.py"
+            for names, expected in (((), "{·}"), (("run",), "{▶}"),
+                    (("update",), "{↻}"), (("draw",), "{◇}"),
+                    (("run", "update"), "{▶↻}"), (("run", "draw"), "{▶◇}"),
+                    (("update", "draw"), "{↻◇}"), (("run", "update", "draw"), "{*}")):
+                path.write_text("raise RuntimeError('never execute')\n" +
+                    "".join(f"def {name}(*args):\n    pass\n" for name in names), encoding="utf8")
+                self.assertEqual(asset_icon(path), expected)
+            path.write_text("def helper():\n    def draw(): pass\n", encoding="utf8")
+            self.assertEqual(asset_icon(path), "{·}")
+            path.write_text("def run(:", encoding="utf8")
+            self.assertEqual(asset_icon(path), "{?}")
+
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
@@ -621,6 +637,8 @@ class AssetSystemTests(unittest.TestCase):
         self.runtime.step(0)
 
         # Find enemy.py row in file explorer
+        ed.reveal_file(self.enemy_script)
+        ed.file_explorer_sync()
         row = next(r for r in ed.file_explorer_rows if r.visible and "enemy.py" in r.components.get("text", ""))
 
         # 1. Single click on enemy.py row
@@ -655,6 +673,8 @@ class AssetSystemTests(unittest.TestCase):
         self.runtime.step(0)
 
         # Start dragging enemy.py from File Explorer
+        ed.reveal_file(self.enemy_script)
+        ed.file_explorer_sync()
         row = next(r for r in ed.file_explorer_rows if r.visible and "enemy.py" in r.components.get("text", ""))
         # Mouse press initiates drag on enemy.py
         self.send(("drag", row.x + 20, row.y + 10, 1, 0, 10, 0))

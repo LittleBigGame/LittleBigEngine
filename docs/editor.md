@@ -212,3 +212,100 @@ system source automatically. Runtime changes also expose immutable `old`, `new`
 and `source` metadata; event observers can use `events.observe(callback)`.
 These are generic runtime observations, while panel presentation and filtering
 policy live in the editor project scripts.
+
+
+## Observed system effects
+
+Right-click a system script in Project Files and choose **Highlight affected
+entities**. Blue outlines show entities returned by its queries; green outlines
+show entities it changed through LBE component, tag, relation or hierarchy APIs.
+Green takes priority when both apply. The inspector also lists systems attached
+to other owners that affected the selected entity, using the same colours.
+Right-click an entity and choose **View affecting systems** to inspect this list.
+Click a system row to open its source. Names resolve from the asset registry;
+selection uses the stable asset UUID.
+
+Run the game with **F5** to collect activity from paused game systems.
+Effects describe the most recent update and subsequent draw/event activity for
+each attachment, rather than predictions about code that has not run. Component
+assignments count as observed writes, including assigning the existing value.
+Unreported mutations inside arbitrary Python objects cannot be detected.
+
+The editor template supports nested system files. Docking, effects presentation
+and source/file operations are separate attachments under `systems/editor/`.
+They can be detached and replaced using the standard system API. Further editor
+systems currently remain in the template root during the folder migration.
+
+
+## Panel roots
+
+Hierarchy opens at **Game** and Project Files opens at **systems/game**.
+Right-click an entity or folder and choose **View as root entity/folder** to
+focus that panel on its subtree. Right-click the current root to choose
+**Set parent as root entity/folder**, where a parent is available. Files remain
+inside the project directory.
+
+Selecting an entity or locating/opening a file outside the current view widens
+the corresponding root to the nearest containing ancestor, expands its path,
+and scrolls to the selection. Each panel has an independent session scope;
+these controls do not reparent entities, move files or alter asset UUIDs.
+
+
+Creation from empty space in Project Files uses its current view root.
+**New folder** creates and selects a uniquely named folder. **New system script**
+creates a numbered Python file in that folder and reveals it in the source panel.
+Folder-specific creation uses the clicked folder. Rename actions restore the
+source panel for name entry if it was closed. Unsaved source protection still
+applies when changing the open file.
+
+
+## Undo and recoverable deletion
+
+Component value changes committed with Enter are single undo transactions.
+Ctrl+Z restores the previous component value and Ctrl+Shift+Z reapplies it.
+Uncommitted typing uses text-buffer undo. When the focused buffer has no text
+history, undo falls back to session project history.
+
+Project history covers file/folder creation, deletion, rename and move. Deleted
+contents are retained under the hidden `.lbe-trash` directory rather than
+immediately destroyed; registry UUID declarations stay intact. Undo/redo stacks
+last for the current editor session. This does not yet cover every entity, tag,
+relation or inspector operation. Deletion through the editor rejects paths that
+contain scripts currently required by its own attachments. External filesystem
+deletion bypasses this safeguard.
+
+
+If the viewport appears empty after panning or moving objects, use
+**View → Frame all game entities** to fit the drawable scene, or
+**View → Frame selected entity** for a close-up. Widely separated objects may
+look small when fitting the entire scene. Focus camera uses hierarchy-relative
+world position. Systems defined inline or outside the project remain inspectable
+without claiming a project asset UUID.
+
+
+Deleting a system source through Project Files stops its live attachments
+immediately, including sources inside a deleted folder. Undo restores the files
+and reloads attachments that have not been replaced or detached in the meantime.
+Reload runs the normal initialization/start lifecycle; script-local state is
+reinitialized while entity components remain authoritative. Redo stops them again.
+
+
+### Source capability badges
+
+Open **View → System Log** (or Ctrl+L) to inspect runtime activity.
+Python files use code-shaped badges in Project Files, attachment rows and asset
+references. Their symbols come from top-level functions in the current source:
+
+| Badge | Available functions |
+| --- | --- |
+| `{▶}` | `run` (explicit script call) |
+| `{↻}` | `update` (frame updates) |
+| `{◇}` | `draw` (render phase) |
+| `{▶↻}`, `{▶◇}`, `{↻◇}` | The indicated pair |
+| `{*}` | All three |
+| `{·}` | No `run`, `update` or `draw` declaration |
+| `{?}` | Source unavailable or invalid Python |
+
+The badge describes capabilities; it does not automatically attach a file or
+change how an existing attachment is scheduled. Functions inside classes or
+other functions do not count as module entry points.

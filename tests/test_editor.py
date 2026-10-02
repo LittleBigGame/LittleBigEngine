@@ -17,6 +17,233 @@ except ImportError:
 
 
 class EditorTests(unittest.TestCase):
+    def test_script_failure_opens_visible_log_without_stopping_other_draws(self):
+        ed=self.editor
+        target=ed.game.children[0]
+        other=ed.game.children[1]
+        target.x='bad geometry'
+        self.runtime.step(0)
+        self.runtime.step(0)
+        panel=ed.app.relations.get('system_log_panel')
+        self.assertIsNotNone(panel)
+        self.assertTrue(panel.visible)
+        self.assertFalse(panel.modal)
+        self.assertTrue(ed.game.systems['render'].running)
+        records=[r for r in self.runtime.services['log'].records if r.kind=='script.error']
+        self.assertTrue(any(str(target.id) in r.target and 'draw_rectangle.py' in r.source for r in records))
+        self.graphics.rectangles.clear()
+        self.runtime.step(0)
+        self.assertTrue(any(kw.get('key')==other.id for _,kw in self.graphics.rectangles))
+        target.x=-3
+        del target.y
+        self.graphics.rectangles.clear()
+        self.runtime.step(0)
+        self.assertFalse(any(kw.get('key')==target.id for _,kw in self.graphics.rectangles))
+
+    def test_deleting_renderer_stops_draw_and_undo_restores_it(self):
+        ed=self.editor
+        path=Path(ed.game.systems['render'].definition.path)
+        target=ed.game.children[0]
+        ed.delete_file_item(dict(path=path))
+        self.assertFalse(ed.game.systems['render'].running)
+        self.graphics.rectangles.clear()
+        self.runtime.step(0)
+        self.assertFalse(any(kwargs.get('key')==target.id for args,kwargs in self.graphics.rectangles))
+        ed.ui.focus(None)
+        self.send(('key','Z',True,False))
+        self.assertTrue(ed.game.systems['render'].running)
+        self.graphics.rectangles.clear()
+        self.runtime.step(0)
+        self.assertTrue(any(kwargs.get('key')==target.id for args,kwargs in self.graphics.rectangles))
+
+    def test_frame_game_recovers_distant_camera_and_nested_focus(self):
+        ed = self.editor
+        ed.camera.x,ed.camera.y = 9999,9999
+        namespace=ed.app.systems['app'].namespace
+        namespace['frame_game']()
+        for target in ed.game.children:
+            if target.components.get('color') is not None:
+                sx,sy=world_to_screen(ed.camera,ed.viewport,target.x,target.y)
+                self.assertGreaterEqual(sx,ed.viewport.x)
+                self.assertLessEqual(sx,ed.viewport.x+ed.viewport.w)
+                self.assertGreaterEqual(sy,ed.viewport.y)
+                self.assertLessEqual(sy,ed.viewport.y+ed.viewport.h)
+        parent=self.runtime.create(parent=ed.game,x=10,y=20)
+        child=self.runtime.create(parent=parent,x=2,y=3)
+        namespace['context_focus_camera'](child)
+        self.assertEqual((ed.camera.x,ed.camera.y),(12,23))
+
+    def test_external_system_source_is_inspectable_without_project_asset(self):
+        from lbe import SystemDefinition
+        ed = self.editor
+        target = ed.game.children[0]
+        path = str(Path(self.directory.name).parent/'external-lbe-system.py')
+        target.systems.attach('external',SystemDefinition('def update(dt):\n    entity.x += dt',path))
+        self.runtime.step(1)
+        ed.select(target)
+        ed.inspector_sync()
+        self.assertTrue(any(r.visible and r.components.get('system_key')==(target.id,'external') for r in ed.system_rows))
+        self.assertTrue(any(r.asset is None and r.system=='external' for r in self.runtime.services['effects'].affecting(target)))
+        self.assertFalse([list(i.errors) for e in self.runtime.entities for i in e.systems.values() if i.errors])
+
+    def test_component_commit_undo_is_one_enter_transaction(self):
+        ed = self.editor
+        target = ed.game.children[0]
+        ed.select(target)
+        field = next(f for _,f in ed.component_rows if f.visible and f.components.get('component_key')=='x')
+        before = target.x
+        ed.ui.focus(field)
+        field.buffer.anchor = 0
+        field.buffer.cursor = len(field.buffer.text)
+        self.send(('text','1'),('text','2'),('text','3'),('key','ENTER',False,False))
+        self.assertEqual(target.x,123)
+        self.send(('key','Z',True,False))
+        self.assertEqual(target.x,before)
+        self.send(('key','Z',True,True))
+        self.assertEqual(target.x,123)
+
+    def test_editor_dependencies_cannot_be_deleted_but_game_file_undo_works(self):
+        ed = self.editor
+        with self.assertRaisesRegex(ValueError,'Required editor source'):
+            ed.delete_file_item(dict(path=ed.project/'systems/editor'))
+        path = ed.project/'systems/game/deletable.py'
+        path.write_text('def update(dt): pass',encoding='utf-8')
+        identity = self.runtime.assets.registry.register(path)
+        ed.delete_file_item(dict(path=path))
+        self.assertFalse(path.exists())
+        ed.ui.focus(None)
+        self.send(('key','Z',True,False))
+        self.assertTrue(path.exists())
+        self.assertEqual(self.runtime.assets.registry.get_id(path),identity)
+        self.send(('key','Z',True,True))
+        self.assertFalse(path.exists())
+
+    def test_scoped_creation_menu_creates_visible_folder_and_system(self):
+        ed = self.editor
+        folder = ed.project / 'systems/game'
+        ed.switch_left_tab('files')
+        ed.set_file_root(folder)
+        actions = ed.app.systems['app'].namespace['context_actions']({'file_explorer':True})
+        next(a for a in actions if a['label']=='+ New folder...')['run'](None)
+        created = folder / 'New Folder'
+        self.assertTrue(created.is_dir())
+        self.assertTrue(any(r.visible and r.file_item['path']==created for r in ed.file_explorer_rows))
+        ed.dock_tree.remove_panel('code_panel')
+        next(a for a in actions if a['label']=='+ New system script...')['run'](None)
+        source = folder / 'system_1.py'
+        self.assertTrue(source.is_file())
+        self.assertIsNotNone(self.runtime.assets.registry.get_id(source))
+        self.assertTrue(ed.code_panel.visible)
+        self.assertEqual(Path(ed.code.source_path),source)
+        self.assertTrue(any(r.visible and r.file_item['path']==source for r in ed.file_explorer_rows))
+        next(a for a in actions if a['label']=='+ New system script...')['run'](None)
+        self.assertTrue((folder/'system_2.py').is_file())
+        self.assertFalse((ed.project/'system_1.py').exists())
+        ed.ui.focus(ed.code)
+        self.send(('key','Z',True,False))
+        self.assertFalse((folder/'system_2.py').exists())
+        self.send(('key','Z',True,True))
+        self.assertTrue((folder/'system_2.py').exists())
+
+        ed.dock_tree.remove_panel('code_panel')
+        ed.prompt_rename_file_item(dict(type='folder', path=created))
+        self.assertTrue(ed.code_panel.visible)
+        self.assertFalse(ed.path_field.readonly)
+        ed.path_field.buffer.text = 'Renamed folder'
+        ed.path_field.on_commit()
+        self.assertTrue((folder/'Renamed folder').is_dir())
+        self.assertFalse(created.exists())
+
+        self.assert_healthy()
+
+    def test_panel_roots_default_to_game_and_promote_for_external_selection(self):
+        reopened = load_project(self.window, RecordingGraphics(), Input(), self.directory.name + '-roots', template=template_path('editor'))
+        self.addCleanup(reopened.close)
+        import shutil
+        self.addCleanup(lambda: shutil.rmtree(self.directory.name + '-roots', ignore_errors=True))
+        reopened.step(0)
+        ed = reopened.entities[0].application_state
+        self.assertIs(ed.hierarchy.relations['view_root'], ed.game)
+        self.assertEqual(ed.file_explorer.components.get('view_root','systems/game'),'systems/game')
+        target = reopened.create(parent=ed.game,name='Scoped')
+        ed.set_hierarchy_root(target)
+        self.assertIs(ed.hierarchy.relations['view_root'],target)
+        ed.select(ed.camera)
+        ed.hierarchy_sync()
+        self.assertIs(ed.hierarchy.relations['view_root'],ed.app)
+        self.assertTrue(any(r.visible and r.relations.get('target') is ed.camera for r in ed.hierarchy_rows))
+        actions = ed.app.systems['app'].namespace['context_actions'](ed.app)
+        self.assertNotIn('Set parent as root entity',[a['label'] for a in actions if a])
+        ed.set_hierarchy_root(target)
+        reopened.destroy(target)
+        ed.hierarchy_sync()
+        self.assertIs(ed.hierarchy.relations['view_root'],ed.game)
+        ed.switch_left_tab('files')
+        ed.set_file_root(ed.project/'systems/game')
+        ed.reveal_file(ed.project/'inspector.py')
+        ed.file_explorer_sync()
+        self.assertEqual(ed.file_explorer.view_root,'.')
+        self.assertTrue(any(r.visible and r.file_item['path'] == ed.project/'inspector.py' for r in ed.file_explorer_rows))
+        ed.set_file_root(ed.project/'systems/game')
+        item=ed.file_explorer.visible_items[0]
+        actions=ed.app.systems['app'].namespace['context_actions']({'file_item':item})
+        next(a for a in actions if a and a['label']=='Set parent as root folder')['run'](None)
+        self.assertEqual(ed.file_explorer.view_root,'systems')
+
+    def test_moved_editor_system_starts_from_its_preserved_uuid(self):
+        ed = self.editor
+        source = ed.project / 'ui.py'
+        identity = self.runtime.assets.registry.get_id(source)
+        destination = ed.project / 'systems/editor/ui/ui.py'
+        destination.parent.mkdir(parents=True)
+        ed.files.relocate(source, destination, save=ed.save_editor_project)
+        reopened = load_project(self.window, RecordingGraphics(), Input(), ed.project)
+        self.addCleanup(reopened.close)
+        reopened.step(0)
+        app = reopened.entities[0]
+        self.assertEqual(reopened.assets.registry.get_id(destination), identity)
+        self.assertEqual(Path(app.systems['ui'].definition.path), destination)
+        self.assertFalse([(name, list(instance.errors)) for e in reopened.entities
+                          for name, instance in e.systems.items() if instance.errors])
+        actions = app.systems['app'].namespace['context_actions'](app.application_state.game)
+        self.assertIn('View affecting systems', [a['label'] for a in actions if a])
+
+    def test_system_effect_file_menu_and_inspector_use_asset_identity(self):
+        from lbe import SystemDefinition
+        ed = self.editor
+        path = ed.project / 'observed.py'
+        path.write_text('def update(dt):\n    for target in query("effect_target"):\n        target.x += 1', encoding='utf-8')
+        identity = self.runtime.assets.registry.register(path)
+        ed.game.systems.attach('observed', self.runtime.assets[identity])
+        target = self.runtime.create(parent=ed.game, effect_target=True, x=0, y=0, w=1, h=1)
+        self.runtime.step(0)
+        actions = ed.app.systems["app"].namespace["context_actions"]({'file_item':dict(path=path,name=path.name,is_dir=False,type='system',asset_id=identity,rel_path=path.name)})
+        next(a for a in actions if a and a['label'] == 'Highlight affected entities')['run'](None)
+        self.assertEqual(ed.app.highlight_system_asset, identity)
+        self.assertEqual(ed.affected_entities()[target.id], (90,195,125))
+        ed.select(target)
+        ed.inspector_sync()
+        row = next(r for r in ed.system_rows if r.visible and r.components.get('system_key') == (ed.game.id,'observed'))
+        self.assertEqual(row.ink,(90,195,125))
+        self.assertEqual(row.asset_id,identity)
+        path.write_text('def update(dt):\n    list(query("effect_target"))', encoding='utf-8')
+        ed.game.systems.reload('observed', SystemDefinition(path.read_text(encoding='utf-8'), str(path)))
+        self.runtime.step(0)
+        self.assertEqual(ed.affected_entities()[target.id], (85,155,230))
+        self.assert_healthy()
+
+    def test_docking_attachment_can_detach_and_recompose(self):
+        app = self.editor.app
+        instance = app.systems['docking']
+        definition = instance.definition
+        self.assertTrue(definition.path.endswith('systems\\editor\\layout\\docking.py') or definition.path.endswith('systems/editor/layout/docking.py'))
+        del app.systems['docking']
+        self.runtime.step(0)
+        self.assert_healthy()
+        app.systems.attach('docking',definition)
+        self.runtime.step(0)
+        self.assert_healthy()
+
     def test_active_tabs_keep_panel_border_colour_without_hover_and_attach_text_fits(self):
         ed = self.editor
         hierarchy = next(b for b in ed.dock_tab_buttons if b.text == 'HIERARCHY')
@@ -90,6 +317,8 @@ class EditorTests(unittest.TestCase):
         self.runtime = load_project(self.window, self.graphics, self.input, self.directory.name, template=template_path("editor"))
         self.addCleanup(self.runtime.close)
         self.editor = self.runtime.entities[0].components["application_state"]
+        self.editor.hierarchy.relations['view_root'] = self.editor.app
+        self.editor.file_explorer.components['view_root'] = '.'
         self.runtime.step(0)
         self.assert_healthy()
 
@@ -290,13 +519,19 @@ class EditorTests(unittest.TestCase):
         from lbe import SystemDefinition
         root = self.editor.app
         old = root.systems["app"]
-        source = old.definition.source.replace("New source:", "Revised source:")
+        source = old.definition.source
         before = set(self.runtime.entities)
         replacement = root.systems.reload("app", SystemDefinition(source, old.definition.path))
         self.assertIsNot(replacement, old)
         self.assertEqual(set(self.runtime.entities), before)
         self.click(self.editor.new_button)
+        self.assertIn("New source:", root.status)
+        provider = root.systems["source_files"]
+        updated = provider.definition.source.replace("New source:", "Revised source:")
+        root.systems.reload("source_files", SystemDefinition(updated, provider.definition.path))
+        self.click(self.editor.new_button)
         self.assertIn("Revised source:", root.status)
+        self.assertEqual(set(self.runtime.entities), before)
         self.assertNotIn("editor", self.runtime.services)
 
     def test_source_editor_cursor_and_selection_alignment(self):
@@ -477,7 +712,7 @@ class EditorTests(unittest.TestCase):
         self.assertEqual(ed.code_panel.w, 1600 - 370 - 24)
 
         # Hit test in reflowed header button
-        self.assertEqual(ed.panel_button.x, 1600 - 190)
+        self.assertEqual(ed.panel_button.x + ed.panel_button.w, 1600 - 12)
         self.click(ed.panel_button)
         self.assertEqual(len(ed.extra_panels), 1)
 
@@ -542,10 +777,10 @@ class EditorTests(unittest.TestCase):
         self.assertIs(ed.app.relations["selection"], ed.code_panel)
 
         sys_buttons = [b for b in ed.system_rows if b.visible]
-        self.assertTrue(any(b.components.get("text") == "code_editor" for b in sys_buttons))
+        self.assertTrue(any(b.components.get("text", "").endswith(" code_editor.py") for b in sys_buttons))
 
         # Clicking system button opens its source in code editor
-        code_sys_btn = next(b for b in sys_buttons if b.components.get("text") == "code_editor")
+        code_sys_btn = next(b for b in sys_buttons if b.components.get("text", "").endswith(" code_editor.py"))
         self.click(code_sys_btn)
         self.assertEqual(ed.path_field.buffer.text, "code_editor.py")
         self.assertIn("Code editor panel and coding-specific specialization system", ed.code.buffer.text)
@@ -561,31 +796,31 @@ class EditorTests(unittest.TestCase):
         self.assertIn(ed.code_panel.id, ed.hierarchy.expanded)
 
         # 3. Inspect TextArea's reusable behavior and coding-specific behavior
-        text_area_sys = [b.components.get("text") for b in ed.system_rows if b.visible]
-        self.assertIn("text_area", text_area_sys)
-        self.assertIn("code_editor", text_area_sys)
+        text_area_sys = [b.components.get("text", "").split(" ", 1)[-1] for b in ed.system_rows if b.visible]
+        self.assertIn("text_area.py", text_area_sys)
+        self.assertIn("code_editor.py", text_area_sys)
 
         # Open text_area system source
-        ta_btn = next(b for b in ed.system_rows if b.visible and b.components.get("text") == "text_area")
+        ta_btn = next(b for b in ed.system_rows if b.visible and b.components.get("text", "").endswith(" text_area.py"))
         self.click(ta_btn)
         self.assertEqual(ed.path_field.buffer.text, "text_area.py")
         self.assertIn("Reusable multiline text area entity system", ed.code.buffer.text)
 
         # Open code_editor specialization system source
-        ce_btn = next(b for b in ed.system_rows if b.visible and b.components.get("text") == "code_editor")
+        ce_btn = next(b for b in ed.system_rows if b.visible and b.components.get("text", "").endswith(" code_editor.py"))
         self.click(ce_btn)
         self.assertEqual(ed.path_field.buffer.text, "code_editor.py")
 
         # 4. Verify same approach works for other controls (e.g. HierarchyPanel, InspectorPanel)
         self.select(ed.hierarchy)
         self.runtime.step(0)
-        h_btn = next(b for b in ed.system_rows if b.visible and b.components.get("text") == "hierarchy")
+        h_btn = next(b for b in ed.system_rows if b.visible and b.components.get("text", "").endswith(" hierarchy.py"))
         self.click(h_btn)
         self.assertEqual(ed.path_field.buffer.text, "hierarchy.py")
 
         self.select(ed.inspector)
         self.runtime.step(0)
-        i_btn = next(b for b in ed.system_rows if b.visible and b.components.get("text") == "inspector")
+        i_btn = next(b for b in ed.system_rows if b.visible and b.components.get("text", "").endswith(" inspector.py"))
         self.click(i_btn)
         self.assertEqual(ed.path_field.buffer.text, "inspector.py")
 
@@ -2556,6 +2791,16 @@ class EditorTests(unittest.TestCase):
 
         # Splitter between viewport and code_panel was pruned and is hidden
         self.assertFalse(ed.code_splitter.components.get("visible", False))
+
+    def test_view_menu_opens_system_log(self):
+        ed = self.editor
+        self.click(ed.menu_view_btn)
+        menu = ed.app.relations['context_menu']
+        item = next(c for c in menu.children if c.components.get('text') == 'System Log (Ctrl+L)')
+        self.click(item)
+        panel = ed.app.relations['system_log_panel']
+        self.assertTrue(panel.visible)
+        self.assertIsNone(ed.app.relations.get('context_menu'))
 
     def test_view_menu_toggles_and_restores_panels(self):
         """Req 3: Classic top menu buttons exist, close minimizes, and View menu restores to default."""

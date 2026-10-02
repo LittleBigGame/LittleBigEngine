@@ -11,6 +11,16 @@ MANIFEST = '.lbe-template.json'
 JOURNAL = '.lbe-template-upgrade.json'
 
 
+def _target(directory, name):
+    path = Path(name)
+    if path.drive or path.is_absolute() or '..' in path.parts or not path.name:
+        raise ValueError('Invalid template source path')
+    target = (directory / path).resolve()
+    if not target.is_relative_to(directory.resolve()):
+        raise ValueError('Template source escapes the project')
+    return target
+
+
 def recover_template_upgrade(directory):
     directory = Path(directory).resolve()
     journal = directory / JOURNAL
@@ -24,14 +34,14 @@ def recover_template_upgrade(directory):
         raise ValueError('Invalid template backup path')
     if record['phase'] == 'prepared':
         for name, status in record['files'].items():
-            if Path(name).name != name:
-                raise ValueError('Invalid template source path')
+            destination = _target(directory, name)
             original = backup / name
             if original.exists():
-                shutil.copyfile(original, directory / name)
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(original, destination)
             elif status == 'new':
                 (directory / name).unlink(missing_ok=True)
-            (directory / ('.' + name + '.upgrade')).unlink(missing_ok=True)
+            (destination.parent / ('.' + destination.name + '.upgrade')).unlink(missing_ok=True)
         shutil.copyfile(backup / MANIFEST, directory / MANIFEST)
     journal.unlink()
 
@@ -45,11 +55,13 @@ def initialize_template(directory, template, *, entry='app.py'):
     if (directory / entry).exists():
         return
     managed = {}
-    for source in sorted(template.glob('*.py')):
-        destination = directory / source.name
+    for source in sorted(template.rglob('*.py')):
+        name = source.relative_to(template).as_posix()
+        destination = _target(directory, name)
         if not destination.exists():
+            destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(source, destination)
-            managed[source.name] = _hash(source)
+            managed[name] = _hash(source)
     write_json(directory / MANIFEST, dict(version=1, template=template.name, files=managed))
 
 
@@ -63,17 +75,18 @@ def template_updates(directory, template):
     if baseline.get('version') != 1 or baseline.get('template') != template.name:
         raise ValueError('Template manifest version/name does not match')
     result = {}
-    for source in sorted(template.glob('*.py')):
-        destination = directory / source.name
-        expected = baseline['files'].get(source.name)
+    for source in sorted(template.rglob('*.py')):
+        name = source.relative_to(template).as_posix()
+        destination = _target(directory, name)
+        expected = baseline['files'].get(name)
         if expected is None:
-            result[source.name] = 'new' if not destination.exists() else 'customized'
+            result[name] = 'new' if not destination.exists() else 'customized'
         elif not destination.exists():
-            result[source.name] = 'customized'
+            result[name] = 'customized'
         elif _hash(destination) != expected:
-            result[source.name] = 'customized'
+            result[name] = 'customized'
         else:
-            result[source.name] = 'current' if _hash(source) == expected else 'update'
+            result[name] = 'current' if _hash(source) == expected else 'update'
     return result
 
 
@@ -97,14 +110,16 @@ def upgrade_template(directory, template):
     shutil.copyfile(manifest_path, backup / MANIFEST)
     for name in paths:
         if (directory / name).exists():
+            (backup / name).parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(directory / name, backup / name)
     record = dict(phase='prepared', backup=backup.relative_to(directory).as_posix(),
                   files={name: result[name] for name in paths})
     write_json(directory / JOURNAL, record)
     try:
         for name in paths:
-            destination = directory / name
-            temporary = directory / ('.' + name + '.upgrade')
+            destination = _target(directory, name)
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            temporary = destination.parent / ('.' + destination.name + '.upgrade')
             shutil.copyfile(template / name, temporary)
             temporary.replace(destination)
         updated = dict(baseline, files=dict(baseline['files']))

@@ -401,6 +401,9 @@ class TextBuffer:
                 self.anchor = new_end
                 self.cursor = new_start
 
+    def can_undo(self, redo=False):
+        return bool(self._redo if redo else self._undo)
+
     def undo(self, redo=False):
         self.preferred_column = None
         source, target = (self._redo, self._undo) if redo else (self._undo, self._redo)

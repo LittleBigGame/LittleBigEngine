@@ -8,6 +8,37 @@ selected = lambda: state.selected()
 select = lambda target: state.select(target)
 message = lambda text: state.message(text)
 
+def view_root():
+    root = entity.relations.get("view_root")
+    if root is None or not root.alive:
+        root = state.game if state.game.alive else state.app
+        entity.relations["view_root"] = root
+    return root
+
+
+def set_hierarchy_root(target):
+    if target is None or not target.alive:
+        return
+    entity.relations["view_root"] = target
+    state.hierarchy.scroll = 0
+    state.hierarchy.expanded.add(target.id)
+    state.select(target)
+    hierarchy_sync()
+
+
+def reveal_hierarchy(target):
+    root = view_root()
+    while root is not target and root not in target.ancestors and root.parent is not None:
+        root = root.parent
+    # Separate top-level trees have no shared entity ancestor.
+    if root is not target and root not in target.ancestors:
+        root = target.root
+    entity.relations["view_root"] = root
+    for ancestor in target.ancestors:
+        state.hierarchy.expanded.add(ancestor.id)
+    return root
+
+
 def hierarchy_sync():
     if not getattr(state, "hierarchy", None) or not state.hierarchy.components.get("visible", True):
         for row in getattr(state, "hierarchy_rows", []):
@@ -19,7 +50,8 @@ def hierarchy_sync():
         return
 
     visible = []
-    traversal_stack = [(e, 0) for e in reversed(state.runtime.entities) if e.parent is None]
+    root = reveal_hierarchy(selected())
+    traversal_stack = [(root, 0)]
     expanded = state.hierarchy.expanded
     while traversal_stack and len(visible) < 10000:
         entity, depth = traversal_stack.pop()
@@ -29,6 +61,12 @@ def hierarchy_sync():
     capacity = int(max(0, (state.hierarchy.h - 34)) // 22)
     state.hierarchy.visible_count = len(visible)
     max_scroll = max(0, len(visible) - capacity)
+    target = selected()
+    if state.hierarchy.components.get('revealed_selection') != target.id:
+        state.hierarchy.components['revealed_selection'] = target.id
+        index = next((i for i,(e,_) in enumerate(visible) if e is target), 0)
+        state.hierarchy.scroll = max(0,index-capacity+1)
+
     put(state.hierarchy, scroll=max(0, min(state.hierarchy.scroll, max_scroll)))
     while len(state.hierarchy_rows) < capacity:
         row = state.ui.create(state.hierarchy, f'HierarchyRow{len(state.hierarchy_rows)}', 'button', text='', indent=0,
@@ -148,6 +186,8 @@ def start():
     global _release
     _release = bind_callbacks(system, state, {
         "hierarchy_sync": hierarchy_sync,
+        "set_hierarchy_root": set_hierarchy_root,
+        "reveal_hierarchy": reveal_hierarchy,
         "hierarchy_click": hierarchy_click,
         "hierarchy_row_drag": hierarchy_row_drag,
         "hierarchy_scroll_drag": hierarchy_scroll_drag,

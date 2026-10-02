@@ -123,3 +123,39 @@ records, and excludes its presentation subtree to prevent logging feedback. The
 editor's `system_log.py` composes ordinary UI entities; no log panel concepts enter
 Core. Observation preserves direct-child queries, independent system namespaces,
 listener failure isolation, and all-update-before-all-draw ordering.
+
+
+Query iteration publishes a generic `query.result` observation containing the
+snapshot returned to its caller. `SystemEffects` derives per-attachment queried
+and written entity UUID sets from that observation and existing source-attributed
+changes. It retains no entity handles and discards detached/deleted attachments.
+Registry identities and current attachment paths remain authoritative. Editor
+colouring, menu actions and overlays are ordinary template system behavior above
+Core; the runtime does not know about inspection colours or panels. Nested
+template files retain per-file upgrade provenance and recovery.
+
+
+Hierarchy view scope is an ordinary panel `view_root` relation; file view scope
+is a project-relative `view_root` component on the file panel. Template systems
+derive rows from those scopes and promote them to containing ancestors when
+revealing outside selections. Actual hierarchy, project paths and asset identity
+remain authoritative and unchanged. View scope defaults are applied each session.
+
+
+`History` stores reversible session commands above Core. ProjectFiles registers
+transactional file actions; inspector systems record explicit component commits,
+rather than treating runtime simulation writes as user edits. Components remain
+authoritative. Retained deletion uses the existing file-operation journal and a
+hidden trash location. Required editor-source checks are template policy, not
+Core entity or filesystem semantics.
+
+
+Attached scripts (`lbe.scripts`) reuse generic definition and instance execution
+semantics, declare required components, and expose per-entity `run` calls. Core
+queries accept stable asset references to match script/system attachments, or
+explicit requirement tuples to match data. Systems orchestrate these calls;
+script exceptions are caught at the backend boundary and emitted as
+`script.error` changes with source attribution. Editor templates consume those
+records to open the log panel. Persistence retains script UUIDs and source paths.
+The runtime does not schedule scripts automatically or add domain-specific
+rendering semantics. Legacy named system attachments remain compatible.

@@ -864,8 +864,8 @@ class UI:
                 entry = reg.get(uid_str) if reg else None
                 if entry:
                     etype = entry.get("type", "asset")
-                    if etype == "system":
-                        pill_label = f" ⚡ System: {entry['name']} "
+                    if etype in ("system", "script"):
+                        pill_label = f" {reg.icon(uid_str)} {entry['name']} "
                     elif etype == "image":
                         pill_label = f" 🖼️ Image: {entry['name']} "
                     elif etype == "audio":

@@ -120,7 +120,19 @@ def inspector_sync():
 
     entity = inspected()
     items = tuple(entity.components.items())
-    systems = tuple(entity.systems.items())
+    systems = [(entity, name, instance, None) for name, instance in tuple(entity.systems.items())+tuple(entity.scripts.items())]
+    for effect in effects.affecting(entity):
+        owner = next((e for e in runtime.entities if e.id == effect.owner), None)
+        if owner is None or (effect.system not in owner.systems and effect.system not in owner.scripts):
+            continue
+        colour = (90, 195, 125) if entity.id in effect.changed else (85, 155, 230)
+        instance = owner.systems.get(effect.system) or owner.scripts.get(effect.system)
+        row = (owner, effect.system, instance, colour)
+        existing = next((i for i, r in enumerate(systems) if r[0] is owner and r[1] == effect.system), None)
+        if existing is None:
+            systems.append(row)
+        else:
+            systems[existing] = row
     children = tuple(entity.children)
     relations = tuple(entity.relations.items())
     i_pad = parse_box(ip.components.get("padding", (8, 12, 8, 12)))
@@ -194,6 +206,13 @@ def inspector_sync():
         comp_start_y = cur_y
         avail_comp_h = max(25, ip.h - (comp_start_y - ip.y) - bottom_h)
         capacity = max(1, int(avail_comp_h // 25))
+        focused=state.ui.focused
+        geometry=(ip.w,ip.h)
+        if (focused is not None and focused.relations.get('target') is entity
+                and focused.components.get('component_key') in entity.components
+                and ip.components.get('edit_geometry')==geometry):
+            capacity=ip.components.get('capacity',capacity)
+        ip.components['edit_geometry']=geometry
         max_scroll = max(0, len(items) - capacity)
         state.inspector.item_count = len(items)
         state.inspector.capacity = capacity
@@ -228,7 +247,7 @@ def inspector_sync():
             field_w = max(40, ip.w - 12 - lbl_w - 6 - sb_w - 12)
             put(label, x=ip.x + 12, y=y + 1, w=lbl_w, h=23)
             if is_asset:
-                icon = ASSET_ICONS.get(value.type, "📦")
+                icon = state.runtime.assets.registry.icon(value.id)
                 display_val = f" {icon} {value.type.capitalize()}: {(state.runtime.assets.registry.get(value.id) or {}).get('name', value.name or 'Asset')} "
                 put(field, x=ip.x + 12 + lbl_w + 6, y=y, w=field_w, h=23, readonly=True,
                     color=(35, 55, 75), normal_color=(35, 55, 75), hover_color=(50, 80, 110),
@@ -284,7 +303,7 @@ def inspector_sync():
     # SECTION 2: SYSTEMS (Collapsible)
     show_sys_title = (cur_y + 22 <= max_bottom)
     put(state.system_label, visible=show_sys_title, x=ip.x + 12, y=cur_y, w=max(80, ip.w - 24 - 80), h=22,
-        text=f"{'▶' if sys_collapsed else '▼'} SYSTEMS ({len(systems)})")
+        text=f"{'▶' if sys_collapsed else '▼'} SYSTEMS / SCRIPTS ({len(systems)})")
     sys_btn_w = len('+ Attach') * state.ui.pitch + 16
     put(state.add_system_button, visible=show_sys_title, x=ip.x + ip.w - 12 - sys_btn_w, y=cur_y, w=sys_btn_w, h=22, text='+ Attach')
     cur_y += 26
@@ -340,14 +359,20 @@ def inspector_sync():
                 put(s_btn, visible=shown)
                 put(e_btn, visible=shown)
                 if shown:
-                    name, instance = systems[index]
-                    s_title = name + (' !' if instance.errors else '')
-                    s_ink = (255, 120, 120) if instance.errors else INK
+                    owner, name, instance, effect_colour = systems[index]
+                    try:
+                        identity = assets.registry.get_id(instance.definition.path) if instance.definition.path else None
+                    except ValueError:
+                        identity = None
+                    entry = assets.registry.get(identity) if identity else None
+                    s_title = ((assets.registry.icon(identity) + " " + entry["name"]) if entry else name) + (' !' if instance.errors else '')
+                    s_ink = (255, 120, 120) if instance.errors else (effect_colour or INK)
                     put(s_btn, x=ip.x + 12, y=cur_y, w=s_w, h=24, text=s_title, ink=s_ink)
                     put(e_btn, x=ip.x + 12 + s_w + 4, y=cur_y, w=btn_edit_w, h=24, text='Edit')
-                    s_btn.system_key = (entity.id, name)
-                    s_btn.action = lambda e=entity, n=name: open_system(e, n)
-                    e_btn.action = lambda e=entity, n=name: open_system(e, n)
+                    s_btn.system_key = (owner.id, name)
+                    s_btn.asset_id = identity
+                    s_btn.action = lambda e=owner, n=name: open_system(e, n)
+                    e_btn.action = lambda e=owner, n=name: open_system(e, n)
                     cur_y += 26
             cur_y += 4
 
@@ -487,7 +512,23 @@ def commit_component(field):
     target, key = (field.relations['target'], field.component_key)
     if field.buffer.text == safe_repr(target.components[key]):
         return
-    target.components[key] = parse_value(field.buffer.text)
+    before = target.components[key]
+    after = parse_value(field.buffer.text)
+    identity = target.id
+    def apply(value):
+        current = state.runtime.resolve(identity)
+        if current is None or not current.alive:
+            raise ValueError('Edited entity no longer exists')
+        current.components[key] = value
+        for _, control in state.component_rows:
+            if control.relations.get('target') is current and control.components.get('component_key') == key:
+                control.buffer = TextBuffer(safe_repr(value))
+                control.committed_text = control.buffer.text
+        inspector_sync()
+    target.components[key] = after
+    field.buffer = TextBuffer(safe_repr(after))
+    field.committed_text = field.buffer.text
+    state.files.history.record(lambda:apply(before),lambda:apply(after),'change '+key)
     message(f'Updated {key}')
     inspector_sync()
 
@@ -720,6 +761,15 @@ def unlink_relation(name):
 
 
 def focus_component_value(key):
+    keys=tuple(inspected().components)
+    if key in keys:
+        index=keys.index(key)
+        capacity=max(1,state.inspector.components.get('capacity',1))
+        scroll=state.inspector.scroll
+        if index < scroll or index >= scroll+capacity-1:
+            neighbour=min(len(keys)-1,index+1)
+            state.inspector.scroll=max(0,neighbour-capacity+1)
+            inspector_sync()
     for lbl, fld in state.component_rows:
         if fld.visible and getattr(fld, 'component_key', None) == key:
             state.ui.focus(fld)
@@ -992,7 +1042,8 @@ def detach_system_from_entity(ent, name):
         message('The active editor cannot detach itself')
         return
     try:
-        del ent.systems[name]
+        collection = ent.systems if name in ent.systems else ent.scripts
+        del collection[name]
         if state.code.relations.get('owner') is ent and state.code.components.get('system_name') == name:
             del state.code.relations['owner']
             state.code.components.pop('system_name', None)
@@ -1145,7 +1196,7 @@ def open_asset_picker_menu(ent, comp):
     actions = []
     if reg:
         for uid, entry in sorted(reg.entries(), key=lambda x: (x[1]["type"], x[1]["name"].lower())):
-            icon = ASSET_ICONS.get(entry["type"], "📦")
+            icon = reg.icon(uid)
             is_active = (isinstance(current_val, AssetRef) and current_val.id == uid)
             pref = "> " if is_active else "   "
             actions.append(dict(
