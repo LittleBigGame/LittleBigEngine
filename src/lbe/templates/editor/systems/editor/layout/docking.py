@@ -245,16 +245,28 @@ def layout():
     # Header layout (docked top with padding)
     header_h = state.header.components.get("h", 44)
     put(state.header, x=0, y=0, w=w, h=header_h)
-    btn_gap = 10
-    rx = w - 16
+    btn_gap = 6
     is_paused = bool(state.game.components.get("paused", False))
     put(state.run_button, text='Run (F5)' if is_paused else 'Pause (F5)')
-    for btn, width in ((state.panel_button, 174), (state.system_panel_button, 150),
-                       (state.detach_button, 150), (state.save_project_button, 130),
-                       (state.run_button, 110)):
-        rx -= width
-        put(btn, x=rx, y=8, w=width, h=28)
-        rx -= btn_gap
+    put(state.detach_button, text='Detach')
+    put(state.panel_button, text='Inspect entity')
+    toolbar = (state.run_button, state.save_project_button, state.detach_button,
+               state.system_panel_button, state.panel_button)
+    widths = [len(button.text) * state.ui.pitch + 20 for button in toolbar]
+    total = sum(widths) + btn_gap * (len(toolbar)-1)
+    wrapped = w < total + 250
+    header_h = 76 if wrapped else 44
+    put(state.header, h=header_h)
+    rx = 16 if wrapped else w-total-12
+    ty = 42 if wrapped else 10
+    for button, width in zip(toolbar, widths):
+        if wrapped and rx+width > w-12 and rx > 16:
+            rx = 16
+            ty += 30
+        put(button, x=rx, y=ty, w=width, h=24)
+        rx += width+btn_gap
+    header_h = max(header_h,ty+34)
+    put(state.header, h=header_h)
 
     # Top menu bar buttons layout
     if hasattr(state, "menu_file_btn"):

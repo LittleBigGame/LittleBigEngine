@@ -78,6 +78,7 @@ def open_specific_file(path):
         state.code.relations.pop('owner', None)
     state.reveal_file(path)
     message(f"Opened {rel_name}")
+    return True
 
 def open_file_menu(x=None, y=None):
     candidates = []
@@ -110,7 +111,16 @@ def on_path_field_click(control, event):
         return True
     return False
 
+def show_source_panel():
+    if not state.dock_tree.find_tab_group_with_panel('code_panel'):
+        state.toggle_panel_view('code_panel')
+    group = state.dock_tree.find_tab_group_with_panel('code_panel')
+    group.active = group.panels.index('code_panel')
+    state.layout()
+
+
 def prompt_rename_file():
+    show_source_panel()
     state.path_field.components["readonly"] = False
     state.path_field.components["ink"] = INK
     state.ui.focus(state.path_field)
@@ -239,6 +249,8 @@ def new_source_in_dir(folder_path):
     if not confirm_discard(("new", str(folder_path))):
         return
     f_path = Path(folder_path).resolve()
+    if not f_path.is_relative_to(state.project) or not f_path.is_dir():
+        raise ValueError('Choose an existing folder inside the project')
     rel_folder = f_path.relative_to(state.project) if f_path.is_relative_to(state.project) else f_path.name
     i = 1
     while (f_path / f"system_{i}.py").exists():
@@ -249,13 +261,17 @@ def new_source_in_dir(folder_path):
     state._saved_source = (new_name, state.code.buffer.text)
     state.code.source_path = str(state.project / new_name)
     state.code.components["system_name"] = f"system_{i}"
+    state.code.relations.pop('owner', None)
     save()
+    state.reveal_file(f_path / f"system_{i}.py")
+    show_source_panel()
     refresh_project_files()
     message(f"Created {new_name}")
 
 def prompt_rename_file_item(item):
     if item["type"] == "system":
-        open_specific_file(item["path"])
+        if not open_specific_file(item["path"]):
+            return
         prompt_rename_file()
     else:
         path = Path(item['path']).resolve()
@@ -296,7 +312,9 @@ def delete_file_item(item):
     message(f"Deleted '{path.name}'; references remain recoverable")
 
 def create_new_folder(parent_dir=None):
-    pdir = Path(parent_dir) if parent_dir else Path(state.project).resolve()
+    pdir = Path(parent_dir).resolve() if parent_dir else (state.project / state.file_explorer.components.get('view_root','systems/game')).resolve()
+    if not pdir.is_relative_to(state.project) or not pdir.is_dir():
+        raise ValueError('Choose an existing folder inside the project')
     base_name = "New Folder"
     candidate = pdir / base_name
     idx = 1
@@ -304,7 +322,8 @@ def create_new_folder(parent_dir=None):
         candidate = pdir / f"{base_name} ({idx})"
         idx += 1
     try:
-        candidate.mkdir(parents=True, exist_ok=True)
+        candidate.mkdir()
+        state.reveal_file(candidate)
         refresh_project_files()
         message(f"Created folder '{candidate.name}'")
     except Exception as e:

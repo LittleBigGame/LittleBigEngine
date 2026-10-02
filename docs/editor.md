@@ -249,3 +249,11 @@ Selecting an entity or locating/opening a file outside the current view widens
 the corresponding root to the nearest containing ancestor, expands its path,
 and scrolls to the selection. Each panel has an independent session scope;
 these controls do not reparent entities, move files or alter asset UUIDs.
+
+
+Creation from empty space in Project Files uses its current view root.
+**New folder** creates and selects a uniquely named folder. **New system script**
+creates a numbered Python file in that folder and reveals it in the source panel.
+Folder-specific creation uses the clicked folder. Rename actions restore the
+source panel for name entry if it was closed. Unsaved source protection still
+applies when changing the open file.

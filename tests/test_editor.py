@@ -17,6 +17,38 @@ except ImportError:
 
 
 class EditorTests(unittest.TestCase):
+    def test_scoped_creation_menu_creates_visible_folder_and_system(self):
+        ed = self.editor
+        folder = ed.project / 'systems/game'
+        ed.switch_left_tab('files')
+        ed.set_file_root(folder)
+        actions = ed.app.systems['app'].namespace['context_actions']({'file_explorer':True})
+        next(a for a in actions if a['label']=='+ New folder...')['run'](None)
+        created = folder / 'New Folder'
+        self.assertTrue(created.is_dir())
+        self.assertTrue(any(r.visible and r.file_item['path']==created for r in ed.file_explorer_rows))
+        ed.dock_tree.remove_panel('code_panel')
+        next(a for a in actions if a['label']=='+ New system script...')['run'](None)
+        source = folder / 'system_1.py'
+        self.assertTrue(source.is_file())
+        self.assertIsNotNone(self.runtime.assets.registry.get_id(source))
+        self.assertTrue(ed.code_panel.visible)
+        self.assertEqual(Path(ed.code.source_path),source)
+        self.assertTrue(any(r.visible and r.file_item['path']==source for r in ed.file_explorer_rows))
+        next(a for a in actions if a['label']=='+ New system script...')['run'](None)
+        self.assertTrue((folder/'system_2.py').is_file())
+        self.assertFalse((ed.project/'system_1.py').exists())
+        ed.dock_tree.remove_panel('code_panel')
+        ed.prompt_rename_file_item(dict(type='folder', path=created))
+        self.assertTrue(ed.code_panel.visible)
+        self.assertFalse(ed.path_field.readonly)
+        ed.path_field.buffer.text = 'Renamed folder'
+        ed.path_field.on_commit()
+        self.assertTrue((folder/'Renamed folder').is_dir())
+        self.assertFalse(created.exists())
+
+        self.assert_healthy()
+
     def test_panel_roots_default_to_game_and_promote_for_external_selection(self):
         reopened = load_project(self.window, RecordingGraphics(), Input(), self.directory.name + '-roots', template=template_path('editor'))
         self.addCleanup(reopened.close)
@@ -573,7 +605,7 @@ class EditorTests(unittest.TestCase):
         self.assertEqual(ed.code_panel.w, 1600 - 370 - 24)
 
         # Hit test in reflowed header button
-        self.assertEqual(ed.panel_button.x, 1600 - 190)
+        self.assertEqual(ed.panel_button.x + ed.panel_button.w, 1600 - 12)
         self.click(ed.panel_button)
         self.assertEqual(len(ed.extra_panels), 1)
 

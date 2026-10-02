@@ -1875,8 +1875,8 @@ def context_actions(target):
 
     if isinstance(target, dict) and target.get('file_explorer'):
         return [
-            dict(label="+ New folder...", run=lambda _: create_new_folder(state.project)),
-            dict(label="+ New system script...", run=lambda _: new_source()),
+            dict(label="+ New folder...", run=lambda _: create_new_folder(state.project / state.file_explorer.components.get("view_root", "systems/game"))),
+            dict(label="+ New system script...", run=lambda _: new_source_in_dir(state.project / state.file_explorer.components.get("view_root", "systems/game"))),
             dict(label="Refresh project files", run=lambda _: refresh_project_files()),
         ]
 
@@ -1886,7 +1886,7 @@ def context_actions(target):
             dict(label=f"Save / reload ('{cur_file}')", run=lambda _: save()),
             dict(label=f"Rename '{cur_file}'...", run=lambda _: prompt_rename_file()),
             dict(label="Open file...", run=lambda _: open_file_menu()),
-            dict(label="+ New system script...", run=lambda _: new_source()),
+            dict(label="+ New system script...", run=lambda _: new_source_in_dir(state.project / state.file_explorer.components.get("view_root", "systems/game"))),
         ]
         if state.code.components.get("system_name") and 'owner' in state.code.relations:
             owner = state.code.relations['owner']
