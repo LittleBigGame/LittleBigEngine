@@ -978,10 +978,13 @@ def open_change_type_menu(ent, comp):
 def open_attach_system_menu():
     ent = inspected()
     candidates = []
-    # Project directory
+    # Recursively scan project directory and subdirectories (e.g. systems/game)
     if state.project and state.project.exists():
-        for p in sorted(state.project.glob("*.py")):
-            if p.name in ("ui.py", "app.py", "hierarchy.py", "inspector.py", "text_area.py", "code_editor.py"):
+        for p in sorted(state.project.rglob("*.py")):
+            if p.name in ("ui.py", "app.py", "hierarchy.py", "inspector.py", "text_area.py", "code_editor.py", "docking.py", "file_explorer.py", "system_log.py", "effects.py", "files.py"):
+                continue
+            rel_parts = p.relative_to(state.project).parts if p.is_relative_to(state.project) else ()
+            if any(part in (".venv", "__pycache__", ".git") for part in rel_parts):
                 continue
             candidates.append(p)
     # Also check template directory
@@ -989,8 +992,8 @@ def open_attach_system_menu():
         from lbe.project import template_path
         tpl = template_path("editor")
         if tpl.exists():
-            for p in sorted(tpl.glob("*.py")):
-                if p.name in ("ui.py", "app.py", "hierarchy.py", "inspector.py", "text_area.py", "code_editor.py"):
+            for p in sorted(tpl.rglob("*.py")):
+                if p.name in ("ui.py", "app.py", "hierarchy.py", "inspector.py", "text_area.py", "code_editor.py", "docking.py", "file_explorer.py", "system_log.py", "effects.py", "files.py"):
                     continue
                 if not any(c.name == p.name for c in candidates):
                     candidates.append(p)
@@ -1000,9 +1003,10 @@ def open_attach_system_menu():
     actions = []
     for p in candidates:
         name = p.stem
-        already = name in ent.systems
+        already = name in ent.systems or name in ent.scripts
         if not already:
-            actions.append(dict(label=f"+ {name} ({p.name})", run=lambda e, path=p: attach_system_to_entity(ent, path)))
+            rel_label = str(p.relative_to(state.project)).replace("\\", "/") if p.is_relative_to(state.project) else p.name
+            actions.append(dict(label=f"+ {name} ({rel_label})", run=lambda e, path=p: attach_system_to_entity(ent, path)))
         else:
             actions.append(dict(label=f"{name} (attached)", run=None))
 
@@ -1014,9 +1018,16 @@ def open_attach_system_menu():
 
 
 def prompt_new_system(ent):
-    new_source()
+    target_dir = state.project / "systems" / "game" / "scripts"
+    if not target_dir.exists():
+        target_dir = state.project / "systems" / "game"
+    target_dir.mkdir(parents=True, exist_ok=True)
+    if hasattr(state, "new_source_in_dir"):
+        state.new_source_in_dir(target_dir, kind="script")
+    else:
+        new_source()
     state.code.relations['owner'] = ent
-    message(f"New system for {ent.components.get('name', ent.id)}: choose filename, edit, then Attach")
+    message(f"New script for {ent.components.get('name', ent.id)} in {target_dir.name}: edit source, then click Attach or Save")
 
 
 def attach_system_to_entity(ent, path):

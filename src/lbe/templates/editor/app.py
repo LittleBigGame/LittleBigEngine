@@ -503,6 +503,7 @@ def initialize():
     state.open_specific_file = open_specific_file
     state.switch_left_tab = switch_left_tab
     state.locate_in_file_explorer = locate_in_file_explorer
+    state.open_launcher_project = open_launcher_project
     if (assets.registry.get_path("333b5454-9934-566b-90c6-19ddb72f2da1") is not None and assets.registry.get_path("333b5454-9934-566b-90c6-19ddb72f2da1").exists()) and 'hierarchy' not in state.hierarchy.systems:
         state.hierarchy.systems.attach('hierarchy', assets["333b5454-9934-566b-90c6-19ddb72f2da1"])
     if (assets.registry.get_path("ed74702d-a604-5ce0-ae65-6b79c63918ee") is not None and assets.registry.get_path("ed74702d-a604-5ce0-ae65-6b79c63918ee").exists()) and 'file_explorer' not in state.file_explorer.systems:

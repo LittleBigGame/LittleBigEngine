@@ -29,14 +29,11 @@ def source_path():
     return path
 
 def new_source():
-    if not confirm_discard('new'):
-        return
-    state.path_field.buffer = TextBuffer('new_system.py')
-    state.code.buffer = TextBuffer('def update(dt):\n    pass\n')
-    state._saved_source = (state.path_field.buffer.text, state.code.buffer.text)
-    state.code.components.pop('system_name', None)
-    state.code.relations.pop('owner', None)
-    message('New source: right-click to Rename file... or Save / reload')
+    target_dir = state.project / "systems" / "game" / "scripts"
+    if not target_dir.exists():
+        target_dir = state.project / "systems" / "game"
+    target_dir.mkdir(parents=True, exist_ok=True)
+    new_source_in_dir(target_dir, kind="system")
 
 def open_path():
     path = source_path()
@@ -271,7 +268,7 @@ def new_source_in_dir(folder_path, *, kind="system"):
     state.reveal_file(f_path / f"{kind}_{i}.py")
     show_source_panel()
     refresh_project_files()
-    message(f"Created {new_name}")
+    message(f"New source: created {new_name}")
 
 def prompt_rename_file_item(item):
     if item["type"] in ("system","script"):

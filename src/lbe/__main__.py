@@ -51,12 +51,6 @@ def main() -> None:
     elif args.demo:
         template = template_path("demo")
         build = lambda w, g, i: load_project(w, g, i, "workspace-demo", template=template)
-    elif not args.launcher:
-        last_proj = get_last_project()
-        if last_proj is not None:
-            build = lambda w, g, i: load_project(w, g, i, last_proj)
-        else:
-            build = None
     else:
         build = None
 

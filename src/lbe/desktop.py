@@ -210,6 +210,8 @@ def launch(build, *, headless=False, frames=None, screenshot=None):
         runtime = create_launcher_runtime(window, graphics, input_state, switch_project)
     else:
         runtime = build(window, graphics, input_state)
+        if runtime is not None and "switch_project" not in runtime.services:
+            runtime.services["switch_project"] = switch_project
 
     elapsed = 0.0
     rendered = 0
@@ -256,8 +258,13 @@ def launch(build, *, headless=False, frames=None, screenshot=None):
             cur.step(min(elapsed, 0.1))
             if cur is not None:
                 for entity in cur.entities:
-                    for instance in entity.systems.values():
-                        failures.update((error.source, error.message) for error in instance.errors)
+                    for instance in tuple(entity.systems.values()) + tuple(entity.scripts.values()):
+                        if instance.errors:
+                            failures.update((error.source, error.message) for error in instance.errors)
+                            app_st = cur.services.get("application_state")
+                            if app_st and hasattr(app_st, "app") and not instance.running:
+                                last_err = instance.errors[-1]
+                                app_st.app.status = f"Error in {instance.name}: {last_err.message} | Press Ctrl+L for System Log"
         elapsed = 0.0
         graphics.finish()
         rendered += 1
