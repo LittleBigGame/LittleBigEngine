@@ -124,3 +124,48 @@ def stop():
         self.runtime.step(1)
         self.assertFalse(instance.running)
         self.assertIn("recursively", instance.errors[-1].message)
+
+    def test_run_dt_iterates_over_matching_children_with_self_injected(self):
+        c1 = self.runtime.create(parent=self.owner, x=0, y=0, vx=5, vy=-2)
+        c2 = self.runtime.create(parent=self.owner, x=10, y=20, vx=-1, vy=3)
+        static = self.runtime.create(parent=self.owner, x=5, y=5)
+        
+        script = SystemDefinition('''
+components = ("x", "y", "vx", "vy")
+
+def run(dt):
+    self.x += self.vx * dt
+    self.y += self.vy * dt
+''')
+        self.owner.systems.attach("mover", script)
+        self.runtime.step(0.5)
+        self.assertEqual((c1.x, c1.y), (2.5, -1.0))
+        self.assertEqual((c2.x, c2.y), (9.5, 21.5))
+        self.assertEqual((static.x, static.y), (5, 5))
+
+    def test_update_dt_with_self_and_space_near(self):
+        from lbe.space import SpatialIndex
+        self.runtime.services["space"] = SpatialIndex(self.runtime, cell_size=1.0)
+        
+        p1 = self.runtime.create(parent=self.owner, x=0.2, y=0.3, w=0.5, h=0.5, name="ball1")
+        p2 = self.runtime.create(parent=self.owner, x=0.6, y=0.7, w=0.5, h=0.5, name="ball2")
+        far = self.runtime.create(parent=self.owner, x=50.0, y=50.0, w=0.5, h=0.5, name="ball_far")
+        
+        collected = []
+        self.runtime.services["collected"] = collected
+        
+        script = SystemDefinition('''
+components = ("x", "y")
+
+def run(dt):
+    nearby = space.near(self)
+    for other in nearby:
+        collected.append((self.name, other.name))
+''')
+        self.owner.systems.attach("collider", script)
+        self.runtime.step(0.1)
+        self.assertIn(("ball1", "ball2"), collected)
+        self.assertIn(("ball2", "ball1"), collected)
+        self.assertNotIn(("ball1", "ball_far"), collected)
+        self.runtime.services["space"].close()
+

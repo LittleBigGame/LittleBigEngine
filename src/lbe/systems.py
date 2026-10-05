@@ -149,6 +149,7 @@ class SystemInstance:
         self.namespace.update({
             "__name__": f"lbe_script_{self.entity.id.hex}_{self.name}",
             "__file__": self.definition.path,
+            "self": self.entity,
             "entity": self.entity,
             "runtime": runtime,
             "system": self,
@@ -201,6 +202,12 @@ class SystemInstance:
             pname = list(params.keys())[0] if param_count else None
             if pname == 'dt' and args:
                 func(args[0])
+            elif pname in ('self', 'entity') and args and not isinstance(args[0], (int, float)):
+                func(args[0])
+            elif pname in ('self', 'entity'):
+                func(self.entity)
+            elif args:
+                func(args[0])
             else:
                 func(self.entity)
         elif param_count == 2:
@@ -208,30 +215,74 @@ class SystemInstance:
         else:
             func(*args)
 
+    def _invoke_target(self, func, target, dt):
+        import inspect
+        try:
+            sig = inspect.signature(func)
+            params = sig.parameters
+            param_count = len(params)
+        except (ValueError, TypeError):
+            param_count = None
+
+        if param_count == 0:
+            func()
+        elif param_count == 1:
+            pname = list(params.keys())[0] if param_count else None
+            if pname in ("entity", "e", "ent", "target"):
+                func(target)
+            else:
+                func(dt)
+        elif param_count == 2:
+            pnames = list(params.keys())
+            if pnames[0] in ("dt", "delta") and pnames[1] in ("entity", "self", "e"):
+                func(dt, target)
+            else:
+                func(target, dt)
+        else:
+            try:
+                func(dt)
+            except TypeError:
+                func(target)
+
     def call(self, phase, *args):
         try:
+            dt = args[0] if args else 0.0
             if phase == "update":
-                if self.definition.components:
-                    missing = [k for k in self.definition.components if k not in self.entity.components]
-                    if missing:
-                        raise ValueError(f"Missing required components: {', '.join(missing)}")
-                callbacks = []
-                if callable(self.namespace.get("update")):
-                    callbacks.append(("update", self.namespace.get("update")))
-                if callable(self.namespace.get("run")):
-                    callbacks.append(("run", self.namespace.get("run")))
-                if not callbacks:
+                has_update = callable(self.namespace.get("update"))
+                has_run = callable(self.namespace.get("run"))
+                if not has_update and not has_run:
                     return
+
                 with self.entity.runtime.changes.context(self.entity, self.name, phase):
                     self.entity.runtime.events.emit('system.call', self.entity, self.name, phase)
-                    for cb_name, cb in callbacks:
-                        self._invoke(cb, *args)
+
+                    if has_update:
+                        self.namespace["self"] = self.entity
+                        self._invoke(self.namespace["update"], *args)
+
+                    if has_run:
+                        if self.definition.components:
+                            targets = list(self.entity.query(*self.definition.components, recursive=True))
+                            if not targets and all(c in self.entity.components for c in self.definition.components):
+                                targets = [self.entity]
+                        else:
+                            targets = list(self.entity.children)
+                            if not targets:
+                                targets = [self.entity]
+
+                        run_func = self.namespace["run"]
+                        for target in targets:
+                            self.namespace["self"] = target
+                            self._invoke_target(run_func, target, dt)
+
+                        self.namespace["self"] = self.entity
             else:
                 callback = self.namespace.get(phase)
                 if callback is None:
                     return
                 with self.entity.runtime.changes.context(self.entity, self.name, phase):
                     self.entity.runtime.events.emit('system.call', self.entity, self.name, phase)
+                    self.namespace["self"] = self.entity
                     self._invoke(callback, *args)
         except Exception as error:
             self._error(phase, error)

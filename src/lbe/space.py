@@ -43,7 +43,7 @@ class SpatialIndex:
     Oversized objects are kept separately rather than allocating unbounded cells.
     """
 
-    def __init__(self, runtime, cell_size=16.0, *, scope=None, bounds_fn=bounds):
+    def __init__(self, runtime, cell_size=1.0, *, scope=None, bounds_fn=bounds):
         if not isfinite(cell_size) or cell_size <= 0:
             raise ValueError("cell_size must be finite and positive")
         self.cell_size = cell_size
@@ -101,15 +101,31 @@ class SpatialIndex:
                 for entity in change.entity.descendants:
                     self._refresh(entity)
 
-    def configure(self, *, scope=None, bounds_fn=bounds):
+    def configure(self, *, scope=None, bounds_fn=bounds, cell_size=None):
         """Change coordinate/membership policy without changing the public query operations."""
         self.scope, self.bounds_fn = scope, bounds_fn
+        if cell_size is not None:
+            if not isfinite(cell_size) or cell_size <= 0:
+                raise ValueError("cell_size must be finite and positive")
+            self.cell_size = cell_size
         self._bounds.clear()
         self._membership.clear()
         self._cells.clear()
         self._large.clear()
         for entity in self.runtime.entities:
             self._refresh(entity)
+
+    def near(self, entity):
+        """Get any entities in the same space partition(s) as entity, excluding entity itself."""
+        if entity not in self._membership:
+            self._refresh(entity)
+        keys = self._membership.get(entity, ())
+        nearby = set()
+        for key in keys:
+            nearby.update(self._cells.get(key, ()))
+        nearby.update(self._large)
+        nearby.discard(entity)
+        return tuple(sorted((e for e in nearby if getattr(e, "alive", True)), key=lambda e: e.id.int))
 
     def query(self, x, y, w=0, h=0):
         if any(not isinstance(v, (int, float)) or not isfinite(v) for v in (x, y, w, h)):

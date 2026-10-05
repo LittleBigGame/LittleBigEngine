@@ -42,7 +42,38 @@ class ScriptInstance(SystemInstance):
             if missing:
                 raise ValueError('Missing components: '+', '.join(missing))
             with self.entity.runtime.changes.context(self.entity,self.name,'run'):
-                return self.namespace['run'](self.entity,*args,**kwargs)
+                self.namespace['self'] = self.entity
+                run_func = self.namespace['run']
+                import inspect
+                try:
+                    sig = inspect.signature(run_func)
+                    params = sig.parameters
+                    param_count = len(params)
+                except (ValueError, TypeError):
+                    params = {}
+                    param_count = None
+
+                if param_count == 0:
+                    return run_func()
+                elif param_count == 1:
+                    pname = list(params.keys())[0]
+                    if pname in ("entity", "e", "ent", "target"):
+                        return run_func(self.entity)
+                    elif pname in ("dt", "delta") and args and isinstance(args[0], (int, float)):
+                        return run_func(args[0])
+                    elif args:
+                        return run_func(args[0])
+                    else:
+                        return run_func(self.entity)
+                elif param_count == 2:
+                    pnames = list(params.keys())
+                    dt = args[0] if (args and isinstance(args[0], (int, float))) else (args[1] if (len(args) > 1 and isinstance(args[1], (int, float))) else 0.0)
+                    if pnames[0] in ("dt", "delta"):
+                        return run_func(dt, self.entity)
+                    else:
+                        return run_func(self.entity, dt)
+                else:
+                    return run_func(self.entity, *args, **kwargs)
         except Exception as error:
             # A failed call does not disable the orchestrator or other entities.
             self.errors.append(Diagnostic(f'{self.name}.run',str(error),traceback.format_exc()))
