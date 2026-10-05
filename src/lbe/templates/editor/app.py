@@ -272,6 +272,12 @@ def initialize():
     if project_data and project_data.get("entities"):
         activate_entities(restored.values(), state.runtime, project_dir=project)
 
+    if "render" not in state.game.systems:
+        render_path = state.project / "render.py"
+        if render_path.exists():
+            render_id = assets.registry.register(render_path)
+            state.game.systems.attach("render", assets[render_id])
+
     drawing = assets["f084e424-d2d9-5fd1-8624-63580396274c"]
     outline = assets["dbc0d180-5a28-56a1-bc9c-85d63174e431"]
     for target in state.game.descendants:
@@ -1055,12 +1061,17 @@ def inspect_system():
 def detach_system():
     owner = state.code.relations.get('owner')
     name = state.code.components.get('system_name')
-    if owner is None or name not in owner.systems:
-        raise ValueError('Open an attached system first')
+    if owner is None or (name not in owner.systems and name not in owner.scripts):
+        message('Open an attached system first')
+        return
     if owner is state.app and name in ('app', 'ui'):
-        raise ValueError('The active editor cannot detach itself')
-    del owner.systems[name]
-    message(f'Detached {name}')
+        message('The active editor cannot detach itself')
+        return
+    if owner is state.game and name == 'render':
+        message('Cannot detach core render system from Game')
+        return
+    detach_system_from_entity(owner, name)
+
 
 def open_panel(system_name=None, target=None, component=None):
     target = target or selected()

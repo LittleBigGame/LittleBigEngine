@@ -347,19 +347,21 @@ def inspector_sync():
                 state.system_edit_buttons.append(e_btn)
                 state.system_detach_buttons.append(d_btn)
 
-            btn_edit_w = 52
-            s_w = max(40, ip.w - 24 - btn_edit_w - 6)
+            btn_edit_w = 46
+            btn_del_w = 26
+            s_w = max(40, ip.w - 24 - btn_edit_w - btn_del_w - 8)
 
             for index in range(len(state.system_rows)):
                 s_btn = state.system_rows[index]
                 e_btn = state.system_edit_buttons[index]
                 d_btn = state.system_detach_buttons[index]
-                put(d_btn, visible=False)
                 shown = (index < max_sys) and (cur_y + 24 <= max_bottom)
                 put(s_btn, visible=shown)
                 put(e_btn, visible=shown)
                 if shown:
                     owner, name, instance, effect_colour = systems[index]
+                    can_detach = not (owner is state.game and name == 'render')
+                    put(d_btn, visible=can_detach)
                     try:
                         identity = assets.registry.get_id(instance.definition.path) if instance.definition.path else None
                     except ValueError:
@@ -369,11 +371,16 @@ def inspector_sync():
                     s_ink = (255, 120, 120) if instance.errors else (effect_colour or INK)
                     put(s_btn, x=ip.x + 12, y=cur_y, w=s_w, h=24, text=s_title, ink=s_ink)
                     put(e_btn, x=ip.x + 12 + s_w + 4, y=cur_y, w=btn_edit_w, h=24, text='Edit')
+                    if can_detach:
+                        put(d_btn, x=ip.x + 12 + s_w + 4 + btn_edit_w + 4, y=cur_y, w=btn_del_w, h=24, text='✕', color=(55, 30, 35), hover_color=(90, 35, 45))
                     s_btn.system_key = (owner.id, name)
                     s_btn.asset_id = identity
                     s_btn.action = lambda e=owner, n=name: open_system(e, n)
                     e_btn.action = lambda e=owner, n=name: open_system(e, n)
+                    d_btn.action = lambda e=owner, n=name: detach_system_from_entity(e, n)
                     cur_y += 26
+                else:
+                    put(d_btn, visible=False)
             cur_y += 4
 
         # Divider 3: between Systems and Links
@@ -1064,6 +1071,9 @@ def attach_system_to_entity(ent, path):
 def detach_system_from_entity(ent, name):
     if ent is state.app and name in ('app', 'ui'):
         message('The active editor cannot detach itself')
+        return
+    if ent is state.game and name == 'render':
+        message('Cannot detach core render system from Game')
         return
     try:
         collection = ent.systems if name in ent.systems else ent.scripts
