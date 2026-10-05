@@ -1022,12 +1022,25 @@ def prompt_new_system(ent):
     if not target_dir.exists():
         target_dir = state.project / "systems" / "game"
     target_dir.mkdir(parents=True, exist_ok=True)
-    if hasattr(state, "new_source_in_dir"):
-        state.new_source_in_dir(target_dir, kind="script")
-    else:
-        new_source()
+    i = 1
+    while (target_dir / f"script_{i}.py").exists():
+        i += 1
+    script_path = target_dir / f"script_{i}.py"
+    initial_text = 'components = ("x", "y", "vx", "vy")\n\ndef run(entity):\n    entity.x += getattr(entity, "vx", 0.0)\n    entity.y += getattr(entity, "vy", 0.0)\n'
+    script_path.write_text(initial_text, encoding="utf-8")
+    
+    attach_system_to_entity(ent, script_path)
+    if hasattr(state, "open_specific_file"):
+        state.open_specific_file(script_path)
+    elif hasattr(state, "new_source_in_dir"):
+        rel_name = str(script_path.relative_to(state.project)).replace("\\", "/")
+        state.path_field.buffer = TextBuffer(rel_name)
+        state.code.buffer = TextBuffer(initial_text)
+        state._saved_source = (rel_name, initial_text)
+        state.code.source_path = str(script_path)
+        state.code.components["system_name"] = script_path.stem
     state.code.relations['owner'] = ent
-    message(f"New script for {ent.components.get('name', ent.id)} in {target_dir.name}: edit source, then click Attach or Save")
+    message(f"Created and attached {script_path.name} to {ent.components.get('name', ent.id)}")
 
 
 def attach_system_to_entity(ent, path):

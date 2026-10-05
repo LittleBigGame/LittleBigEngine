@@ -62,11 +62,26 @@ def draw():
                 graphics.rect(cell_x + t, cell_y + t, cell_size - 2 * t, cell_size - 2 * t, color=fill_color, key=(key_b, "f"), layer=0)
 
         # The system orchestrates; each target script call is backend-isolated.
-        drawing = assets["f084e424-d2d9-5fd1-8624-63580396274c"]
-        for target in query(drawing, *drawing.components, recursive=True):
-            target.run(drawing)
+        drawn_ids = set()
+        drawing = assets.get("f084e424-d2d9-5fd1-8624-63580396274c")
+        if drawing:
+            for target in query(drawing, *drawing.components, recursive=True):
+                target.run(drawing)
+                drawn_ids.add(target.id)
+
+        for target in query("x", "y", "color", recursive=True):
+            if target.id in drawn_ids:
+                continue
+            tx, ty = getattr(target, "x", 0.0), getattr(target, "y", 0.0)
+            tw = getattr(target, "w", 1.5)
+            th = getattr(target, "h", 1.5)
+            if tx + tw < view_min_x or tx > view_max_x or ty + th < view_min_y or ty > view_max_y:
+                continue
+            clr = target.components.get("color")
+            if isinstance(clr, (list, tuple)) and len(clr) >= 3:
+                graphics.rect(tx, ty, tw, th, color=clr[:3], key=(target.id.hex, "fallback_draw"), layer=1)
 
         selected = entity.relations.get("selection")
-        outline = assets["dbc0d180-5a28-56a1-bc9c-85d63174e431"]
-        if selected is not None and selected.alive and outline in selected.scripts:
+        outline = assets.get("dbc0d180-5a28-56a1-bc9c-85d63174e431")
+        if selected is not None and selected.alive and outline and outline in selected.scripts:
             selected.run(outline, entity, zoom)

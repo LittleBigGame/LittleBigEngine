@@ -53,6 +53,8 @@ def create_launcher_runtime(window, graphics, input_state, on_select_project):
     path_lbl = ui.create(path_row, "PathLbl", "label", text="Location:", size=10, w=70, h=26, color=(145, 163, 183, 255))
     path_field = ui.field(path_row, "PathField", text=str(state.current_dir), w=700, h=32)
 
+    from .user_state import save_last_directory
+
     def do_navigate_path():
         target_str = path_field.buffer.text.strip()
         if target_str:
@@ -60,6 +62,7 @@ def create_launcher_runtime(window, graphics, input_state, on_select_project):
             if p.exists() and p.is_dir():
                 state.current_dir = p
                 state.page = 0
+                save_last_directory(state.current_dir)
             else:
                 status_lbl.text = f"Invalid directory path: {target_str}"
                 status_lbl.color = (248, 81, 73, 255)
@@ -71,6 +74,7 @@ def create_launcher_runtime(window, graphics, input_state, on_select_project):
         if state.current_dir.parent != state.current_dir:
             state.current_dir = state.current_dir.parent.resolve()
             state.page = 0
+            save_last_directory(state.current_dir)
 
     btn_up = ui.button(path_row, "BtnUp", "⯅ Up", do_navigate_up, w=65, h=30)
 
@@ -88,6 +92,7 @@ def create_launcher_runtime(window, graphics, input_state, on_select_project):
             def handler():
                 state.current_dir = Path(drive_path).resolve()
                 state.page = 0
+                save_last_directory(state.current_dir)
             return handler
         d_btn = ui.button(action_row, f"Drive_{d}", d, make_drive_handler(d), w=45, h=28, color=(38, 55, 75))
         drive_buttons.append(d_btn)
@@ -110,7 +115,6 @@ def create_launcher_runtime(window, graphics, input_state, on_select_project):
 
     status_lbl = ui.create(container, "StatusLbl", "label", text="", size=10, w=1100, h=18, color=(248, 81, 73, 255))
 
-    # Step 1 -> Step 2 transition button
     def do_initiate_new_project():
         name_str = name_field.buffer.text.strip()
         if not name_str:
@@ -125,7 +129,7 @@ def create_launcher_runtime(window, graphics, input_state, on_select_project):
             target_dir = state.current_dir / folder_name
             ui.set_text(name_field, name_str)
         
-        # Enter Step 2: Pick template to copy from
+        save_last_directory(state.current_dir)
         state.target_project_path = target_dir
         state.mode = "pick_template"
         try:
@@ -158,16 +162,19 @@ def create_launcher_runtime(window, graphics, input_state, on_select_project):
     # Step 2 specific buttons (Default template & Cancel)
     def do_use_default_editor():
         if state.target_project_path:
+            save_last_directory(state.target_project_path.parent)
             on_select_project(state.target_project_path, template=template_path("editor"))
 
     btn_use_default_editor = ui.button(action_row, "BtnDefaultEditor", "🚀 Copy Default LBE v1 Editor", do_use_default_editor, w=240, h=28, color=(38, 95, 85))
 
     def do_cancel_template_picker():
         state.mode = "browse"
+        target = state.target_project_path.parent if state.target_project_path else start_dir
         state.target_project_path = None
-        state.current_dir = user_docs.resolve()
+        state.current_dir = target.resolve()
         state.page = 0
         state.last_dir = None
+        save_last_directory(state.current_dir)
         status_lbl.text = "Project creation cancelled"
         status_lbl.color = (145, 163, 183, 255)
 
@@ -313,7 +320,7 @@ def create_launcher_runtime(window, graphics, input_state, on_select_project):
                     btn_color = (30, 42, 56)
                     btn_hover = (48, 68, 90)
                     ink_color = (220, 230, 239, 255)
-                    action = (lambda target=p: lambda: (setattr(state, "current_dir", target), setattr(state, "page", 0)))()
+                    action = (lambda target=p: lambda: (setattr(state, "current_dir", target), setattr(state, "page", 0), save_last_directory(target)))()
                 else:
                     ext = p.suffix.lower()
                     icon = "🐍" if ext == ".py" else ("⚙️" if ext == ".json" else ("🖼️" if ext in (".png", ".jpg") else "📄"))

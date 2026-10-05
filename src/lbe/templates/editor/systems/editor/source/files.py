@@ -209,13 +209,13 @@ def save():
     definition = state.runtime.assets.system(path)
     count = 0
     for entity in state.runtime.entities:
-        for collection in (entity.systems,entity.scripts):
-          for name, instance in tuple(collection.items()):
-            if Path(instance.definition.path) == path:
-                updated = collection.reload(name, definition)
-                if updated.definition is not definition or not updated.running:
-                    raise RuntimeError(f"{name}: {(updated.errors[-1].message if updated.errors else 'reload failed')}")
-                count += 1
+        for collection in (entity.systems, entity.scripts):
+            for name, instance in tuple(collection.items()):
+                if Path(instance.definition.path) == path:
+                    updated = collection.reload(name, definition)
+                    if updated.definition is not definition or not updated.running:
+                        raise RuntimeError(f"{name}: {(updated.errors[-1].message if updated.errors else 'reload failed')}")
+                    count += 1
     save_editor_project()
     message(f'Saved {path.name}; reloaded {count} attachment(s)')
 
@@ -223,16 +223,23 @@ def attach():
     save()
     path = source_path()
     definition = state.runtime.assets.system(path)
-    if path.stem in selected().systems:
-        instance = selected().systems.reload(path.stem, definition)
+    owner = state.code.relations.get('owner') or selected()
+    if owner is None:
+        owner = state.game
+    if path.stem in owner.systems:
+        instance = owner.systems.reload(path.stem, definition)
+    elif path.stem in owner.scripts:
+        instance = owner.scripts.reload(path.stem, definition)
     else:
-        instance = selected().systems.attach(path.stem, definition)
+        instance = owner.systems.attach(path.stem, definition)
     if not instance.running:
-        raise RuntimeError(instance.errors[-1].message)
+        err = instance.errors[-1].message if instance.errors else "Attachment failed"
+        raise RuntimeError(err)
     state.code.system_name = path.stem
-    state.code.relations['owner'] = selected()
+    state.code.relations['owner'] = owner
     save_editor_project()
-    message(f"Attached {path.stem} to {selected().components.get('name', selected().id)}")
+    inspector_sync()
+    message(f"Attached {path.stem} to {owner.components.get('name', owner.id)}")
 
 def refresh_project_files():
     reg = getattr(state.runtime.assets, "registry", None)
@@ -262,7 +269,6 @@ def new_source_in_dir(folder_path, *, kind="system"):
     state._saved_source = (new_name, state.code.buffer.text)
     state.code.source_path = str(state.project / new_name)
     state.code.components["system_name"] = f"{kind}_{i}"
-    state.code.relations.pop('owner', None)
     save()
     state.files.record_create(f_path / f"{kind}_{i}.py", save=save_editor_project)
     state.reveal_file(f_path / f"{kind}_{i}.py")

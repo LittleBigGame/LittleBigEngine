@@ -263,7 +263,7 @@ def initialize():
         if (assets.registry.get_path("cd53cb27-f893-5a6b-a3d2-52f550f7d35d") is not None and assets.registry.get_path("cd53cb27-f893-5a6b-a3d2-52f550f7d35d").exists()):
             state.game.systems.attach("render", assets["cd53cb27-f893-5a6b-a3d2-52f550f7d35d"])
 
-    state.camera = create(parent=entity, name="Camera", x=0.0, y=0.0, zoom=48.0)
+    state.camera = create(parent=entity, name="Camera", x=0.0, y=0.0, zoom=32.0)
     state.viewport_panel = state.ui.create(entity, "ViewportPanel", "panel", color=PANEL, layer=0)
     state.viewport = state.ui.create(state.viewport_panel, "Viewport", "surface", color=(12, 18, 25), layer=0)
     space.configure(scope=state.game, bounds_fn=world_bounds)
@@ -2069,10 +2069,12 @@ def context_add_child(target):
 
 
 def context_focus_camera(target):
-    x,y = world_position(target, state.game)
-    w,h = target.components.get('w',0),target.components.get('h',0)
-    state.camera.x, state.camera.y = x+w/2,y+h/2
-    state.camera.zoom = max(0.1,min(48,max(1,state.viewport.w-48)/max(1,w),max(1,state.viewport.h-48)/max(1,h)))
+    x, y = world_position(target, state.game)
+    w, h = target.components.get('w', 0), target.components.get('h', 0)
+    state.camera.x, state.camera.y = x + w / 2, y + h / 2
+    vw = max(1.0, getattr(state.viewport, "w", 800) - 48)
+    vh = max(1.0, getattr(state.viewport, "h", 600) - 48)
+    state.camera.zoom = max(8.0, min(36.0, vw / max(1.0, w), vh / max(1.0, h)))
     save_editor_project()
 
 
@@ -2087,9 +2089,13 @@ def frame_game():
     if not boxes:
         message('No drawable game entities to frame')
         return
-    left,bottom = min(b[0] for b in boxes),min(b[1] for b in boxes)
-    right,top = max(b[2] for b in boxes),max(b[3] for b in boxes)
-    state.camera.x, state.camera.y = (left+right)/2,(bottom+top)/2
-    state.camera.zoom = max(0.1,min(max(1,state.viewport.w-48)/max(1,right-left),max(1,state.viewport.h-48)/max(1,top-bottom),256))
+    left, bottom = min(b[0] for b in boxes), min(b[1] for b in boxes)
+    right, top = max(b[2] for b in boxes), max(b[3] for b in boxes)
+    state.camera.x, state.camera.y = (left + right) / 2, (bottom + top) / 2
+    bw = max(1.0, right - left)
+    bh = max(1.0, top - bottom)
+    vw = max(1.0, getattr(state.viewport, "w", 800) - 48)
+    vh = max(1.0, getattr(state.viewport, "h", 600) - 48)
+    state.camera.zoom = max(8.0, min(36.0, vw / bw, vh / bh))
     save_editor_project()
     message('Framed drawable game entities')

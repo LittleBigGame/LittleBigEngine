@@ -97,6 +97,12 @@ class Assets:
     def __getitem__(self, key):
         return self.resolve(key)
 
+    def __contains__(self, key):
+        try:
+            return self.get(key) is not None
+        except Exception:
+            return False
+
 
 class SystemInstance:
     def __init__(self, entity, name, definition):
@@ -126,7 +132,7 @@ class SystemInstance:
 
     @property
     def lifecycle(self):
-        return tuple(name for name in ("start", "update", "draw", "stop")
+        return tuple(name for name in ("start", "update", "run", "draw", "stop")
                      if callable(self.namespace.get(name)))
 
     def _error(self, phase, error):
@@ -161,7 +167,7 @@ class SystemInstance:
             with runtime.changes.context(self.entity, self.name, 'initialize'):
                 runtime.events.emit('system.call', self.entity, self.name, 'initialize')
                 exec(self.definition.code, self.namespace)
-            for name in ("start", "update", "draw", "stop"):
+            for name in ("start", "update", "run", "draw", "stop"):
                 value = self.namespace.get(name)
                 if value is not None and not callable(value):
                     raise TypeError(f"{name} must be callable")
@@ -178,14 +184,55 @@ class SystemInstance:
             self.running = True
             self.call("start")
 
-    def call(self, phase, *args):
-        callback = self.namespace.get(phase)
-        if callback is None:
+    def _invoke(self, func, *args):
+        if not callable(func):
             return
+        import inspect
         try:
-            with self.entity.runtime.changes.context(self.entity, self.name, phase):
-                self.entity.runtime.events.emit('system.call', self.entity, self.name, phase)
-                callback(*args)
+            sig = inspect.signature(func)
+            params = sig.parameters
+            param_count = len(params)
+        except (ValueError, TypeError):
+            param_count = None
+
+        if param_count == 0:
+            func()
+        elif param_count == 1:
+            pname = list(params.keys())[0] if param_count else None
+            if pname == 'dt' and args:
+                func(args[0])
+            else:
+                func(self.entity)
+        elif param_count == 2:
+            func(self.entity, args[0] if args else 0.0)
+        else:
+            func(*args)
+
+    def call(self, phase, *args):
+        try:
+            if phase == "update":
+                if self.definition.components:
+                    missing = [k for k in self.definition.components if k not in self.entity.components]
+                    if missing:
+                        raise ValueError(f"Missing required components: {', '.join(missing)}")
+                callbacks = []
+                if callable(self.namespace.get("update")):
+                    callbacks.append(("update", self.namespace.get("update")))
+                if callable(self.namespace.get("run")):
+                    callbacks.append(("run", self.namespace.get("run")))
+                if not callbacks:
+                    return
+                with self.entity.runtime.changes.context(self.entity, self.name, phase):
+                    self.entity.runtime.events.emit('system.call', self.entity, self.name, phase)
+                    for cb_name, cb in callbacks:
+                        self._invoke(cb, *args)
+            else:
+                callback = self.namespace.get(phase)
+                if callback is None:
+                    return
+                with self.entity.runtime.changes.context(self.entity, self.name, phase):
+                    self.entity.runtime.events.emit('system.call', self.entity, self.name, phase)
+                    self._invoke(callback, *args)
         except Exception as error:
             self._error(phase, error)
 

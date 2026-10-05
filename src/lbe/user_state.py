@@ -48,10 +48,28 @@ def save_last_project(directory: str | Path) -> None:
     try:
         p = Path(directory).resolve()
         if p.exists() and p.is_dir():
+            import tempfile
+            temp_dir = Path(tempfile.gettempdir()).resolve()
+            if p == temp_dir or (p.parent == temp_dir and p.name.startswith("tmp")):
+                set_user_state(last_project=str(p))
+                return
             set_user_state(
                 last_project=str(p),
                 last_directory=str(p.parent if p.is_dir() else p)
             )
+    except Exception:
+        pass
+
+
+def save_last_directory(directory: str | Path) -> None:
+    try:
+        p = Path(directory).resolve()
+        if p.exists() and p.is_dir():
+            import tempfile
+            temp_dir = Path(tempfile.gettempdir()).resolve()
+            if p == temp_dir or (p.parent == temp_dir and p.name.startswith("tmp")):
+                return
+            set_user_state(last_directory=str(p))
     except Exception:
         pass
 
@@ -62,11 +80,16 @@ def get_last_directory() -> Path:
     if path_str:
         try:
             p = Path(path_str).resolve()
-            if p.exists():
-                return p if p.is_dir() else p.parent
+            import tempfile
+            temp_dir = Path(tempfile.gettempdir()).resolve()
+            if p != temp_dir:
+                if p.exists() and p.is_dir():
+                    return p
+                if p.parent.exists() and p.parent.is_dir() and p.parent != temp_dir:
+                    return p.parent
         except Exception:
             pass
-    user_docs = Path.home() / "Documents"
-    if user_docs.exists():
-        return user_docs.resolve()
+    for cand in [Path("F:/LBE Projects"), Path("F:/"), Path.home() / "Documents", Path.home()]:
+        if cand.exists():
+            return cand.resolve()
     return Path.home().resolve()
