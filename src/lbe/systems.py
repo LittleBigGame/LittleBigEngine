@@ -186,63 +186,12 @@ class SystemInstance:
             self.call("start")
 
     def _invoke(self, func, *args):
-        if not callable(func):
-            return
-        import inspect
-        try:
-            sig = inspect.signature(func)
-            params = sig.parameters
-            param_count = len(params)
-        except (ValueError, TypeError):
-            param_count = None
-
-        if param_count == 0:
-            func()
-        elif param_count == 1:
-            pname = list(params.keys())[0] if param_count else None
-            if pname == 'dt' and args:
-                func(args[0])
-            elif pname in ('self', 'entity') and args and not isinstance(args[0], (int, float)):
-                func(args[0])
-            elif pname in ('self', 'entity'):
-                func(self.entity)
-            elif args:
-                func(args[0])
-            else:
-                func(self.entity)
-        elif param_count == 2:
-            func(self.entity, args[0] if args else 0.0)
-        else:
-            func(*args)
+        from .invocation import invoke
+        return invoke(func, self.entity, args)
 
     def _invoke_target(self, func, target, dt):
-        import inspect
-        try:
-            sig = inspect.signature(func)
-            params = sig.parameters
-            param_count = len(params)
-        except (ValueError, TypeError):
-            param_count = None
-
-        if param_count == 0:
-            func()
-        elif param_count == 1:
-            pname = list(params.keys())[0] if param_count else None
-            if pname in ("entity", "e", "ent", "target"):
-                func(target)
-            else:
-                func(dt)
-        elif param_count == 2:
-            pnames = list(params.keys())
-            if pnames[0] in ("dt", "delta") and pnames[1] in ("entity", "self", "e"):
-                func(dt, target)
-            else:
-                func(target, dt)
-        else:
-            try:
-                func(dt)
-            except TypeError:
-                func(target)
+        from .invocation import invoke
+        return invoke(func, target, (dt,))
 
     def call(self, phase, *args):
         try:
@@ -276,6 +225,8 @@ class SystemInstance:
 
                         run_func = self.namespace["run"]
                         for target in targets:
+                            if not target.alive or not self.running:
+                                continue
                             self.namespace["self"] = target
                             self._invoke_target(run_func, target, dt)
 
@@ -290,6 +241,8 @@ class SystemInstance:
                     self._invoke(callback, *args)
         except Exception as error:
             self._error(phase, error)
+        finally:
+            self.namespace['self'] = self.entity
 
     def listen(self, name, callback):
         """Subscribe with automatic cleanup when this attachment stops."""
@@ -385,21 +338,7 @@ class Systems(MutableMapping):
             current.errors.append(Diagnostic(f"{name}.compile", str(error), traceback.format_exc()))
             self._entity._changed("system.error", name)
             return current
-        candidate = SystemInstance(self._entity, name, definition)
-        if not candidate.initialize():
-            current.errors.extend(candidate.errors)
-            return current
-        if not self._entity.alive or self._values.get(name) is not current:
-            candidate.stop()
-            return current
-        current.stop()
-        if not self._entity.alive or self._values.get(name) is not current:
-            candidate.stop()
-            return current
-        self._values[name] = candidate
-        candidate.start()
-        self._entity._changed("system.reload", name)
-        return candidate
+        return reload_attachment(self, name, definition, SystemInstance, 'system')
 
     def move(self, name, index):
         self._entity._check()
@@ -427,3 +366,35 @@ class Systems(MutableMapping):
         instance.namespace["__file__"] = str(path)
         self._entity._changed("system.relocate", new_name)
         return instance
+
+
+def reload_attachment(collection, name, definition, instance_type, role):
+    """Retain the previous attachment and managed world if activation fails."""
+    from .checkpoint import RuntimeCheckpoint
+    current = collection._values[name]
+    runtime = collection._entity.runtime
+    checkpoint = RuntimeCheckpoint(runtime)
+    candidate = instance_type(collection._entity, name, definition)
+    try:
+        if not candidate.initialize():
+            raise RuntimeError('initialization failed')
+        if not collection._entity.alive or collection._values.get(name) is not current:
+            raise RuntimeError('Reload changed its owning attachment during initialization')
+        current.stop()
+        if not collection._entity.alive or collection._values.get(name) is not current:
+            raise RuntimeError('Reload changed its owning attachment during stop')
+        collection._values[name] = candidate
+        candidate.start()
+        if not candidate.running or not collection._entity.alive or collection._values.get(name) is not candidate:
+            raise RuntimeError('replacement did not remain active')
+    except Exception as error:
+        diagnostics = tuple(candidate.errors)
+        candidate._unsubscribe()
+        candidate.running = False
+        candidate._stopped = True
+        checkpoint.restore()
+        current.errors.extend(diagnostics or (Diagnostic(f'{name}.reload', str(error), traceback.format_exc()),))
+        collection._entity._changed(role + '.error', name, new=current.errors[-1].message)
+        return current
+    collection._entity._changed(role + '.reload', name)
+    return candidate

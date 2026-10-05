@@ -76,11 +76,19 @@ Each `step(dt)` executes all `update(dt)` callbacks before all `draw()` callback
 Attachment order is deterministic; `systems.move(name, index)` reorders it.
 New or reloaded attachments join on the next frame. Detaching stops immediately.
 
-Use `systems.reload(name, source_or_definition)` to reload. Compilation or staged
-initialization failure preserves the previous attachment and records diagnostics.
-On success the old instance stops and the new instance starts. Top-level script
-side effects outside its own namespace cannot be rolled back; acquire external
-resources in `start()` and release them in `stop()`.
+Use `systems.reload(name, source_or_definition)` to reload. Compilation,
+initialization, or start failure preserves the previous attachment and records
+diagnostics. Reload restores the managed entity graph, attachment state, native
+mutable containers, subscriptions and LBE service state in place. On success the
+old instance stops and the replacement runs. UUID script reloads use the same
+recovery boundary. External files, imported modules, native resources and opaque
+user objects are outside this checkpoint; acquire external resources explicitly
+and release them in `stop()`. Python execution remains trusted and synchronous.
+
+Callbacks are bound before execution and called once. Both `update(dt)` and
+`update(self, dt)` are supported, including keyword-only `self`/`dt`. A body
+`TypeError` is reported without retrying the callback with different arguments.
+The injected `self` is reset to the attachment owner after each system call.
 
 Script errors stop that instance's frame callbacks and remain in `instance.errors`.
 Other systems continue. `globals`, `lifecycle`, `definition`, `entity`, `name` and

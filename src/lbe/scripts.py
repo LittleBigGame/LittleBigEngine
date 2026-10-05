@@ -1,7 +1,7 @@
 """Attached behavior with per-entity requirements and isolated execution."""
 from collections.abc import MutableMapping
 import traceback
-from .systems import SystemDefinition, SystemInstance
+from .systems import SystemDefinition, SystemInstance, reload_attachment
 from .events import Diagnostic
 
 
@@ -24,6 +24,7 @@ class ScriptInstance(SystemInstance):
             return False
         if not callable(self.namespace.get('run')):
             self._error('initialize',TypeError('Attached script must define run(dt) or run()'))
+            self._unsubscribe()
             return False
         return True
 
@@ -44,42 +45,16 @@ class ScriptInstance(SystemInstance):
             with self.entity.runtime.changes.context(self.entity,self.name,'run'):
                 self.namespace['self'] = self.entity
                 run_func = self.namespace['run']
-                import inspect
-                try:
-                    sig = inspect.signature(run_func)
-                    params = sig.parameters
-                    param_count = len(params)
-                except (ValueError, TypeError):
-                    params = {}
-                    param_count = None
-
-                if param_count == 0:
-                    return run_func()
-                elif param_count == 1:
-                    pname = list(params.keys())[0]
-                    if pname in ("entity", "e", "ent", "target"):
-                        return run_func(self.entity)
-                    elif pname in ("dt", "delta") and args and isinstance(args[0], (int, float)):
-                        return run_func(args[0])
-                    elif args:
-                        return run_func(args[0])
-                    else:
-                        return run_func(self.entity)
-                elif param_count == 2:
-                    pnames = list(params.keys())
-                    dt = args[0] if (args and isinstance(args[0], (int, float))) else (args[1] if (len(args) > 1 and isinstance(args[1], (int, float))) else 0.0)
-                    if pnames[0] in ("dt", "delta"):
-                        return run_func(dt, self.entity)
-                    else:
-                        return run_func(self.entity, dt)
-                else:
-                    return run_func(self.entity, *args, **kwargs)
+                from .invocation import invoke
+                return invoke(run_func, self.entity, args, kwargs)
         except Exception as error:
             # A failed call does not disable the orchestrator or other entities.
             self.errors.append(Diagnostic(f'{self.name}.run',str(error),traceback.format_exc()))
             with self.entity.runtime.changes.context(self.entity,self.name,'run'):
                 self.entity._changed('script.error',self.name,new=str(error))
             return None
+        finally:
+            self.namespace['self'] = self.entity
 
 
 class Scripts(MutableMapping):
@@ -136,21 +111,11 @@ class Scripts(MutableMapping):
 
     def reload(self, key, definition):
         current=self[key]
-        candidate=ScriptInstance(self._entity,current.name,definition)
-        if not candidate.initialize():
-            current.errors.extend(candidate.errors)
-            return current
-        if not self._entity.alive or self._values.get(current.name) is not current:
-            candidate.stop()
-            return current
-        current.stop()
-        if not self._entity.alive or self._values.get(current.name) is not current:
-            candidate.stop()
-            return current
-        self._values[current.name]=candidate
-        candidate.start()
-        self._entity._changed('script.reload',current.name)
-        return candidate
+        if not isinstance(definition, SystemDefinition):
+            raise TypeError('Expected a SystemDefinition')
+        if identity(self._entity, definition) not in (None, identity(self._entity, current.definition)):
+            raise ValueError('Reload must preserve the script asset UUID')
+        return reload_attachment(self, current.name, definition, ScriptInstance, 'script')
 
     def relocate(self,key,path,*,new_name=None):
         current=self[key]
