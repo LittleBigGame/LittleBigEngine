@@ -44,12 +44,14 @@ See [UI and application scripting](docs/ui.md) to build your own application.
 ## Test
 
 ```console
-python -m unittest discover -s tests -v
+python tests/run_suite.py -v
 python tests/desktop_walkthrough.py
 ```
 
 Continuous integration checks Python 3.11 and 3.14 on Windows and Linux.
 The desktop walkthrough uses real graphics and synthetic editor input.
+The suite runner isolates preferences and caches and enables EGL on Linux.
+The desktop CI job runs the full suite with completion and graphics installed.
 
 ## Design
 

@@ -2,11 +2,29 @@ import importlib.util
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 from lbe.completion import complete, code_context
 
 
 @unittest.skipUnless(importlib.util.find_spec('jedi'), 'optional Jedi dependency')
 class CompletionTests(unittest.TestCase):
+    def test_analysis_failure_is_reported_instead_of_empty_suggestions(self):
+        from lbe.completion import AnalysisError, request_completion
+        with patch('jedi.Script.complete', side_effect=RuntimeError('analysis unavailable')):
+            future = request_completion('entity.sta', 10, 'scratch.py', ('stamina',))
+            with self.assertRaisesRegex(AnalysisError, 'analysis unavailable'):
+                future.result(timeout=5)
+
+    def test_unwritable_cache_uses_temporary_storage(self):
+        import errno
+        from lbe.completion import analyze
+        with patch('jedi.settings.cache_directory', 'unwritable-cache'):
+            operation = unittest.mock.Mock(side_effect=[OSError(errno.EROFS, 'read-only cache'), ['ok']])
+            self.assertEqual(analyze(operation), ['ok'])
+            self.assertEqual(operation.call_count, 2)
+            import jedi
+            self.assertNotEqual(jedi.settings.cache_directory, 'unwritable-cache')
+
     def test_infers_local_type_instead_of_assuming_entity(self):
         source = 'class Tool:\n    def perform(self): pass\nthing = Tool()\nthing.per'
         prefix, matches = complete(source, len(source), 'scratch.py')
@@ -108,5 +126,4 @@ class CompletionTests(unittest.TestCase):
         self.assertIn('query', all_names)
         self.assertIn('destroy', all_names)
         self.assertIn('children', all_names)
-
 

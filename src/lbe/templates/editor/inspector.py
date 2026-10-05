@@ -347,7 +347,7 @@ def inspector_sync():
                 state.system_edit_buttons.append(e_btn)
                 state.system_detach_buttons.append(d_btn)
 
-            btn_edit_w = 46
+            btn_edit_w = 52
             btn_del_w = 26
             s_w = max(40, ip.w - 24 - btn_edit_w - btn_del_w - 8)
 

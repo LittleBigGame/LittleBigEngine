@@ -6,8 +6,35 @@ import keyword
 from pathlib import Path
 import re
 import tokenize
+import errno
+import tempfile
 
 _worker = ThreadPoolExecutor(max_workers=1, thread_name_prefix="lbe-completion")
+_fallback_cache = None
+
+
+class AnalysisError(RuntimeError):
+    """Static analysis failed; the editor can display the underlying cause."""
+
+
+def analyze(operation):
+    """Retry unwritable caches once, then report failures instead of empty results."""
+    global _fallback_cache
+    try:
+        return operation()
+    except OSError as error:
+        if error.errno not in (errno.EACCES, errno.EPERM, errno.EROFS):
+            raise AnalysisError(str(error)) from error
+        import jedi
+        if _fallback_cache is None:
+            _fallback_cache = tempfile.TemporaryDirectory(prefix='lbe-analysis-')
+        jedi.settings.cache_directory = _fallback_cache.name
+        try:
+            return operation()
+        except Exception as retry_error:
+            raise AnalysisError(str(retry_error)) from retry_error
+    except Exception as error:
+        raise AnalysisError(str(error)) from error
 
 TYPE_MAP = {
     'int': 'int',
@@ -143,7 +170,7 @@ def complete(source, cursor, path, context=()):
     line = prelude.count("\n") + source[:cursor].count("\n") + 1
     column = len(source[:cursor].rsplit("\n", 1)[-1])
     try:
-        raw_matches = script.complete(line, column)
+        raw_matches = analyze(lambda: script.complete(line, column))
         matches = [(c.name, c.type) for c in raw_matches
                    if c.name != prefix and (not c.name.startswith("_") or prefix.startswith("_"))]
         known_components = set()
@@ -156,8 +183,8 @@ def complete(source, cursor, path, context=()):
             known_components.update({"x", "y", "vx", "vy", "w", "h", "color", "name", "self", "query", "space", "dt"})
         if known_components:
             matches.sort(key=lambda m: (0 if m[0] in known_components else 1, m[0]))
-    except Exception:
-        matches = []
+    except AnalysisError:
+        raise
     return prefix, matches[:100]
 
 
@@ -188,9 +215,9 @@ def hover_info(source, line, column, path, context=()):
     jedi_line = prelude.count("\n") + line + 1
     jedi_column = column
     try:
-        definitions = script.help(jedi_line, jedi_column)
+        definitions = analyze(lambda: script.help(jedi_line, jedi_column))
         if not definitions:
-            definitions = script.infer(jedi_line, jedi_column)
+            definitions = analyze(lambda: script.infer(jedi_line, jedi_column))
         if not definitions:
             return None
         d = definitions[0]
@@ -243,8 +270,8 @@ def hover_info(source, line, column, path, context=()):
             "line": line,
             "column": column,
         }
-    except Exception:
-        return None
+    except Exception as error:
+        raise AnalysisError(str(error)) from error
 
 
 def request_hover(source, line, column, path, context=()):

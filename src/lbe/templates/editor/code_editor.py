@@ -649,11 +649,13 @@ def update(dt):
         hover_state.pop("future")
         try:
             info = h_fut.result()
+            target.components.pop('hover_error', None)
             if info and (info.get("name") or info.get("description")):
                 hover_state.update(active=True, info=info)
             else:
                 hover_state["resolved_empty"] = True
-        except Exception:
+        except Exception as error:
+            target.components['hover_error'] = str(error)
             hover_state["resolved_empty"] = True
 
     # Sync UI Popups
@@ -683,4 +685,3 @@ def stop():
         p = child.components.get("part", "")
         if p in popup_parts or p.startswith("hover_line:") or p.startswith("ac_item:"):
             child.visible = False
-

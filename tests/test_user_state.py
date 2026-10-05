@@ -4,6 +4,7 @@ import tempfile
 from pathlib import Path
 from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
 
 from lbe.user_state import (
     get_user_state,
@@ -26,20 +27,12 @@ class UserStateTests(unittest.TestCase):
         self.addCleanup(self.directory.cleanup)
         self.project_path = Path(self.directory.name).resolve()
 
-        # Backup state file if exists
-        self.old_state_content = None
-        if STATE_FILE.exists():
-            try:
-                self.old_state_content = STATE_FILE.read_text(encoding="utf-8")
-            except Exception:
-                pass
-
-    def tearDown(self):
-        if self.old_state_content is not None:
-            STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
-            STATE_FILE.write_text(self.old_state_content, encoding="utf-8")
-        elif STATE_FILE.exists():
-            STATE_FILE.unlink(missing_ok=True)
+        state_directory = self.project_path / 'preferences'
+        for name, value in [('STATE_DIR', state_directory),
+                            ('STATE_FILE', state_directory / 'state.json')]:
+            binding = patch('lbe.user_state.' + name, value)
+            binding.start()
+            self.addCleanup(binding.stop)
 
     def test_save_and_get_last_project(self):
         proj_dir = self.project_path / "test_game.lbe"
