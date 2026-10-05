@@ -64,4 +64,4 @@ def update(dt):
         for _ in range(3):
             entity.systems.reload("worker", 'system.listen("ping", lambda: None)\nraise ValueError("fail")')
         self.assertIs(entity.systems["worker"], original)
-        self.assertEqual(runtime.events._listeners["ping"], [])
+        self.assertEqual(runtime.events._listeners.get("ping", []), [])
