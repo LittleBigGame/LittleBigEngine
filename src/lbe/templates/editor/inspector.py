@@ -1026,7 +1026,7 @@ def prompt_new_system(ent):
     while (target_dir / f"script_{i}.py").exists():
         i += 1
     script_path = target_dir / f"script_{i}.py"
-    initial_text = 'components = ("x", "y", "vx", "vy")\n\ndef run(entity):\n    entity.x += getattr(entity, "vx", 0.0)\n    entity.y += getattr(entity, "vy", 0.0)\n'
+    initial_text = 'components = ("x", "y", "vx", "vy")\n\ndef run(dt):\n    self.x += getattr(self, "vx", 0.0) * dt\n    self.y += getattr(self, "vy", 0.0) * dt\n'
     script_path.write_text(initial_text, encoding="utf-8")
     
     attach_system_to_entity(ent, script_path)

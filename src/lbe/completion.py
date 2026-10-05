@@ -56,11 +56,16 @@ def build_prelude(context=()):
         for name in components:
             if name.isidentifier() and not keyword.iskeyword(name):
                 prelude += f"    {name}: object\n"
+        # Provide standard components on _Owner for self completion if not explicitly provided
+        for name in ("name", "x", "y", "w", "h", "vx", "vy", "color"):
+            if name not in components:
+                prelude += f"    {name}: object\n"
         prelude += (
+            "self: _Owner\n"
             "entity: _Owner\n"
-            "query = entity.query\n"
-            "runtime = entity.runtime\n"
-            "systems = entity.systems\n"
+            "query = self.query\n"
+            "runtime = self.runtime\n"
+            "systems = self.systems\n"
             "create = runtime.create\n"
             "resolve = runtime.resolve\n"
             "destroy = runtime.destroy\n"
@@ -93,6 +98,7 @@ def build_prelude(context=()):
         if name.isidentifier() and not keyword.iskeyword(name):
             type_str = TYPE_MAP.get(type_name, 'object')
             prelude += f"    {name}: {type_str}\n"
+    prelude += "self: _OwnerEntity\n"
     prelude += "entity: _OwnerEntity\n\n"
 
     # Runtime resolution yields an entity; known project components refine its static view.
@@ -146,6 +152,8 @@ def complete(source, cursor, path, context=()):
             known_components.update(context.get("owner", {}).get("components", {}).keys())
         elif hasattr(context, "__iter__"):
             known_components.update(context)
+        if not known_components:
+            known_components.update({"x", "y", "vx", "vy", "w", "h", "color", "name", "self", "query", "space", "dt"})
         if known_components:
             matches.sort(key=lambda m: (0 if m[0] in known_components else 1, m[0]))
     except Exception:

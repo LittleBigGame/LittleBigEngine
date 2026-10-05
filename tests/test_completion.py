@@ -86,3 +86,27 @@ class CompletionTests(unittest.TestCase):
         self.assertEqual(info['type'], 'function')
         self.assertIn('query(*components', info['description'])
 
+    def test_self_completion_and_type_hints(self):
+        context = {
+            'owner': {'components': {'x': 'float', 'y': 'float', 'vx': 'float', 'vy': 'float'}},
+            'all_components': {'x': 'float', 'y': 'float', 'vx': 'float', 'vy': 'float'}
+        }
+        source = 'def run(dt):\n    self.v'
+        prefix, matches = complete(source, len(source), 'test.py', context)
+        self.assertEqual(prefix, 'v')
+        match_names = [m[0] for m in matches]
+        self.assertIn('vx', match_names)
+        self.assertIn('vy', match_names)
+
+        source_full = 'def run(dt):\n    self.'
+        _, all_matches = complete(source_full, len(source_full), 'test.py', context)
+        all_names = [m[0] for m in all_matches]
+        self.assertIn('x', all_names)
+        self.assertIn('y', all_names)
+        self.assertIn('vx', all_names)
+        self.assertIn('vy', all_names)
+        self.assertIn('query', all_names)
+        self.assertIn('destroy', all_names)
+        self.assertIn('children', all_names)
+
+

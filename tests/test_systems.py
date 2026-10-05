@@ -169,3 +169,19 @@ def run(dt):
         self.assertNotIn(("ball1", "ball_far"), collected)
         self.runtime.services["space"].close()
 
+    def test_run_dt_attached_directly_to_entity_runs_without_parent_system(self):
+        ball = self.runtime.create(parent=self.owner, x=1.0, y=2.0, vx=3.0, vy=-1.0)
+        script = SystemDefinition('''
+components = ("x", "y", "vx", "vy")
+
+def run(dt):
+    self.x += self.vx * dt
+    self.y += self.vy * dt
+''')
+        # Attached directly to ball, NOT to self.owner (Game/world)!
+        attachment = ball.systems.attach("phys", script)
+        self.assertTrue(attachment.running)
+        self.runtime.step(0.5)
+        self.assertEqual(ball.x, 2.5)
+        self.assertEqual(ball.y, 1.5)
+

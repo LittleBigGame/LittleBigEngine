@@ -23,7 +23,7 @@ class ScriptInstance(SystemInstance):
         if not super().initialize():
             return False
         if not callable(self.namespace.get('run')):
-            self._error('initialize',TypeError('Attached script must define run(entity, ...)'))
+            self._error('initialize',TypeError('Attached script must define run(dt) or run()'))
             return False
         return True
 

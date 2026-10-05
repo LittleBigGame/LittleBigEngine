@@ -262,13 +262,17 @@ class SystemInstance:
 
                     if has_run:
                         if self.definition.components:
-                            targets = list(self.entity.query(*self.definition.components, recursive=True))
-                            if not targets and all(c in self.entity.components for c in self.definition.components):
+                            if all(c in self.entity.components for c in self.definition.components):
                                 targets = [self.entity]
+                            else:
+                                targets = list(self.entity.query(*self.definition.components, recursive=True))
                         else:
-                            targets = list(self.entity.children)
-                            if not targets:
+                            if not self.entity.children or ("root" not in self.entity.tags and self.entity.parent is not None):
                                 targets = [self.entity]
+                            else:
+                                targets = list(self.entity.children)
+                                if not targets:
+                                    targets = [self.entity]
 
                         run_func = self.namespace["run"]
                         for target in targets:
