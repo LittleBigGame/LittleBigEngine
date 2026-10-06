@@ -1,17 +1,19 @@
 """Explicit persistent identity linking and disposable runtime handles."""
 from dataclasses import dataclass
-from uuid import UUID
+from uuid import UUID, uuid4
 
 
 @dataclass(frozen=True)
 class Handle:
     slot: int
     generation: int
+    scope: UUID
 
 
 class Linker:
     def __init__(self, runtime):
         self.runtime = runtime
+        self.scope = uuid4()
         self.objects = {}
         self.owners = {}
         self.dependencies = {}
@@ -28,13 +30,15 @@ class Linker:
                 self._slots.append(None)
                 self._generations.append(0)
             self._slots[slot] = identity
-            self._handles[identity] = Handle(slot, self._generations[slot])
+            self._handles[identity] = Handle(slot, self._generations[slot], self.scope)
         self.objects[identity] = item
         if owner is not None:
             self.owners[identity] = owner
         from .items import InheritedComponent
         if isinstance(item, InheritedComponent):
             self.dependencies[identity] = {item.source}
+        elif hasattr(item, "definition") and item.definition.references:
+            self.dependencies[identity] = {reference.id for reference in item.definition.references}
         else:
             self.dependencies.pop(identity, None)
 
@@ -52,14 +56,15 @@ class Linker:
         identity = UUID(str(identity))
         item = self.objects[identity]
         if expected is not None and not isinstance(item, expected):
-            raise TypeError(f"{identity} is {type(item).__name__}, not {expected.__name__}")
+            label = '/'.join(t.__name__ for t in expected) if isinstance(expected, tuple) else expected.__name__
+            raise TypeError(f"{identity} is {type(item).__name__}, not {label}")
         return item
 
     def handle(self, identity):
         return self._handles[UUID(str(identity))]
 
     def resolve_handle(self, handle):
-        if (not isinstance(handle, Handle) or handle.slot < 0 or handle.slot >= len(self._slots)
+        if (not isinstance(handle, Handle) or handle.scope != self.scope or handle.slot < 0 or handle.slot >= len(self._slots)
                 or self._generations[handle.slot] != handle.generation
                 or self._slots[handle.slot] is None):
             raise ReferenceError("Stale or invalid runtime handle")

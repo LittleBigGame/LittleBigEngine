@@ -22,6 +22,21 @@ class Components(MutableMapping):
         self._entity._check()
         return self._values.record(key)
 
+    def rename(self, key, new_name):
+        from dataclasses import replace
+        if not isinstance(new_name, str) or not new_name:
+            raise ValueError("Component names must be nonempty strings")
+        item = self.item(key)
+        if key == new_name:
+            return item
+        if new_name in self:
+            raise ValueError(f"Component {new_name!r} already exists")
+        self._entity.items._names.pop((Component, key))
+        renamed = replace(item, name=new_name)
+        self._entity.items._put(renamed)
+        self._entity._changed("component.rename", key, new=new_name)
+        return renamed
+
     def inherit(self, key, source, patch=()):
         """Attach a source UUID and local patch without copying authoritative data."""
         source = source.id if isinstance(source, (Component, InheritedComponent)) else UUID(str(source))

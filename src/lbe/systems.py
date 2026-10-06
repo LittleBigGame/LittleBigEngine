@@ -17,11 +17,15 @@ class SystemDefinition:
     asset_id: object = None
     components: tuple = field(init=False, default=())
     code: CodeType = field(init=False, repr=False, compare=False)
+    references: tuple = field(init=False, repr=False, compare=False, default=())
 
     def __post_init__(self):
-        object.__setattr__(self, "code", compile(self.source, self.path, "exec"))
+        from .references import lower_references
+        lowered, references = lower_references(self.source, self.path)
+        object.__setattr__(self, "references", references)
+        object.__setattr__(self, "code", compile(lowered, self.path, "exec"))
         import ast
-        for statement in ast.parse(self.source).body:
+        for statement in ast.parse(lowered).body:
             if isinstance(statement, ast.Assign) and any(isinstance(t,ast.Name) and t.id=='components' for t in statement.targets):
                 requirements=ast.literal_eval(statement.value)
                 if not isinstance(requirements,(tuple,list)) or not all(isinstance(k,str) and k for k in requirements):
@@ -167,6 +171,9 @@ class SystemInstance:
         })
         self._injected = dict(self.namespace)
         try:
+            from .references import bind_reference
+            for reference in self.definition.references:
+                self.namespace[reference.symbol] = bind_reference(runtime, reference)
             with runtime.changes.context(self.entity, self.name, 'initialize'):
                 runtime.events.emit('system.call', self.entity, self.name, 'initialize')
                 exec(self.definition.code, self.namespace)
@@ -351,7 +358,7 @@ class Systems(MutableMapping):
         instance.stop()
         self._entity._changed("system.detach", name)
 
-    def attach(self, name, definition=None, *, identity=None):
+    def attach(self, name, definition=None, *, identity=None, activate=True):
         if definition is None:
             definition = self._entity.runtime.assets.resolve(name) if not isinstance(name,SystemDefinition) else name
             identity = definition.asset_id
@@ -372,7 +379,7 @@ class Systems(MutableMapping):
         instance = SystemInstance(self._entity, name, definition, identity=identity)
         self._values[name] = instance
         self._entity._changed("system.attach", name)
-        if instance.initialize() and self._entity.alive and self._values.get(name) is instance:
+        if activate and instance.initialize() and self._entity.alive and self._values.get(name) is instance:
             instance.start()
         return instance
 

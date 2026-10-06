@@ -117,11 +117,11 @@ class Items(Mapping):
         category = self.category(item)
         key = category, item.name
         previous_id = self._names.get(key)
-        if previous_id is not None and previous_id != item.id:
-            self._drop(previous_id)
         existing = self.entity.runtime.linker.objects.get(item.id)
         if existing is not None and item.id not in self._records:
             raise ValueError(f"Duplicate object UUID: {item.id}")
+        if previous_id is not None and previous_id != item.id:
+            self._drop(previous_id)
         self.entity.runtime.linker.register(item, owner=self.entity.id)
         self._records[item.id] = item
         self._names[key] = item.id
@@ -143,6 +143,8 @@ class Items(Mapping):
         if isinstance(item, (Component, InheritedComponent)):
             if not isinstance(item.name, str) or not item.name:
                 raise ValueError("Component names must be nonempty strings")
+            if isinstance(item, InheritedComponent):
+                compose(self.entity.runtime.linker.component_value(item.source), item.patch)
             self._put(item)
             self.entity._changed("component.set", item.name, new=self.entity.components[item.name])
         elif isinstance(item, Tag):

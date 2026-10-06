@@ -11,7 +11,7 @@ from .core import Entity, Runtime
 from .events import Diagnostic
 from .space import SpatialIndex
 
-CURRENT_VERSION = 2
+CURRENT_VERSION = 3
 
 
 @dataclass(frozen=True)
@@ -25,6 +25,7 @@ class EntityRef:
 
 @dataclass
 class Restoration:
+    item_records: dict = field(default_factory=dict)
     scripts: dict = field(default_factory=dict)
     systems: dict = field(default_factory=dict)
     system_order: dict = field(default_factory=dict)
@@ -198,7 +199,9 @@ def serialize_entity(entity, *, project_dir=None, on_unsupported="error", known_
         "position": entity.parent.children.index(entity) if entity.parent else 0,
         "components": {}, "relations": dict(pending.relations.get(entity.id, {})), "systems": {},
     }
-    for key, value in entity.components.items():
+    from .items import Component
+    for item in entity.all(Component):
+        key, value = item.name, item.value
         try:
             encoded = serialize_value(value, project_dir=project_dir, on_unsupported=on_unsupported, known_ids=known_ids)
             if value is None or encoded is not None or on_unsupported != "skip":
@@ -240,6 +243,10 @@ def serialize_entity(entity, *, project_dir=None, on_unsupported="error", known_
     order = pending.system_order.get(entity.id, ())
     data["systems"] = {name: data["systems"][name] for name in dict.fromkeys((*order, *data["systems"]))
                        if name in data["systems"]}
+    from .item_storage import encode_items
+    data["items"] = encode_items(entity, data,
+        encode=lambda value: serialize_value(value, project_dir=project_dir, on_unsupported=on_unsupported, known_ids=known_ids),
+        pending_items=pending.item_records.get(entity.id))
     return data
 
 
@@ -256,8 +263,13 @@ def serialize_entities(entities, *, project_dir=None, on_unsupported="error", kn
 
 def deserialize_entities(entity_data_list, runtime, *, default_parent=None, project_dir=None, activate=True):
     """Restore the whole graph before activating scripts; roll back structural failures."""
-    records = list(entity_data_list)
+    from .item_storage import project_record
+    records = [project_record(record) for record in entity_data_list]
     ids = [UUID(record["id"]) for record in records]
+    item_ids = [UUID(identity) for record in records for identity in record["items"]]
+    all_ids = ids + item_ids
+    if len(set(all_ids)) != len(all_ids) or any(identity in runtime.linker.objects for identity in all_ids):
+        raise ValueError("Duplicate object UUID in project")
     if len(set(ids)) != len(ids) or any(eid in {e.id for e in runtime.entities} for eid in ids):
         raise ValueError("Duplicate entity identity in project")
     parents = {eid: UUID(record["parent"]) if record.get("parent") else None for eid, record in zip(ids, records)}
@@ -299,6 +311,18 @@ def deserialize_entities(entity_data_list, runtime, *, default_parent=None, proj
             pending.scripts[eid] = dict(record.get("scripts", {}))
             pending.systems[eid] = dict(record.get("systems", {}))
             pending.system_order[eid] = list(record.get("systems", {}))
+            pending.item_records[eid] = record["items"]
+            from .items import Component, InheritedComponent, Tag, Relation, Parent
+            categories = {"Component": Component, "Tag": Tag, "Relation": Relation, "Parent": Parent}
+            for identity, item in record["items"].items():
+                uid = UUID(identity)
+                if item["type"] == "InheritedComponent":
+                    patch = deserialize_value(item.get("patch", []), runtime=runtime, id_map=created)
+                    target.items._put(InheritedComponent(item["name"], UUID(item["source"]), tuple(patch), uid))
+                elif item["type"] in categories:
+                    category = categories[item["type"]]
+                    if (category, item["name"]) in target.items._names:
+                        target.items._replace_identity(category, item["name"], uid)
         # Rebuild sibling order independently of creation/scheduler order.
         for parent in {e.parent for e in created.values() if e.parent is not None}:
             siblings = [(record.get("position", index), index, created[eid])
@@ -315,6 +339,7 @@ def deserialize_entities(entity_data_list, runtime, *, default_parent=None, proj
             pending.system_order.pop(eid, None)
             pending.relations.pop(eid, None)
             pending.parents.pop(eid, None)
+            pending.item_records.pop(eid, None)
         del pending.diagnostics[diagnostic_start:]
         raise
     finally:
@@ -328,6 +353,7 @@ def activate_entities(entities, runtime, *, project_dir=None):
     """Attach restored scripts after application dependencies are ready. Retry missing files safely."""
     from .systems import SystemDefinition
     pending = restoration(runtime)
+    ready = []
     for entity in tuple(entities):
         if not entity.alive:
             continue
@@ -346,10 +372,9 @@ def activate_entities(entities, runtime, *, project_dir=None):
                     if not path.is_relative_to(Path(project_dir).resolve()):
                         raise ValueError("System path must be inside the project")
                     definition = runtime.assets.system(path)
-                instance = entity.systems.attach(name, definition)
+                instance = entity.systems.attach(name, definition, identity=declaration.get("item_id"), activate=False)
+                ready.append(instance)
                 pending.systems.get(entity.id, {}).pop(name, None)
-                if not instance.running:
-                    pending.diagnostics.extend(instance.errors)
             except (OSError, ValueError, TypeError, SyntaxError) as error:
                 pending.diagnostics.append(Diagnostic("project.system", f"{entity.id}.{name}: {error}"))
         for identity,declaration in tuple(pending.scripts.get(entity.id,{}).items()):
@@ -367,10 +392,9 @@ def activate_entities(entities, runtime, *, project_dir=None):
                     definition=SystemDefinition.from_file(path)
                     from dataclasses import replace
                     definition=replace(definition,asset_id=UUID(identity))
-                instance=entity.scripts.attach(definition)
+                instance=entity.scripts.attach(definition, item_identity=declaration.get("item_id"), activate=False)
+                ready.append(instance)
                 pending.scripts[entity.id].pop(identity,None)
-                if not instance.running:
-                    pending.diagnostics.extend(instance.errors)
             except (OSError,ValueError,TypeError,SyntaxError) as error:
                 pending.diagnostics.append(Diagnostic('project.script',f'{entity.id}.{identity}: {error}'))
         pending.loading += 1
@@ -380,6 +404,19 @@ def activate_entities(entities, runtime, *, project_dir=None):
                 entity.systems.move(name, index)
         finally:
             pending.loading -= 1
+    # All attachments have identities before source linking/initialization.
+    initialized = []
+    for instance in ready:
+        if instance.entity.alive and runtime.linker.objects.get(instance.id) is instance:
+            if instance.initialize():
+                initialized.append(instance)
+            else:
+                pending.diagnostics.extend(instance.errors)
+    for instance in initialized:
+        if instance.entity.alive and runtime.linker.objects.get(instance.id) is instance:
+            instance.start()
+            if not instance.running:
+                pending.diagnostics.extend(instance.errors)
 
 
 def resolve_references(entity, runtime):
@@ -414,7 +451,9 @@ def resolve_references(entity, runtime):
         changed = any(flag for _, flag in resolved)
         return (type(value)(item for item, _ in resolved) if changed else value), changed
 
-    for key, value in tuple(entity.components.items()):
+    from .items import Component
+    for item in entity.all(Component):
+        key, value = item.name, item.value
         resolved, changed = resolve_value(value, set())
         if changed:
             entity.components[key] = resolved
@@ -451,7 +490,14 @@ def migrate_v1_to_v2(data):
     return migrated
 
 
+def migrate_v2_to_v3(data):
+    from .item_storage import from_legacy
+    return dict(data, version=3, entities=[dict(record, items=from_legacy(record))
+                                         for record in data.get("entities", ())])
+
+
 MIGRATIONS = {
+    2: migrate_v2_to_v3,
     1: migrate_v1_to_v2,
     0: migrate_v0_to_v1,
 }
