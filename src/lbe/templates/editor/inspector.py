@@ -750,6 +750,10 @@ def inspector_duplicate_entity():
     comps = deepcopy(dict(ent.components))
     comps['name'] = new_name
     dup = state.runtime.create(parent=parent, tags=list(ent.tags), components=comps)
+    from lbe import InheritedComponent
+    for item in ent.all(InheritedComponent):
+        del dup.components[item.name]
+        dup.components.inherit(item.name, item.source, item.patch)
     inspect_entity(dup)
     message(f"Duplicated '{orig_name}' as '{new_name}'")
     hierarchy_sync()

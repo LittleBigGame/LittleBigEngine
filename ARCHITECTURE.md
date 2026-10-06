@@ -10,6 +10,23 @@ Entities provide identity, arbitrary components, tags, relations and hierarchy.
 Components are normally flat values, accessible through attributes or a mapping.
 Component storage remains the source of truth for derived indexes and views.
 
+### UUID-keyed item storage and linking
+
+On `codex/uuid-kernel-gui`, entity data is owned by one UUID-keyed `Items` store.
+Named components/tags/relations/system/script collections are compatibility
+projections. Components, inherited declarations, tags, relation/parent links and
+behavior attachments have persistent UUIDs; links store target UUIDs. Name/type
+indexes and ordered child adjacency are derived runtime state.
+
+Inherited declarations retain a source UUID plus explicit operations; resolved
+values are derived private copies. The linker maintains object/dependency indexes
+and runtime-scoped slot/generation handles, not another authoritative model.
+Project v3 prefers canonical item records and migrates legacy named declarations.
+Restore registers all behavior attachments before linking/initializing/starting.
+`<|Type:uuid|>` source references are lexically lowered outside strings/comments.
+The editor displays typed reference pills, identity menus and inheritance controls.
+See [UUID kernel guide](docs/UUID_KERNEL_GUIDE.md) for APIs, GUI usage and limits.
+
 ## Hierarchy and queries
 
 Hierarchy organizes entities and establishes query boundaries. It does not imply

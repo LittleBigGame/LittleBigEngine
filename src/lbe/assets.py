@@ -38,7 +38,8 @@ ASSET_ICONS = {
 def _source_functions(path, modified, size):
     """Inspect declarations without executing source; stat keys invalidate edits."""
     try:
-        body = ast.parse(Path(path).read_text(encoding="utf-8-sig")).body
+        from .references import lower_references
+        body = ast.parse(lower_references(Path(path).read_text(encoding="utf-8-sig"), path)[0]).body
     except (OSError, SyntaxError, UnicodeError):
         return None
     return frozenset(node.name for node in body if isinstance(node, ast.FunctionDef))

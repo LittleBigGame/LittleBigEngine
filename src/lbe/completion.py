@@ -137,6 +137,15 @@ def complete(source, cursor, path, context=()):
     prefix_match = re.search(r"[A-Za-z_]\w*$", source[:cursor])
     prefix = prefix_match.group() if prefix_match else ""
     prelude = build_prelude(context)
+    from .references import lower_references
+    try:
+        source, references = lower_references(source, str(path))
+        prelude += 'from lbe.references import LinkedReference as _LinkedReference\n'
+        for reference in references:
+            reference_type = '_Entity' if reference.kind == 'Entity' else '_LinkedReference'
+            prelude += f'{reference.symbol}: {reference_type}\n'
+    except SyntaxError:
+        pass
     path = Path(path).resolve()
     project = jedi.Project(path.parent, added_sys_path=[str(Path(__file__).parent.parent)])
     script = jedi.Script(prelude + source, path=path, project=project)

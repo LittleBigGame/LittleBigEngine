@@ -1421,6 +1421,8 @@ def replace_asset_reference(pill_control, new_uid, new_entry):
     line_text = lines[row]
     col_start, col_end = span
     new_token = f'asset("{new_uid}")'
+    if pill_control.components.get('reference_kind') == 'Asset':
+        new_token = f'<|Asset:{new_uid}|>'
     new_line = line_text[:col_start] + new_token + line_text[col_end:]
     lines[row] = new_line
     buf.text = "\n".join(lines)
@@ -1887,6 +1889,19 @@ def context_actions(target):
         pill = target['control']
         uid = target.get('asset_id')
         name = target.get('asset_name', 'asset')
+        kind = pill.components.get('reference_kind')
+        if kind and kind != 'Asset':
+            from uuid import UUID
+            identity = UUID(uid)
+            owner_id = identity if kind == 'Entity' else runtime.linker.owners.get(identity)
+            owner = runtime._entities.get(owner_id)
+            return [
+                dict(label=f'Inspect {kind} owner', run=(lambda _: open_panel(target=owner)) if owner else None),
+                dict(label='Copy persistent reference', run=lambda _: state.window.set_clipboard_text(pill.asset_token)),
+                dict(label=f'Copy {kind} UUID', run=lambda _: state.window.set_clipboard_text(uid)),
+                None,
+                dict(label='Remove reference', run=lambda _: remove_asset_reference(pill)),
+            ]
         return [
             dict(label=f"Locate '{name}' in Project Files", run=lambda _: locate_in_file_explorer(uid)),
             dict(label=f"Rename '{name}'...", run=lambda _: prompt_rename_asset(uid)),
