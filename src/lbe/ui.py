@@ -9,9 +9,11 @@ from time import monotonic
 from .syntax import slice_spans
 from .text import TextBuffer
 
-ASSET_PATTERN = re.compile(
+_LEGACY_ASSET_PATTERN = re.compile(
     r'(?:asset|resolve)\(\s*["\']([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})["\']\s*\)|assets\[\s*["\']([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})["\']\s*\]'
 )
+from .references import REFERENCE_PATTERN, source_references, reference_label
+ASSET_PATTERN = re.compile(_LEGACY_ASSET_PATTERN.pattern + '|' + REFERENCE_PATTERN.pattern)
 
 def reference_matches(text):
     """Recognize reference calls only in Python code, never inside comments or strings."""
@@ -25,6 +27,7 @@ def reference_matches(text):
                 names.add(offsets[token.start[0] - 1] + token.start[1])
     except (tokenize.TokenError, IndentationError):
         pass
+    names.update(reference.start for reference in source_references(text))
     return tuple(match for match in ASSET_PATTERN.finditer(text) if match.start() in names)
 
 
@@ -897,10 +900,15 @@ class UI:
 
             pill_index = 0
             for m in matches:
-                uid_str = m.group(1) or m.group(2)
+                uid_str = m.group(1) or m.group(2) or m.group(4)
+                reference_kind = m.group(3)
+                valid_reference = True
                 reg = getattr(self.runtime.assets, "registry", None) if hasattr(self.runtime, "assets") else None
                 entry = reg.get(uid_str) if reg else None
-                if entry:
+                if reference_kind:
+                    label, valid_reference = reference_label(self.runtime, reference_kind, uid_str)
+                    pill_label = f" {label} "
+                elif entry:
                     etype = entry.get("type", "asset")
                     if etype in ("system", "script"):
                         pill_label = f" {reg.icon(uid_str)} {entry['name']} "
@@ -947,6 +955,7 @@ class UI:
                     span_w = (c_vis_end - c_vis_start) * pitch
                     pill_w = min(max(span_w, len(pill_label) * pitch + 16), control.x + control.w - pill_x - 12)
                     pill.components["asset_id"] = uid_str
+                    pill.components["reference_kind"] = reference_kind
                     pill.components["asset_token"] = m.group(0)
                     pill.components["asset_name"] = entry["name"] if entry else pill_label.strip()
                     pill.components["asset_row"] = row
@@ -968,6 +977,8 @@ class UI:
                     pill_col = (60, 110, 165) if pill_selected else (35, 55, 75)
                     pill_hover = (75, 130, 190) if pill_selected else (50, 80, 110)
                     pill_ink = (255, 255, 255, 255) if pill_selected else (230, 245, 255)
+                    if not valid_reference:
+                        pill_col, pill_hover, pill_ink = (75, 30, 35), (110, 40, 45), ERROR
 
                     put(pill, visible=True, x=pill_x, y=y + 1, w=pill_w, h=line_height - 2,
                         text=pill_label, color=pill_col, normal_color=pill_col, hover_color=pill_hover,

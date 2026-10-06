@@ -31,7 +31,7 @@ def create_launcher_runtime(window, graphics, input_state, on_select_project):
     container = ui.create(root, "Container", "panel", x=0, y=0, w=window.width, h=window.height, color=(17, 23, 31))
 
     title = ui.create(container, "Title", "label", text="LittleBigEngine - Project Manager (LBE v1)", size=16, w=1100, h=26, color=(69, 182, 199, 255))
-    subtitle = ui.create(container, "Subtitle", "label", text="Editor Version: LBE v1 | Full File Manager & Project Launcher", size=10, w=1100, h=18, color=(145, 163, 183, 255))
+    subtitle = ui.create(container, "Subtitle", "label", text="UUID item kernel | Typed references | Inherited components", size=10, w=1100, h=18, color=(145, 163, 183, 255))
 
     # Browser state (Default starting dir from user state or Documents)
     from .user_state import get_last_directory
@@ -230,7 +230,7 @@ def create_launcher_runtime(window, graphics, input_state, on_select_project):
             open_current_btn.text = "Copy Current Folder as Template"
         else:
             title.text = "LittleBigEngine - Project Manager (LBE v1)"
-            subtitle.text = "Editor Version: LBE v1 | Full File Manager & Project Launcher"
+            subtitle.text = "UUID item kernel | Typed references | Inherited components"
             open_current_btn.text = "Open Current Folder as Project"
 
         # Read directory

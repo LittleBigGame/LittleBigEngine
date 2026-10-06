@@ -1977,8 +1977,12 @@ def context_actions(target):
     if isinstance(target, dict) and 'system' in target:
         ent = target['entity']
         name = target['system']
+        instance = ent.systems.get(name) or ent.scripts.get(name)
+        kind = 'System' if name in ent.systems else 'Script'
         return [
             dict(label=f"Edit system '{name}'", run=lambda t: open_system(ent, name)),
+            dict(label="Copy attachment reference", run=lambda _: state.window.set_clipboard_text(f"<|{kind}:{instance.id}|>")),
+            dict(label=f"Attachment UUID: {instance.id}", run=None),
             None,
             dict(label=f"Detach system '{name}'", run=lambda t: detach_system_from_entity(ent, name)),
         ]
@@ -1995,16 +1999,30 @@ def context_actions(target):
     if isinstance(target, dict) and 'component' in target:
         ent = target['entity']
         comp = target['component']
-        val = ent.components.get(comp)
+        try:
+            val = ent.components.get(comp)
+        except (KeyError, TypeError, ValueError):
+            val = None
+        item = ent.components.item(comp)
         type_name = type(val).__name__
         actions = [
             dict(label='Inspect component', run=lambda t: open_panel(target=ent, component=comp)),
+            dict(label="Copy Component reference / inheritance source", run=lambda _: state.window.set_clipboard_text(f"<|Component:{item.id}|>")),
+            dict(label=f"Item UUID: {item.id}", run=None),
             dict(label=f"Rename '{comp}'...", run=lambda t: start_rename_component(ent, comp)),
             dict(label=f"Change type... ({type_name})", run=lambda t: open_change_type_menu(ent, comp)),
             dict(label=f"Delete '{comp}'", run=lambda t: delete_component(comp)),
             None,
             dict(label="+ Add Component...", run=lambda t: open_add_component_menu()),
         ]
+        from lbe import InheritedComponent
+        if isinstance(item, InheritedComponent):
+            owner_id = runtime.linker.owners.get(item.source)
+            actions.extend([
+                dict(label=f"Inherited source: {str(item.source)[:8]}", run=None),
+                dict(label="Reset local patch", run=lambda _: state.reset_component_patch(ent, comp)),
+                dict(label="Inspect source entity", run=(lambda _: open_panel(target=runtime.resolve(owner_id))) if owner_id else None),
+            ])
         from lbe.core import Entity
         if isinstance(val, Entity) and val.alive:
             val_name = str(val.components.get('name', str(val.id)[:8]))
@@ -2041,6 +2059,7 @@ def context_actions(target):
         dict(label='Select', run=select),
         dict(label='Rename', run=context_rename),
         dict(label='Inspect entity', run=lambda e: open_panel(target=e)),
+        dict(label='Copy Entity reference', run=lambda e: state.window.set_clipboard_text(f'<|Entity:{e.id}|>')),
         dict(label='View affecting systems', run=lambda e: (inspect_entity(e), inspector_sync())),
         None,
         dict(label="+ Add Component...", run=lambda e: (select(e), open_add_component_menu())),
@@ -2055,6 +2074,8 @@ def context_actions(target):
         actions.append(dict(label=f"Link from selected as '{tgt_name.lower()}'", run=lambda e: quick_link_to(e)))
 
     if target is state.game or state.game in target.ancestors:
+        if target is state.game:
+            actions.append(dict(label='Create walk-and-shoot demo', run=lambda _: create_walk_shoot_demo()))
         actions += [
             None,
             dict(label='Add child entity', run=context_add_child),
@@ -2077,6 +2098,30 @@ def context_add_component(target):
 def context_add_child(target):
     child = create(parent=target, name='Entity')
     select(child)
+
+
+def create_walk_shoot_demo():
+    """Keep the existing scene and author the sample using ordinary ECS objects."""
+    existing = state.game.relations.get('demo_player')
+    if existing is not None:
+        select(existing)
+        message('Walk/shoot demo exists; WASD/arrows move, Space shoots')
+        return existing
+    blueprint = create(parent=state.game, name='PlayerBlueprint', tags=('blueprint',), speed=6.0)
+    player = create(parent=state.game, name='Player', tags=('player',), x=0.0, y=0.0,
+                    w=0.9, h=0.9, color=(90, 205, 245), aim_x=1.0, aim_y=0.0)
+    player.components.inherit('speed', blueprint.components.item('speed'))
+    drawing = assets.get('f084e424-d2d9-5fd1-8624-63580396274c')
+    if drawing:
+        player.scripts.attach(drawing)
+    state.game.relations['demo_player'] = player
+    definition = assets.system(state.project / 'systems/game/walk_shoot.py')
+    state.game.systems.attach('walk_shoot', definition)
+    select(player)
+    context_focus_camera(player)
+    save_editor_project()
+    message('WASD/arrows move | Space shoots | Speed inherits PlayerBlueprint')
+    return player
 
 
 def context_focus_camera(target):

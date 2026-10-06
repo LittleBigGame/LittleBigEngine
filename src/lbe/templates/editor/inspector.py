@@ -119,7 +119,17 @@ def inspector_sync():
         return
 
     entity = inspected()
-    items = tuple(entity.components.items())
+    from lbe import Component, InheritedComponent
+    declarations = entity.all(Component) + entity.all(InheritedComponent)
+    items = []
+    broken = set()
+    for declaration in declarations:
+        try:
+            value = entity.components[declaration.name]
+        except (KeyError, TypeError, ValueError) as error:
+            value = f"Unresolved source: {error}"
+            broken.add(declaration.name)
+        items.append((declaration.name, value))
     systems = [(entity, name, instance, None) for name, instance in tuple(entity.systems.items())+tuple(entity.scripts.items())]
     for effect in effects.affecting(entity):
         owner = next((e for e in runtime.entities if e.id == effect.owner), None)
@@ -150,7 +160,8 @@ def inspector_sync():
     ent_display = ent_name or "Entity"
     show_id = (ip.y + 74 <= max_bottom)
     put(state.identity_label, visible=show_id, x=ip.x + 12, y=ip.y + 56, w=max(30, ip.w - 24), h=18,
-        text=f'🔷 Entity: {ent_display}')
+        text=f'🔷 Entity: {ent_display} | {len(entity.items)} items')
+    state.identity_label.on_click = lambda *args: open_identity_menu(entity)
 
     # Hide removed action buttons and chip bar
     put(state.add_child_button, visible=False)
@@ -238,10 +249,13 @@ def inspector_sync():
             if not shown:
                 continue
             key, value = items[source]
+            declaration = entity.components.item(key)
+            inherited = isinstance(declaration, InheritedComponent)
             from lbe.assets import AssetRef, ASSET_ICONS
             is_asset = isinstance(value, AssetRef)
             is_entity = hasattr(value, "components") and hasattr(value, "id")
             editable = type(value) in (int, float, bool, str, tuple, list, dict, type(None)) and not is_asset and not is_entity
+            editable = editable and key not in broken
             y = comp_start_y + index * 25
             lbl_w = min(110, max(50, (ip.w - 24 - 8) // 3))
             field_w = max(40, ip.w - 12 - lbl_w - 6 - sb_w - 12)
@@ -265,6 +279,10 @@ def inspector_sync():
                 if state.ui.focused in (field, label):
                     del state.app.relations['focus']
             field.component_key = key
+            field.item_id = declaration.id
+            field.provenance = "inherited" if inherited else "local"
+            field.source_id = declaration.source if inherited else None
+            label.ink = (170, 145, 225) if inherited else MUTED
             field.relations['target'] = entity
             label.component_key = key
             label.relations['target'] = entity
@@ -347,7 +365,7 @@ def inspector_sync():
                 state.system_edit_buttons.append(e_btn)
                 state.system_detach_buttons.append(d_btn)
 
-            btn_edit_w = 46
+            btn_edit_w = 52
             btn_del_w = 26
             s_w = max(40, ip.w - 24 - btn_edit_w - btn_del_w - 8)
 
@@ -519,21 +537,27 @@ def commit_component(field):
     target, key = (field.relations['target'], field.component_key)
     if field.buffer.text == safe_repr(target.components[key]):
         return
-    before = target.components[key]
-    after = parse_value(field.buffer.text)
+    from dataclasses import replace
+    from lbe import InheritedComponent
+    before = target.components.item(key)
+    value = parse_value(field.buffer.text)
+    after = (replace(before, patch=({"op": "replace", "value": value},))
+             if isinstance(before, InheritedComponent) else replace(before, value=value))
     identity = target.id
-    def apply(value):
+    def apply(declaration):
         current = state.runtime.resolve(identity)
         if current is None or not current.alive:
             raise ValueError('Edited entity no longer exists')
-        current.components[key] = value
+        old = current.components[key]
+        current.items._put(declaration)
+        current._changed("component.set", key, old=old, new=current.components[key])
         for _, control in state.component_rows:
             if control.relations.get('target') is current and control.components.get('component_key') == key:
-                control.buffer = TextBuffer(safe_repr(value))
+                control.buffer = TextBuffer(safe_repr(current.components[key]))
                 control.committed_text = control.buffer.text
         inspector_sync()
-    target.components[key] = after
-    field.buffer = TextBuffer(safe_repr(after))
+    apply(after)
+    field.buffer = TextBuffer(safe_repr(target.components[key]))
     field.committed_text = field.buffer.text
     state.files.history.record(lambda:apply(before),lambda:apply(after),'change '+key)
     message(f'Updated {key}')
@@ -862,11 +886,13 @@ def commit_component_key(lbl):
     if old_key and new_key != old_key and target and target.alive:
         if new_key in target.components:
             raise ValueError(f"Component '{new_key}' already exists")
-        before = dict(target.components)
-        val = target.components.pop(old_key)
-        target.components[new_key] = val
+        target.components.rename(old_key, new_key)
         message(f"Renamed component '{old_key}' -> '{new_key}'")
-        save_component_changes(target, before)
+        try:
+            save_editor_project()
+        except Exception:
+            target.components.rename(new_key, old_key)
+            raise
         inspector_sync()
         focus_component_value(new_key)
 
@@ -890,6 +916,7 @@ def open_add_component_menu(x=None, y=None, target=None):
         dict(label="+ Speed", run=lambda e: (select(ent), quick_add_speed())),
         None,
         dict(label="+ Custom Component...", run=lambda e: (select(ent), add_custom_component())),
+        dict(label="+ Inherit component from copied reference", run=lambda _: inherit_copied_component(ent)),
     ]
     open_menu(state.ui, ent, x, y, actions=actions)
 
@@ -1223,6 +1250,51 @@ def component_click(control, event):
     return False
 
 
+def open_identity_menu(ent):
+    x, y = state.identity_label.x, state.identity_label.y + state.identity_label.h
+    handle = ent.handle
+    open_menu(state.ui, ent, x, y, actions=[
+        dict(label=f"UUID: {ent.id}", run=None),
+        dict(label=f"Runtime handle: {handle.slot}:{handle.generation} (temporary)", run=None),
+        dict(label=f"Typed items: {len(ent.items)}", run=None),
+        dict(label="Copy Entity reference", run=lambda _: state.window.set_clipboard_text(f"<|Entity:{ent.id}|>")),
+        dict(label="Copy Entity UUID", run=lambda _: state.window.set_clipboard_text(str(ent.id))),
+    ])
+
+
+def inherit_copied_component(ent):
+    from lbe.references import source_references
+    from lbe import Component, InheritedComponent
+    references = source_references(state.window.get_clipboard_text(), strict=True)
+    if len(references) != 1 or references[0].kind != "Component":
+        raise ValueError("Copy a Component reference from another entity's component menu first")
+    source = runtime.linker.resolve(references[0].id, (Component, InheritedComponent))
+    key = source.name
+    suffix = 1
+    while key in ent.components:
+        key = f"{source.name}_inherited{suffix}"
+        suffix += 1
+    item = ent.components.inherit(key, source)
+    try:
+        save_editor_project()
+    except Exception:
+        ent.items.remove(item.id)
+        raise
+    inspector_sync()
+    message(f"Inherited '{key}'; edits change the local patch, not its source")
+
+
+def reset_component_patch(ent, key):
+    original = ent.components.item(key)
+    ent.components.patch(key, ())
+    try:
+        save_editor_project()
+    except Exception:
+        ent.components.patch(key, original.patch)
+        raise
+    inspector_sync()
+
+
 def open_asset_picker_menu(ent, comp):
     current_val = ent.components.get(comp)
     reg = getattr(state.runtime.assets, "registry", None)
@@ -1265,6 +1337,8 @@ def start():
     global _release
     _release = bind_callbacks(system, state, {
         "inspector_sync": inspector_sync,
+        "inherit_copied_component": inherit_copied_component,
+        "reset_component_patch": reset_component_patch,
         "format_float_clean": format_float_clean,
         "clean_repr": clean_repr,
         "safe_repr": safe_repr,

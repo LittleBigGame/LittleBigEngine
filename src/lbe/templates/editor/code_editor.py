@@ -17,7 +17,8 @@ def check_diagnostics(source):
     if not source:
         return None
     try:
-        ast.parse(source)
+        from lbe.references import lower_references
+        ast.parse(lower_references(source, "<editor>")[0])
         return None
     except SyntaxError as err:
         return {
