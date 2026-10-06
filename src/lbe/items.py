@@ -2,6 +2,7 @@
 from collections.abc import Mapping, MutableMapping, MutableSet
 from dataclasses import dataclass, field, replace
 from copy import deepcopy
+from contextlib import contextmanager
 from uuid import UUID, uuid4
 
 
@@ -86,6 +87,7 @@ class Items(Mapping):
         self._records = {}
         self._names = {}
         self._by_category = {}
+        self._by_type = {}
 
     def __getitem__(self, identity):
         self.entity._check()
@@ -114,7 +116,145 @@ class Items(Mapping):
         return type(item)
 
     def named(self, category, name):
+        self.entity._check()
         return self._records[self._names[category, name]]
+
+    def has(self, category, name):
+        self.entity._check()
+        return (category, name) in self._names
+
+    def has_value(self, name):
+        return self.has(Component, name)
+
+    def component(self, name):
+        return self.named(Component, name)
+
+    def get_value(self, name, default=None):
+        """Read conventional named data; the stored key remains the item UUID."""
+        try:
+            item = self.named(Component, name)
+        except KeyError:
+            return default
+        return self.value(item.id)
+
+    def require_value(self, name):
+        return self.value(self.named(Component, name).id)
+
+    def set_value(self, name, value):
+        """Create or edit a value, keeping its concrete type and identity."""
+        try:
+            current = self.named(Component, name)
+        except KeyError:
+            return self.add(Component(name, value))
+        if isinstance(current, InheritedComponent):
+            edited = replace(current, patch=({"op": "replace", "value": value},))
+        else:
+            edited = replace(current, value=value)
+        return self.replace(current.id, edited)
+
+    def update_values(self, values=None, **kwargs):
+        for name, value in dict(values or {}, **kwargs).items():
+            self.set_value(name, value)
+
+    def ensure_value(self, name, default=None):
+        if not self.has(Component, name):
+            self.add(Component(name, default))
+        return self.require_value(name)
+
+    def remove_value(self, name, *default):
+        try:
+            item = self.named(Component, name)
+        except KeyError:
+            if default:
+                return default[0]
+            raise
+        value = self.value(item.id)
+        self.remove(item.id)
+        return value
+
+    def value_dict(self):
+        """Disposable resolved snapshot, never an authoritative collection."""
+        return {name: self.value(uid) for name, uid in tuple(self._by_category.get(Component, {}).items())}
+
+    def value_names(self):
+        self.entity._check()
+        return tuple(self._by_category.get(Component, {}))
+
+    def clear_values(self):
+        for name in self.value_names():
+            self.remove(self.named(Component, name).id)
+
+    def touch_value(self, name):
+        item = self.named(Component, name)
+        self.entity._changed("component.mutate", name, new=self.value(item.id))
+        self.entity.runtime._composition_changed(item.id)
+
+    @contextmanager
+    def edit_value(self, name):
+        value = deepcopy(self.require_value(name))
+        yield value
+        self.set_value(name, value)
+
+    def inherit_value(self, name, source, patch=()):
+        source = source.id if isinstance(source, (Component, InheritedComponent)) else UUID(str(source))
+        return self.add(InheritedComponent(name, source, tuple(deepcopy(patch))))
+
+    def patch_value(self, identity, operations):
+        current = self[identity]
+        if not isinstance(current, InheritedComponent):
+            raise TypeError("Only inherited components have patches")
+        return self.replace(current.id, replace(current, patch=tuple(deepcopy(operations))))
+
+    def tag_names(self):
+        return tuple(item.name for item in self.all(Tag))
+
+    def add_tag(self, name):
+        if self.has(Tag, name):
+            return self.named(Tag, name)
+        return self.add(Tag(name))
+
+    def remove_tag(self, name):
+        if self.has(Tag, name):
+            return self.remove(self.named(Tag, name).id)
+
+    def target(self, name, default=None):
+        try:
+            item = self.named(Relation, name)
+        except KeyError:
+            return default
+        return self.entity.runtime.resolve(item.target)
+
+    def connect(self, name, target):
+        self.entity.runtime._validate(target)
+        if target._destroying:
+            raise RuntimeError("Cannot link to an entity during destruction")
+        if not self.has(Relation, name):
+            return self.add(Relation(name, target.id))
+        current = self.named(Relation, name)
+        previous = self.entity.runtime.resolve(current.target)
+        incoming = self.entity.runtime._incoming.get(previous)
+        if incoming is not None:
+            incoming.discard((self.entity, name))
+            if not incoming:
+                self.entity.runtime._incoming.pop(previous, None)
+        edited = replace(current, target=target.id)
+        self._put(edited)
+        self.entity.runtime._incoming.setdefault(target, set()).add((self.entity, name))
+        self.entity._changed("relation.set", name, old=previous, new=target)
+        return edited
+
+    def disconnect(self, name, *default):
+        if not self.has(Relation, name):
+            if default:
+                return default[0]
+            raise KeyError(name)
+        item = self.named(Relation, name)
+        target = self.entity.runtime.resolve(item.target)
+        self.remove(item.id)
+        return target
+
+    def link_dict(self):
+        return {item.name: self.entity.runtime.resolve(item.target) for item in self.all(Relation)}
 
     def _put(self, item):
         old = self._records.get(item.id)
@@ -124,6 +264,8 @@ class Items(Mapping):
             # Value/patch edits do not need to rebuild unchanged identity indexes.
             self._records[item.id] = item
             self.entity.runtime.linker.objects[item.id] = item
+            for item_type in type(item).__mro__[:-1]:
+                self._by_type[item_type][item.id] = item
             return
         category = self.category(item)
         key = category, item.name
@@ -134,6 +276,12 @@ class Items(Mapping):
         if previous_id is not None and previous_id != item.id:
             self._drop(previous_id)
         old = self._records.get(item.id)
+        if old is not None and type(old) is not type(item):
+            for item_type in type(old).__mro__[:-1]:
+                index = self._by_type[item_type]
+                index.pop(old.id)
+                if not index:
+                    self._by_type.pop(item_type)
         if old is not None and old.name != item.name:
             self._names.pop((category, old.name), None)
             self._by_category.get(category, {}).pop(old.name, None)
@@ -141,9 +289,16 @@ class Items(Mapping):
         self._records[item.id] = item
         self._names[key] = item.id
         self._by_category.setdefault(category, {})[item.name] = item.id
+        for item_type in type(item).__mro__[:-1]:
+            self._by_type.setdefault(item_type, {})[item.id] = item
 
     def _drop(self, identity):
         item = self._records.pop(identity)
+        for item_type in type(item).__mro__[:-1]:
+            index = self._by_type[item_type]
+            index.pop(identity)
+            if not index:
+                self._by_type.pop(item_type)
         self._names.pop((self.category(item), item.name), None)
         self._by_category.get(self.category(item), {}).pop(item.name, None)
         self.entity.runtime.linker.unregister(identity)
@@ -296,6 +451,7 @@ class Items(Mapping):
         else:
             renamed = replace(item, name=name)
         self._put(renamed)
+        self._reindex_order()
         if isinstance(item, Relation):
             target = self.entity.runtime.resolve(item.target)
             incoming = self.entity.runtime._incoming[target]
@@ -349,10 +505,17 @@ class Items(Mapping):
         order.remove(item.id)
         order.insert(index, item.id)
         self._records = {uid: self._records[uid] for uid in order}
+        self._reindex_order()
+        self.entity._changed("item.reorder", item.name)
+
+    def _reindex_order(self):
+        """Rebuild disposable ordering indexes from the UUID dictionary."""
         self._by_category = {}
+        self._by_type = {}
         for record in self._records.values():
             self._by_category.setdefault(self.category(record), {})[record.name] = record.id
-        self.entity._changed("item.reorder", item.name)
+            for item_type in type(record).__mro__[:-1]:
+                self._by_type.setdefault(item_type, {})[record.id] = record
 
     def _replace_identity(self, category, name, identity):
         item = self.named(category, name)
@@ -365,6 +528,10 @@ class Items(Mapping):
 
     def all(self, item_type):
         self.entity._check()
+        if item_type is object:
+            return tuple(self._records.values())
+        if isinstance(item_type, type) and not hasattr(item_type, '__abstractmethods__'):
+            return tuple(self._by_type.get(item_type, {}).values())
         return tuple(item for item in self._records.values() if isinstance(item, item_type))
 
 
@@ -421,7 +588,7 @@ class NamedValues(MutableMapping):
         slots = iter(ids)
         order = [next(slots) if identity in ids else identity for identity in records]
         self.entity.items._records = {identity: records[identity] for identity in order}
-        self.entity.items._by_category[self.category] = {records[uid].name: uid for uid in ids}
+        self.entity.items._reindex_order()
 
 
 class TagValues(MutableSet):

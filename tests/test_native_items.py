@@ -135,3 +135,63 @@ class NativeItemTests(unittest.TestCase):
         self.assertIs(self.runtime.linker.resolve(record.id), record)
         self.assertFalse(record.running)
         self.assertFalse(record._initialized)
+
+    def test_named_value_operations_preserve_concrete_type_and_uuid(self):
+        owner = self.runtime.create()
+        transform = owner.items.add(TransformComponent('transform', {'angle': 0}))
+        owner.items.set_value('transform', {'angle': 90})
+        edited = owner.items.component('transform')
+        self.assertIsInstance(edited, TransformComponent)
+        self.assertEqual(edited.id, transform.id)
+        with owner.items.edit_value('transform') as value:
+            value['angle'] = 180
+        self.assertEqual(owner.items.require_value('transform'), {'angle': 180})
+        self.assertEqual(owner.items.component('transform').id, transform.id)
+        with self.assertRaises(RuntimeError):
+            with owner.items.edit_value('transform') as value:
+                value['angle'] = 270
+                raise RuntimeError('rollback')
+        self.assertEqual(owner.items.require_value('transform'), {'angle': 180})
+
+    def test_snapshots_cannot_become_an_authoritative_collection(self):
+        owner = self.runtime.create()
+        owner.items.update_values({'x': 1, 'y': 2})
+        snapshot = owner.items.value_dict()
+        snapshot['x'] = 99
+        snapshot['new'] = 3
+        self.assertEqual(owner.items.require_value('x'), 1)
+        self.assertFalse(owner.items.has_value('new'))
+        self.assertEqual(set(owner.items.value_names()), {'x', 'y'})
+        self.assertEqual(owner.items.remove_value('x'), 1)
+        self.assertEqual(owner.items.remove_value('x', 'missing'), 'missing')
+
+    def test_native_link_retarget_keeps_uuid_and_cleans_old_incoming_index(self):
+        owner = self.runtime.create()
+        first, second = self.runtime.create(), self.runtime.create()
+        relation = owner.items.connect('target', first)
+        handle = self.runtime.linker.handle(relation.id)
+        edited = owner.items.connect('target', second)
+        self.assertEqual(edited.id, relation.id)
+        self.assertIs(self.runtime.linker.resolve_handle(handle), edited)
+        self.assertNotIn(first, self.runtime._incoming)
+        first.destroy()
+        self.assertIs(owner.items.target('target'), second)
+        self.assertIs(owner.items.disconnect('target'), second)
+        self.assertNotIn(second, self.runtime._incoming)
+
+    def test_type_index_tracks_subclass_edit_rename_remove_and_order(self):
+        owner = self.runtime.create()
+        first = owner.items.add(Component('x', 1))
+        transform = owner.items.add(TransformComponent('transform', {'x': 0}))
+        self.assertEqual(owner.all(Component), (first, transform))
+        self.assertEqual(owner.all(TransformComponent), (transform,))
+        owner.items.set_value('transform', {'x': 1})
+        edited = owner.items.component('transform')
+        self.assertEqual(owner.all(TransformComponent), (edited,))
+        owner.items.move(edited.id, 0)
+        self.assertEqual(owner.all(Component), (edited, first))
+        renamed = owner.items.rename(edited.id, 'pose')
+        self.assertEqual(owner.all(Component), (renamed, first))
+        owner.items.remove(edited.id)
+        self.assertFalse(owner.all(TransformComponent))
+        self.assertEqual(owner.all(Component), (first,))
