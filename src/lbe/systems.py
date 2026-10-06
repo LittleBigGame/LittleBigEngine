@@ -69,15 +69,17 @@ class Assets:
                 except ValueError:
                     uid = None
             if uid is not None and self.registry:
+                entry = self.registry.get(uid)
+                if entry is not None and ASSET_EXTENSIONS.get(Path(entry['path']).suffix.lower()) == 'image':
+                    # Image references are lazy: validate/decode once per rendered
+                    # frame, not once for every entity sharing the texture UUID.
+                    return TextureAsset(uid, 'image', entry['name'], self.registry)
                 p = self.registry.get_path(uid)
                 if p is None:
                     raise KeyError(uid)
                 if not p.exists():
                     raise FileNotFoundError(p)
                 if p.suffix.lower() != '.py':
-                    if ASSET_EXTENSIONS.get(p.suffix.lower()) == 'image':
-                        entry = self.registry.get(uid)
-                        return TextureAsset(uid, 'image', entry['name'], self.registry)
                     return p
                 definition=self.system(p)
                 if definition.asset_id != uid:

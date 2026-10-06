@@ -6,7 +6,7 @@ import struct
 import tempfile
 from types import SimpleNamespace
 import unittest
-from uuid import uuid4
+from unittest.mock import patch
 import zlib
 
 from lbe import Assets, Runtime, TextureAsset
@@ -44,12 +44,18 @@ class TextureTests(unittest.TestCase):
         self.path.rename(new_path)
         self.registry.rename(self.uid, new_path)
         self.assertEqual(texture.path, new_path)
+
         self.assertEqual(self.assets.resolve(self.registry.get_ref(self.uid)).id, self.uid)
         new_path.unlink()
         with self.assertRaises(FileNotFoundError):
             _ = texture.path
         new_path.write_bytes(png_bytes())
         self.assertEqual(texture.path, new_path)
+
+    def test_resolving_shared_texture_handles_does_not_touch_filesystem(self):
+        with patch.object(self.registry, 'get_path', side_effect=AssertionError('eager file lookup')):
+            for _ in range(50):
+                self.assertEqual(self.assets.resolve(self.uid).id, self.uid)
 
     def test_import_preserves_original_and_has_reversible_uuid(self):
         runtime = Runtime()
@@ -144,8 +150,10 @@ class NativeTextureTests(unittest.TestCase):
     def test_sprites_share_texture_pool_refresh_edits_and_release_gpu_ownership(self):
         graphics = self.graphics
         graphics.begin()
-        for key in range(2):
-            graphics.sprite(self.ref, key * 10, 0, 8, 8, key=key)
+        with patch.object(self.ref.registry, 'get_path', wraps=self.ref.registry.get_path) as lookup:
+            for key in range(2):
+                graphics.sprite(self.ref, key * 10, 0, 8, 8, key=key)
+            self.assertEqual(lookup.call_count, 1)
         graphics.finish()
         self.assertEqual(len(graphics._pool), 2)
         self.assertEqual(len(graphics._textures), 1)
