@@ -12,6 +12,17 @@ Component storage remains the source of truth for derived indexes and views.
 
 ### UUID-keyed item storage and linking
 
+The native mutation boundary is `entity.items`: UUID-selected add/remove,
+replacement, rename, behaviour reload and ordering update the actual records
+and their lifecycle/change observations. Application-defined typed records are
+accepted without adding Entity fields. Type/MRO indexes are disposable views
+rebuilt from the UUID dictionary; they retain canonical record order after edits.
+Named value/link helpers operate on those records, and `value_dict()` returns a
+disposable snapshot, not writable authoritative state. Engine UI, editor template
+and backend component consumers now use these native item operations. The older
+Entity collection properties still exist at this intermediate checkpoint; their
+removal, native persistence and unified item inspector are outstanding cutover work.
+
 On `codex/uuid-kernel-gui`, entity data is owned by one UUID-keyed `Items` store.
 Named components/tags/relations/system/script collections are compatibility
 projections. Components, inherited declarations, tags, relation/parent links and

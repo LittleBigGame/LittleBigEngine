@@ -37,9 +37,10 @@ class Linker:
             self.owners[identity] = owner
         self._forget_dependencies(identity)
         from .items import InheritedComponent
+        from .systems import SystemInstance
         if isinstance(item, InheritedComponent):
             self.dependencies[identity] = {item.source}
-        elif hasattr(item, "definition") and item.definition.references:
+        elif isinstance(item, SystemInstance) and item.definition.references:
             self.dependencies[identity] = {reference.id for reference in item.definition.references}
         else:
             self.dependencies.pop(identity, None)

@@ -18,6 +18,13 @@ class CustomRecord:
     id: UUID = field(default_factory=uuid4)
 
 
+@dataclass(frozen=True)
+class DefinitionMetadata:
+    name: str
+    definition: object
+    id: UUID = field(default_factory=uuid4)
+
+
 class NativeItemTests(unittest.TestCase):
     def setUp(self):
         self.runtime = Runtime()
@@ -195,3 +202,10 @@ class NativeItemTests(unittest.TestCase):
         owner.items.remove(edited.id)
         self.assertFalse(owner.all(TransformComponent))
         self.assertEqual(owner.all(Component), (first,))
+
+    def test_custom_record_field_names_do_not_imply_behaviour(self):
+        owner = self.runtime.create()
+        record = DefinitionMetadata('metadata', {'description': 'ordinary data'})
+        self.assertIs(owner.items.add(record), record)
+        self.assertEqual(owner.all(DefinitionMetadata), (record,))
+        self.assertNotIn(record.id, self.runtime.linker.dependencies)
