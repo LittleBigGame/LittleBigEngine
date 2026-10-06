@@ -1,5 +1,6 @@
 """Actual pooled texture sprites, UUID script dispatch, walls and observable statistics."""
 from lbe.space import world_bounds
+renderer = 'textured sprites' if callable(getattr(graphics, 'sprite', None)) else 'round shapes (texture API unavailable)'
 
 
 def draw():
@@ -19,5 +20,5 @@ def draw():
                 ball.run(entity.drawing_script)
     graphics.text(f'{len(entity.children)} balls | contacts {entity.contacts} | walls {entity.wall_contacts} | messages {entity.messages}',
                   12, 8, key='stats', size=12)
-    graphics.text(f'Energy {entity.kinetic_energy:.1f} | Space/F5 pause | S save | tick {entity.tick}',
+    graphics.text(f'Energy {entity.kinetic_energy:.1f} | Space/F5 pause | S save | tick {entity.tick} | {renderer}',
                   12, 29, key='help', size=10)

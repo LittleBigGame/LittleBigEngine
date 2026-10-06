@@ -4,7 +4,9 @@ import math
 components = ('temperature', 'contacts', 'checksum', 'payload')
 
 
-def run(entity, packet):
+# **kwargs keeps this callback out of the older kernel's two-parameter
+# entity/dt shorthand. Both dispatchers then pass the original event packet.
+def run(entity, packet, **kwargs):
     other = resolve(packet['other']) if packet['other'] is not None else None
     if other is not None:
         entity.relations['last_contact'] = other

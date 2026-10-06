@@ -116,7 +116,8 @@ def measure_case(directory, mode, output, *, frames, warmup, profile_frames, vis
                       observable_changes=runtime.changes.sequence - sequence,
                       activity_records=runtime.services['log'].sequence - activity,
                       entities=len(runtime.entities), sprites=sum(k[0] == 'sprite' for k in graphics._pool),
-                      gpu_textures=len(graphics._textures), graphics_objects=len(graphics._pool),
+                      gpu_textures=len(getattr(graphics, '_textures', {})), graphics_objects=len(graphics._pool),
+                      renderer='textured_sprites' if callable(getattr(graphics, 'sprite', None)) else 'round_shapes',
                       kinetic_energy=game.kinetic_energy, raw_frame_ms=timings,
                       healthy=True)
         if mode != 'render_only' and frames >= 20 and result['messages'] == 0:
@@ -177,9 +178,11 @@ def main():
     if not args.visible and sys.platform != 'win32':
         pyglet.options['headless'] = True
     from pyglet import gl
-    scenes = sorted(args.scenes.glob('BouncyBox_*'))
+    scenes = sorted(p for p in args.scenes.glob('BouncyBox_*')
+                    if p.is_dir() and (p / 'scene.json').is_file()
+                    and (p.name.endswith('.lbe') or not p.with_name(p.name + '.lbe').exists()))
     if args.counts is not None:
-        scenes = [p for p in scenes if int(p.name.rsplit('_', 1)[1]) in args.counts]
+        scenes = [p for p in scenes if int(p.name.removesuffix('.lbe').rsplit('_', 1)[1]) in args.counts]
     if not scenes:
         parser.error('No matching saved scenes found')
     output = args.output or args.scenes / 'profiles'
@@ -219,10 +222,10 @@ def main():
             (output / 'summary.json').write_text(json.dumps(dict(environment=environment, results=results), indent=2), encoding='utf-8')
     rows = ['# LBE bouncy-box profile', '', f"Renderer: `{environment['graphics_renderer']}`", '',
             environment['interpretation'], '',
-            '| Balls | Mode | Mean ms | P95 ms | Throughput fps | Physics ms | Render submission ms | Batch + GL completion ms | Messages |',
-            '|---:|---|---:|---:|---:|---:|---:|---:|---:|']
+            '| Balls | Mode | Drawing | Mean ms | P95 ms | Throughput fps | Physics ms | Render submission ms | Batch + GL completion ms | Messages |',
+            '|---:|---|---|---:|---:|---:|---:|---:|---:|---:|']
     for r in results:
-        rows.append(f"| {r['balls']} | {r['mode']} | {r['mean_frame_ms']:.2f} | {r['p95_frame_ms']:.2f} | "
+        rows.append(f"| {r['balls']} | {r['mode']} | {r['renderer']} | {r['mean_frame_ms']:.2f} | {r['p95_frame_ms']:.2f} | "
                     f"{r['throughput_fps']:.1f} | {r['physics_ms']:.2f} | {r['render_submission_ms']:.2f} | "
                     f"{r['batch_and_gpu_completion_ms']:.2f} | {r['messages']} |")
     rows += ['', 'CPU profiles (`cpu.txt`, `cpu.pstats`), raw frame samples (`timings.json`), and actual',

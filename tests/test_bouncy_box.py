@@ -96,6 +96,32 @@ class BouncyBoxTests(unittest.TestCase):
         self.assertEqual(self.game.tick, 8)
         self.assertGreater(self.game.dropped_time, 0)
 
+    def test_kernel_without_sprite_api_draws_round_balls_and_exchanges_packets(self):
+        recorded = RecordingGraphics()
+        graphics = SimpleNamespace(rect=recorded.rect, text=recorded.text, view=recorded.view)
+        runtime = load_project(self.window, graphics, Input(), self.directory)
+        self.addCleanup(runtime.close)
+        game = runtime.services['game']
+        for _ in range(30):
+            runtime.step(1 / 60)
+        profile.healthy(runtime)
+        self.assertGreater(game.messages, 0)
+        self.assertTrue(any(b.payload['generation'] > 0 for b in game.children))
+        for ball in game.children:
+            recorded.rectangles.clear()
+            ball.run(game.drawing_script)
+            self.assertEqual(len(recorded.rectangles), 16)
+            for args, kw in recorded.rectangles:
+                x, y, w, h = args
+                self.assertGreaterEqual(x, ball.x)
+                self.assertGreaterEqual(y, ball.y)
+                self.assertLessEqual(x + w, ball.x + ball.w + 1e-10)
+                self.assertLessEqual(y + h, ball.y + ball.h + 1e-10)
+                self.assertEqual(kw['key'][0], ball.id)
+            widths = [args[2] for args, _ in recorded.rectangles]
+            self.assertLess(widths[0], widths[7])
+            self.assertAlmostEqual(widths[0], widths[-1])
+
     def test_build_refuses_existing_scene_and_archive_has_relative_projects(self):
         with self.assertRaises(FileExistsError):
             build.build_scene(self.directory, 16)
@@ -118,7 +144,7 @@ class BouncyBoxTests(unittest.TestCase):
             self.assertFalse(any(name.startswith('profiles/') for name in bundle.namelist()))
             self.assertEqual(bundle.read('profile_scenes.py'), (example / 'profile_scenes.py').read_bytes())
             for count in (128, 512, 2048, 4096):
-                prefix = f'BouncyBox_{count:05d}/'
+                prefix = f'BouncyBox_{count:05d}.lbe/'
                 data = json.loads(bundle.read(prefix + 'project.json'))
                 self.assertEqual(len(data['entities']), count + 3)
                 self.assertEqual(json.loads(bundle.read(prefix + 'scene.json'))['balls'], count)
@@ -130,5 +156,56 @@ class BouncyBoxTests(unittest.TestCase):
                 for path in (example / 'template').rglob('*.py'):
                     relative = path.relative_to(example / 'template').as_posix()
                     self.assertEqual(bundle.read(prefix + relative), path.read_bytes())
+                for entity in data['entities']:
+                    for kind in ('systems', 'scripts'):
+                        for declaration in entity.get(kind, {}).values():
+                            if 'active_source' in declaration:
+                                self.assertEqual(declaration['active_source'],
+                                                 bundle.read(prefix + declaration['path']).decode('utf-8'))
                 self.assertTrue(all(not Path(value['path']).is_absolute() and '..' not in Path(value['path']).parts
                                     for value in assets.values()))
+
+
+@unittest.skipUnless(importlib.util.find_spec('pyglet'), 'optional desktop dependency')
+class NativeBouncyBoxTests(unittest.TestCase):
+    def test_saved_scene_paints_ball_centers_with_both_graphics_apis(self):
+        import pyglet
+        from pyglet import gl
+        from lbe.desktop import Graphics
+        from lbe.space import world_to_screen
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        directory = build.build_scene(Path(temporary.name) / 'scene.lbe', 16)
+        window = pyglet.window.Window(320, 240, visible=False)
+        self.addCleanup(window.close)
+        window.switch_to()
+        graphics = Graphics(window)
+        self.addCleanup(graphics.close)
+        for textured in (True, False):
+            with self.subTest(textured=textured):
+                adapter = graphics if textured else SimpleNamespace(
+                    rect=graphics.rect, text=graphics.text, view=graphics.view)
+                runtime = load_project(window, adapter, Input(), directory)
+                try:
+                    window.clear()
+                    graphics.begin()
+                    runtime.step(0)
+                    graphics.finish()
+                    gl.glFinish()
+                    profile.healthy(runtime)
+                    game = runtime.services['game']
+                    viewport, camera = game.relations['viewport'], game.relations['camera']
+                    image = pyglet.image.get_buffer_manager().get_color_buffer().get_image_data()
+                    pixels = image.get_bytes('RGBA', image.width * 4)
+                    for ball in game.children:
+                        x, y = world_to_screen(camera, viewport,
+                                               ball.x + ball.radius, ball.y + ball.radius)
+                        px = int(x * image.width / window.width)
+                        py = image.height - 1 - int(y * image.height / window.height)
+                        index = (py * image.width + px) * 4
+                        rgb = tuple(pixels[index:index + 3])
+                        self.assertGreater(sum(rgb), 120, (ball.id, rgb))
+                    self.assertEqual(len(graphics._textures), 1 if textured else 0)
+                finally:
+                    runtime.close()
+                    graphics.close()

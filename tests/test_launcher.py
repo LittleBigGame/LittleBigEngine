@@ -129,6 +129,28 @@ class LauncherTests(unittest.TestCase):
 
         self.assertFalse(renamed_dir.exists())
 
+    def test_project_contents_are_recognized_without_lbe_suffix(self):
+        for name, filename in (('saved_scene', 'project.json'), ('script_app', 'app.py')):
+            directory = self.base_dir / name
+            directory.mkdir()
+            (directory / filename).write_text('{}' if filename.endswith('.json') else '# app', encoding='utf-8')
+        (self.base_dir / 'ordinary_folder').mkdir()
+        runtime = create_launcher_runtime(self.window, self.graphics, self.input, self.on_select)
+        self.addCleanup(runtime.close)
+        root = runtime.entities[0]
+        root.browser_state.current_dir = self.base_dir
+        runtime.step(0)
+        for name in ('saved_scene', 'script_app'):
+            button = next(e for e in root.descendants if e.name == f'Btn_{name}')
+            self.assertIn('LBE Project', button.text)
+            self.assertNotIn('Legacy', button.text)
+            button.action()
+            self.assertEqual(self.selected_project, self.base_dir / name)
+            self.assertIsNone(self.selected_template)
+        folder = next(e for e in root.descendants if e.name == 'Btn_ordinary_folder')
+        folder.action()
+        self.assertEqual(root.browser_state.current_dir, self.base_dir / 'ordinary_folder')
+
     def test_custom_base_editor_template_selection(self):
         # Create a custom base template folder
         custom_tpl = self.base_dir / "my_custom_editor.lbe"

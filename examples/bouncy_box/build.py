@@ -91,7 +91,7 @@ def main():
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=True)
     for count in args.counts:
-        path = build_scene(args.output / f'BouncyBox_{count:05d}', count, seed=args.seed)
+        path = build_scene(args.output / f'BouncyBox_{count:05d}.lbe', count, seed=args.seed)
         print(f'Saved {count} balls: {path}', flush=True)
     shutil.copy2(Path(__file__).parent / 'profile_scenes.py', args.output / 'profile_scenes.py')
     for document in ('README.md', 'RESULTS.md'):

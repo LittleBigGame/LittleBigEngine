@@ -265,7 +265,7 @@ def create_launcher_runtime(window, graphics, input_state, on_select_project):
         for p in visible_entries:
             is_dir = p.is_dir()
             is_lbe = is_dir and p.name.endswith(".lbe")
-            is_legacy = is_dir and not is_lbe and ((p / "app.py").exists() or (p / "project.json").exists())
+            is_project = is_lbe or (is_dir and ((p / "app.py").is_file() or (p / "project.json").is_file()))
             is_template_item = is_dir and (template_root is not None and p.parent.resolve() == template_root)
 
             if state.mode == "pick_template":
@@ -276,7 +276,7 @@ def create_launcher_runtime(window, graphics, input_state, on_select_project):
                     btn_hover = (45, 125, 105)
                     ink_color = (75, 230, 185, 255)
                     action = (lambda target=p: lambda: on_select_project(state.target_project_path, template=target))()
-                elif is_lbe or is_legacy or is_template_item:
+                elif is_project or is_template_item:
                     display_name = f"🚀  Copy '{p.name}' & Create Project"
                     btn_color = (65, 55, 25)
                     btn_hover = (115, 95, 40)
@@ -303,17 +303,11 @@ def create_launcher_runtime(window, graphics, input_state, on_select_project):
                 dynamic_rows.append(row_entity)
             else:
                 # In Step 1: One-step opening
-                if is_lbe:
+                if is_project:
                     display_name = f"🚀  {p.name}   [LBE Project - Click to Open]"
                     btn_color = (28, 55, 75)
                     btn_hover = (45, 95, 125)
                     ink_color = (69, 182, 199, 255)
-                    action = (lambda target=p: lambda: on_select_project(target, template=None))()
-                elif is_legacy:
-                    display_name = f"📦  {p.name}   [Legacy Project - Click to Open]"
-                    btn_color = (55, 45, 30)
-                    btn_hover = (95, 75, 40)
-                    ink_color = (232, 165, 80, 255)
                     action = (lambda target=p: lambda: on_select_project(target, template=None))()
                 elif is_dir:
                     display_name = f"📁  {p.name}"

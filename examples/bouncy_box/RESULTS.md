@@ -1,7 +1,10 @@
 # Bouncy-box profiling results
 
 Measured 2026-10-06 on kernel commit `a25534b6e35f5499c7c2c4c32dbbfd6ecea046f0`.
-Later packaging/documentation commits do not change the measured runtime.
+These are historical measurements of that commit and the original scene scripts.
+The replacement bundle preserves initial entity state and UUIDs, but updates the
+scripts for older-kernel compatibility. Rerun its profiler to measure those scripts;
+the texture-free round-shape renderer is a different workload from these results.
 
 ## Method and limits
 
@@ -83,4 +86,3 @@ The GitHub scene ZIP includes this summary and the exact initial projects.
 A full local profiling bundle additionally contains raw frame samples, CPU
 profiles, input SHA-256 manifests and real framebuffer captures under `profiles/`.
 Raw logs/screenshots remain outside the source repository.
-

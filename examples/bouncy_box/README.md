@@ -2,15 +2,17 @@
 
 Extract the bundle's contents into `F:/LBETestScenes`. Nothing in a scene depends
 on that drive letter: move/copy the whole project, including `project.json`, to
-any machine. Install the `feature/textures-physics-profiling` GitHub branch (which
-includes the stabilization changes) with Python 3.11+:
+any machine. The scenes also run with current `main`: kernels without the texture
+API draw round colored shapes, and the HUD identifies that renderer. For textured
+balls and the stabilization changes, install the `feature/textures-physics-profiling`
+GitHub branch with Python 3.11+:
 
 ```powershell
 git clone --branch feature/textures-physics-profiling https://github.com/LittleBigGame/LittleBigEngine.git
 cd LittleBigEngine
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -e ".[desktop]"
-.\.venv\Scripts\python.exe -m lbe --project F:/LBETestScenes/BouncyBox_00512
+.\.venv\Scripts\python.exe -m lbe --project F:/LBETestScenes/BouncyBox_00512.lbe
 ```
 
 The ZIP includes saved **128, 512, 2048 and 4096-ball** projects, initial entity
@@ -18,6 +20,20 @@ state, seeds/settings, shared RGBA ball texture, UUID-attached scripts and a mea
 results summary (`RESULTS.md`). The full profiling bundle also includes raw profiles.
 Space/F5 pauses; S saves the current scene. Closing without S leaves the measured
 initial state intact. Choose a lower-count scene first on a slower machine.
+
+Each project folder now ends in `.lbe`, so older launchers recognize it as an LBE
+project. Extract the replacement ZIP into a fresh directory, or alongside the old
+unsuffixed scene folders; open the new `.lbe` folder. The saved entity and asset
+UUIDs are unchanged. Your own saved copies are not overwritten or migrated.
+
+If your checkout is currently on `main` and you want textures:
+
+```powershell
+git fetch origin
+git switch feature/textures-physics-profiling
+git pull --ff-only
+.\.venv\Scripts\python.exe -m pip install -e ".[desktop]"
+```
 
 ## Reproduce profiles on your PC
 
@@ -33,11 +49,13 @@ EGL throughput as your Windows GPU performance.
 
 There are independent **physics-only, render-only and combined** runs, each loaded
 from the exact same saved initial state. Frames use 1/60 simulated seconds and
-two 1/120 physics substeps. Real sprite batches are drawn and GL completion is
+two 1/120 physics substeps. Real graphics batches are drawn and GL completion is
 synchronized. Raw mean/p95 frame times are measured without cProfile; CPU call
 profiles are a separate replay. Startup/warmup/health checks are excluded from
 throughput. Inspect `summary.json`, `timings.json`, `cpu.txt`, `cpu.pstats`, and
 combined-mode `scene.png` captures. Scene file SHA-256 manifests are included.
+Each timing record identifies `textured_sprites` or `round_shapes`; compare runs
+using the same renderer. The historical results in `RESULTS.md` used textures.
 
 ## Workload
 
