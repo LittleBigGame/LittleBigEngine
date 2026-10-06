@@ -22,8 +22,11 @@ def world_position(entity, root=None):
     while current is not None and current is not root:
         if current is not entity and root is None and "root" in current.tags:
             break
-        x += current.components.get("x", 0.0)
-        y += current.components.get("y", 0.0)
+        cx, cy = current.components.get('x', 0.0), current.components.get('y', 0.0)
+        if any(not isinstance(v, (int, float)) or not isfinite(v) for v in (cx, cy)):
+            raise ValueError('World coordinates must be finite numbers')
+        x += cx
+        y += cy
         current = current.parent
     return x, y
 
@@ -32,7 +35,10 @@ def world_bounds(entity):
     box = bounds(entity)
     if box is None:
         return None
-    x, y = world_position(entity)
+    try:
+        x, y = world_position(entity)
+    except (ValueError, TypeError):
+        return None
     dx, dy = x - entity.x, y - entity.y
     return box[0] + dx, box[1] + dy, box[2] + dx, box[3] + dy
 

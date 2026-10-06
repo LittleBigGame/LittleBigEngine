@@ -32,6 +32,9 @@ class Input:
                 self.press(event[1])
             elif event[0] == "key_up":
                 self.release(event[1])
+            elif event[0] == 'cancel':
+                self.held.clear()
+                self.ctrl = False
         return pending
 
 
@@ -244,6 +247,7 @@ def launch(build, *, headless=False, frames=None, screenshot=None):
         pressed_keys.clear()
         input_state.held.clear()
         input_state.ctrl = False
+        input_state.pending.append(('cancel',))
 
     @window.event
     def on_draw():

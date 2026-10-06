@@ -112,3 +112,10 @@ def update(*, self, dt): self.x += dt
         script.run(amount=4)
         self.assertEqual(self.owner.x, 7)
         self.assertEqual(list(script.errors), [])
+
+    def test_single_self_argument_receives_each_target_not_delta_time(self):
+        child = self.runtime.create(parent=self.owner, x=1)
+        instance = self.owner.systems.attach('worker', SystemDefinition('def run(self): self.x += 1'))
+        self.runtime.step(2)
+        self.assertEqual(child.x, 2)
+        self.assertEqual(list(instance.errors), [])

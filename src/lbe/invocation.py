@@ -23,7 +23,7 @@ def invoke(callback, entity, args=(), kwargs=None):
             elif parameter.name in TIME_NAMES and args:
                 kwargs.setdefault(parameter.name, args[0])
     if positional and positional[0].name in ENTITY_NAMES:
-        candidates = [(entity, *args), args]
+        candidates = [(entity, *args), (entity,), args]
     elif len(positional) > 1 and positional[0].name in TIME_NAMES and positional[1].name in ENTITY_NAMES:
         candidates = [(args[0] if args else 0.0, entity, *args[1:]), args]
     else:

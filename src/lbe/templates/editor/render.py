@@ -1,5 +1,9 @@
 """Draw compatible children through their camera and viewport with culling and spatial debug."""
 
+from lbe.space import world_bounds
+
+invalid_targets = set()
+
 
 def draw():
     viewport = entity.relations['viewport']
@@ -72,14 +76,26 @@ def draw():
         for target in query("x", "y", "color", recursive=True):
             if target.id in drawn_ids:
                 continue
-            tx, ty = getattr(target, "x", 0.0), getattr(target, "y", 0.0)
-            tw = getattr(target, "w", 1.5)
-            th = getattr(target, "h", 1.5)
-            if tx + tw < view_min_x or tx > view_max_x or ty + th < view_min_y or ty > view_max_y:
-                continue
-            clr = target.components.get("color")
-            if isinstance(clr, (list, tuple)) and len(clr) >= 3:
+            try:
+                box = world_bounds(target)
+                if box is None:
+                    raise ValueError('Geometry requires finite numeric x, y, w and h')
+                tx, ty, right, bottom = box
+                tw = abs(target.components.get('w', 1.5))
+                th = abs(target.components.get('h', 1.5))
+                right, bottom = tx + tw, ty + th
+                if right < view_min_x or tx > view_max_x or bottom < view_min_y or ty > view_max_y:
+                    continue
+                clr = target.components.get("color")
+                if not isinstance(clr, (list, tuple)) or len(clr) < 3 or any(type(c) is not int or not 0 <= c <= 255 for c in clr[:3]):
+                    raise ValueError('Color requires RGB integers from 0 to 255')
                 graphics.rect(tx, ty, tw, th, color=clr[:3], key=(target.id.hex, "fallback_draw"), layer=1)
+                invalid_targets.discard(target.id)
+            except (TypeError, ValueError) as error:
+                if target.id not in invalid_targets:
+                    events.emit('render.error', target, str(error))
+                    invalid_targets.add(target.id)
+        invalid_targets.intersection_update(e.id for e in runtime.entities)
 
         selected = entity.relations.get("selection")
         outline = assets.get("dbc0d180-5a28-56a1-bc9c-85d63174e431")

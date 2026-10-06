@@ -466,9 +466,31 @@ class UI:
                     if callback:
                         callback(message)
 
+    def release_capture(self, event=None):
+        """Clear pointer ownership before a callback can fail or change the UI."""
+        self.root.relations.pop('text_drag', None)
+        active = self.root.relations.pop('active_drag', None)
+        if active is not None and active.alive:
+            if any(tag in active.tags for tag in ('splitter', 'scrollbar_thumb', 'button', 'chip')):
+                put(active, color=active.components.get('normal_color', active.components.get('color', FIELD)))
+            callback = active.components.get('on_release') if event is not None else active.components.get('on_cancel')
+            if callback:
+                callback(active, event or ('cancel',))
+
+    def cancel_interaction(self):
+        self.ctrl_held = self.alt_held = False
+        for name in ('entity_drag', 'asset_drag', 'dock_drag'):
+            self.root.components.pop(name, None)
+        self.release_capture()
+
     def dispatch(self, event):
         from .menus import dispatch_menu
         kind = event[0]
+        if kind == 'cancel':
+            self.cancel_interaction()
+            return
+        if kind == 'key' and event[1] == 'ESCAPE':
+            self.cancel_interaction()
         if kind == "motion":
             if len(event) > 3 and isinstance(event[3], int):
                 self.ctrl_held = bool(event[3] & 2)
@@ -501,17 +523,9 @@ class UI:
 
         if dispatch_menu(self, event):
             if kind == 'release':
-                self.root.relations.pop('text_drag', None)
                 for name in ('entity_drag', 'asset_drag', 'dock_drag'):
                     self.root.components.pop(name, None)
-                active_drag = self.root.relations.pop('active_drag', None)
-                if active_drag is not None:
-                    if any(tag in active_drag.tags for tag in ('splitter', 'scrollbar_thumb', 'button', 'chip')):
-                        normal = active_drag.components.get('normal_color', active_drag.components.get('color', FIELD))
-                        put(active_drag, color=normal)
-                    callback = active_drag.components.get('on_release')
-                    if callback:
-                        callback(active_drag, event)
+                self.release_capture(event)
             return
         if kind == "motion":
             mx, my = event[1], event[2]
@@ -528,34 +542,27 @@ class UI:
                         control.color = target_color
             return
         if kind == "release":
-            self.root.relations.pop("text_drag", None)
-            entity_drag = self.root.components.pop("entity_drag", None)
+            drops = {name: self.root.components.pop(name, None)
+                     for name in ('entity_drag', 'asset_drag', 'dock_drag')}
+            self.release_capture(event)
+            entity_drag = drops['entity_drag']
             if entity_drag is not None:
                 cb = self.root.components.get("on_entity_drop")
                 if cb:
                     cb(entity_drag, event)
                 return
-            asset_drag = self.root.components.pop("asset_drag", None)
+            asset_drag = drops['asset_drag']
             if asset_drag is not None:
                 cb = self.root.components.get("on_asset_drop")
                 if cb:
                     cb(asset_drag, event)
                 return
-            dock_drag = self.root.components.pop("dock_drag", None)
+            dock_drag = drops['dock_drag']
             if dock_drag is not None:
                 cb = self.root.components.get("on_dock_drop")
                 if cb:
                     cb(dock_drag, event)
                 return
-            active_drag = self.root.relations.pop("active_drag", None)
-            if active_drag is not None:
-                if "splitter" in active_drag.tags or "scrollbar_thumb" in active_drag.tags or "button" in active_drag.tags or "chip" in active_drag.tags:
-                    normal = active_drag.components.get("normal_color", active_drag.components.get("color", FIELD))
-                    if active_drag.color != normal:
-                        active_drag.color = normal
-                cb = active_drag.components.get("on_release")
-                if cb:
-                    cb(active_drag, event)
             return
         if kind == "drag":
             if self.root.components.get("asset_drag") is not None or self.root.components.get("entity_drag") is not None:

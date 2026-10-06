@@ -36,8 +36,11 @@ committing, always inspect what will be included with `git status` and
 4. **Run the relevant checks.** For this project, run:
 
    ```powershell
-   .\.venv\Scripts\python.exe -m unittest discover -s tests -v
+   .\.venv\Scripts\python.exe tests/run_suite.py -v
    ```
+
+   On Linux/macOS use `.venv/bin/python tests/run_suite.py -v`. The runner
+   isolates preferences and analysis caches from your normal editor state.
 
 5. **Review the change before committing.**
 

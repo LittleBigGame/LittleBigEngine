@@ -149,6 +149,12 @@ independent of Jedi; install `.[editor]` for analysis without the desktop backen
   including outside its bounds with auto-scrolling. Shift-click extends the existing selection.
   Newline and empty-line selections have a visible highlight. Scrolling no longer
   jumps back to the caret unless the caret or text changes.
+- Escape or window deactivation cancels pointer capture and pending entity,
+  asset and panel drags without executing a drop. Release callbacks run after
+  capture is cleared, so a failed callback cannot leave the UI stuck dragging.
+- Invalid entity coordinates, dimensions or fallback RGB colors are skipped
+  instead of stopping the scene renderer. Correcting the data restores drawing;
+  viewport picking also ignores invalid geometry.
 
 Existing project scripts are never overwritten automatically. To adopt these
 changes in an existing project, compare its `code_editor.py` and `app.py` against

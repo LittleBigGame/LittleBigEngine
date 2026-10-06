@@ -1132,12 +1132,9 @@ def get_game_world_pos(e):
 
 def find_hit_game_entity(wx, wy):
     for child in reversed(state.game.descendants):
-        if "x" in child.components and "y" in child.components:
-            x, y = get_game_world_pos(child)
-            w = child.components.get("w", 0.0)
-            h = child.components.get("h", 0.0)
-            l, r = min(x, x + w), max(x, x + w)
-            b, t = min(y, y + h), max(y, y + h)
+        box = world_bounds(child)
+        if box is not None:
+            l, b, r, t = box
             if l <= wx <= r and b <= wy <= t:
                 return child
     return None
