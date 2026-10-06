@@ -69,7 +69,7 @@ class PersistentGraph:
         self._entities = {entity.id: entity for entity in entities}
         self.revision = 0
         self.schema_revision = 0
-        self._types = {entity.id: {key: type(value) for key, value in entity.components.items()} for entity in entities}
+        self._types = {entity.id: {key: type(value) for key, value in entity.items.value_dict().items()} for entity in entities}
         self._unsubscribe = runtime.changes.subscribe(self._change)
 
     @property
@@ -80,7 +80,7 @@ class PersistentGraph:
         if entity.runtime is not self.runtime or not entity.alive:
             raise ValueError("Expected a live entity in this runtime")
         self._entities[entity.id] = entity
-        self._types[entity.id] = {key: type(value) for key, value in entity.components.items()}
+        self._types[entity.id] = {key: type(value) for key, value in entity.items.value_dict().items()}
         self.revision += 1
         self.schema_revision += 1
 
@@ -98,7 +98,7 @@ class PersistentGraph:
                 self.schema_revision += 1
             elif change.kind.startswith("component."):
                 types = self._types[entity.id]
-                value_type = type(entity.components[change.key]) if change.key in entity.components else None
+                value_type = type(entity.items.require_value(change.key)) if entity.items.has_value(change.key) else None
                 if change.key == "name" or types.get(change.key) is not value_type:
                     self.schema_revision += 1
                 if value_type is None:
@@ -301,7 +301,7 @@ def deserialize_entities(entity_data_list, runtime, *, default_parent=None, proj
             elif record.get("parent_scope") != "detached":
                 target.parent = default_parent
             for key, value in record.get("components", {}).items():
-                target.components[key] = deserialize_value(value, runtime=runtime, id_map=created)
+                target.items.set_value(key, deserialize_value(value, runtime=runtime, id_map=created))
             for key, identity in record.get("relations", {}).items():
                 try:
                     target.relations[key] = runtime.resolve(UUID(identity))
@@ -456,7 +456,7 @@ def resolve_references(entity, runtime):
         key, value = item.name, item.value
         resolved, changed = resolve_value(value, set())
         if changed:
-            entity.components[key] = resolved
+            entity.items.set_value(key, resolved)
 
 
 def migrate_v0_to_v1(data):

@@ -30,7 +30,7 @@ def open_menu(ui, target, x, y, actions=None):
         return None
     width = min(ui.window.width, max(160, max(len(a["label"]) * ui.pitch + 24 for a in actions if a) if any(actions) else 160))
     height = min(ui.window.height, 8 + sum(8 if a is None else 28 for a in actions))
-    layer = max((e.components.get("layer", 2) for e in ui.controls()), default=2) + 10
+    layer = max((e.items.get_value("layer", 2) for e in ui.controls()), default=2) + 10
     menu = ui.create(ui.root, "ContextMenu", "panel", w=width, h=height,
                      x=max(0, min(x, ui.window.width-width)),
                      y=max(0, min(y, ui.window.height-height)), layer=layer,
@@ -78,7 +78,7 @@ def dispatch_menu(ui, event):
         if isinstance(menu.context_target, Entity) and not menu.context_target.alive:
             close_menu(ui)
             return True
-        items = [c for c in menu.children if "menu_action" in c.components]
+        items = [c for c in menu.children if c.items.has_value("menu_action")]
         if kind == "motion":
             menu.active = next((i for i, item in enumerate(items)
                                 if item.visible and contains(item, event[1], event[2])
@@ -120,7 +120,7 @@ def dispatch_menu(ui, event):
     controls.reverse()
     controls.sort(key=lambda c: (c.layer, c.depth), reverse=True)
     target = controls[0] if controls else ui.root
-    resolver = ui.root.components.get("context_target")
+    resolver = ui.root.items.get_value("context_target")
     if resolver:
         target = resolver(target, event)
     open_menu(ui, target, event[1], event[2])

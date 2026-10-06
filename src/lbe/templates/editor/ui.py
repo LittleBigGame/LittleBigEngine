@@ -2,8 +2,8 @@
 
 
 def update(dt):
-    entity.components["ui"].process()
+    entity.items.require_value("ui").process()
 
 
 def draw():
-    entity.components["ui"].draw()
+    entity.items.require_value("ui").draw()

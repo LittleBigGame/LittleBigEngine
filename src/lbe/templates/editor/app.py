@@ -19,7 +19,7 @@ from lbe.project_files import ProjectFiles
 from lbe.menus import open_menu
 from lbe.dock import DockTree, SplitNode, TabGroupNode
 
-state = entity.components.get("application_state")
+state = entity.items.get_value("application_state")
 
 
 def message(text):
@@ -238,7 +238,7 @@ def initialize():
     global state
     state = SimpleNamespace(runtime=entity.runtime, project=project, window=window,
                             graphics=graphics, input=input, app=entity)
-    entity.components["application_state"] = state
+    entity.items.set_value("application_state", state)
     state.hierarchy_sync = hierarchy_sync
     state.inspector_sync = inspector_sync
     state.message = message
@@ -253,7 +253,7 @@ def initialize():
     project_data = load_project_data(project)
     if project_data is not None and project_data.get("entities"):
         restored = deserialize_entities(project_data["entities"], state.runtime, default_parent=entity, project_dir=project, activate=False)
-        state.game = next((e for e in restored.values() if "root" in e.tags and e.components.get("name") == "Game"), None)
+        state.game = next((e for e in restored.values() if "root" in e.tags and e.items.get_value("name") == "Game"), None)
         if state.game is None:
             state.game = next((e for e in restored.values() if e.parent is entity), next(iter(restored.values())))
     else:
@@ -281,9 +281,9 @@ def initialize():
     drawing = assets["f084e424-d2d9-5fd1-8624-63580396274c"]
     outline = assets["dbc0d180-5a28-56a1-bc9c-85d63174e431"]
     for target in state.game.descendants:
-        if 'color' in target.components and drawing not in target.scripts:
+        if target.items.has_value('color') and drawing not in target.scripts:
             target.scripts.attach(drawing)
-        if 'color' in target.components and outline not in target.scripts:
+        if target.items.has_value('color') and outline not in target.scripts:
             target.scripts.attach(outline)
 
     state.hierarchy_rows = []
@@ -320,7 +320,7 @@ def initialize():
     state.app.relations['selection'] = initial_sel
     state.game.relations['selection'] = initial_sel
 
-    state.app.components["left_column_w"] = layout_data.get("left_column_w", 370)
+    state.app.items.set_value("left_column_w", layout_data.get("left_column_w", 370))
     state.header = state.ui.create(state.app, 'Header', 'panel', text='LBE', color=BG, dock='top', h=44, padding=(8, 16, 8, 16))
 
     # Top menu bar buttons (File, Edit, View)
@@ -355,8 +355,8 @@ def initialize():
     else:
         state.dock_tree = DockTree()
 
-    state.app.components["on_dock_drag"] = on_dock_drag
-    state.app.components["on_dock_drop"] = on_dock_drop
+    state.app.items.set_value("on_dock_drag", on_dock_drag)
+    state.app.items.set_value("on_dock_drop", on_dock_drop)
 
     state.active_left_tab = "hierarchy"
     state.tab_hierarchy = state.ui.button(state.app, 'TabHierarchy', 'HIERARCHY', lambda: switch_left_tab('hierarchy'),
@@ -370,7 +370,7 @@ def initialize():
     if "expanded" in h_conf:
         state.hierarchy.expanded = {UUID(x) for x in h_conf["expanded"]} | {state.app.id, state.game.id}
     if "panel_w" in h_conf and h_conf["panel_w"] is not None:
-        state.hierarchy.components["panel_w"] = h_conf["panel_w"]
+        state.hierarchy.items.set_value("panel_w", h_conf["panel_w"])
 
     state.file_explorer = state.ui.create(state.app, 'FileExplorerPanel', 'panel', text='PROJECT FILES', scroll=0,
                                           expanded=set(), dock='left_top', panel_h=h_conf.get("panel_h", 240),
@@ -383,19 +383,19 @@ def initialize():
     state.inspector = state.ui.create(state.app, 'InspectorPanel', 'panel', text='INSPECTOR', scroll=0,
                                      dock=i_conf.get("dock", 'left_bottom'), margin=(4, 8, 6, 8), resizable=True)
     if "panel_h" in i_conf and i_conf["panel_h"] is not None:
-        state.inspector.components["panel_h"] = i_conf["panel_h"]
+        state.inspector.items.set_value("panel_h", i_conf["panel_h"])
     if "panel_w" in i_conf and i_conf["panel_w"] is not None:
-        state.inspector.components["panel_w"] = i_conf["panel_w"]
+        state.inspector.items.set_value("panel_w", i_conf["panel_w"])
 
     cp_conf = layout_data.get("code_panel", {})
     state.code_panel = state.ui.create(state.app, 'CodeEditorPanel', 'panel', text='SYSTEM SOURCE',
                                        dock=cp_conf.get("dock", 'right_bottom'), padding=(8, 12, 8, 12), resizable=True)
     if "split_y" in cp_conf and cp_conf["split_y"] is not None:
-        state.code_panel.components["split_y"] = cp_conf["split_y"]
+        state.code_panel.items.set_value("split_y", cp_conf["split_y"])
     if "panel_h" in cp_conf and cp_conf["panel_h"] is not None:
-        state.code_panel.components["panel_h"] = cp_conf["panel_h"]
+        state.code_panel.items.set_value("panel_h", cp_conf["panel_h"])
     if "panel_w" in cp_conf and cp_conf["panel_w"] is not None:
-        state.code_panel.components["panel_w"] = cp_conf["panel_w"]
+        state.code_panel.items.set_value("panel_w", cp_conf["panel_w"])
 
     cam_conf = layout_data.get("camera", {})
     if "x" in cam_conf:
@@ -623,7 +623,7 @@ def locate_in_file_explorer(target):
         parts = rel_path.split("/")
         fe = getattr(state, "file_explorer", None)
         if fe:
-            expanded = fe.components.setdefault("expanded", set())
+            expanded = fe.items.ensure_value("expanded", set())
             cur = ""
             for part in parts[:-1]:
                 cur = f"{cur}/{part}" if cur else part
@@ -964,7 +964,7 @@ def extract_completion_context():
     owner = state.code.relations.get('owner', selected())
     owner_comps = {}
     if owner and owner.alive:
-        for k, v in owner.components.items():
+        for k, v in owner.items.value_dict().items():
             if isinstance(k, str) and k.isidentifier() and not keyword.iskeyword(k):
                 owner_comps[k] = type(v).__name__
 
@@ -974,12 +974,12 @@ def extract_completion_context():
         if not ent.alive:
             continue
         ent_comps = {}
-        for k, v in ent.components.items():
+        for k, v in ent.items.value_dict().items():
             if isinstance(k, str) and k.isidentifier() and not keyword.iskeyword(k):
                 tname = type(v).__name__
                 ent_comps[k] = tname
                 all_comps[k] = tname
-        name = ent.components.get("name")
+        name = ent.items.get_value("name")
         if name and isinstance(name, str) and name.isidentifier() and not keyword.iskeyword(name):
             entities_info[name] = {"components": ent_comps, "id": str(ent.id)}
 
@@ -993,23 +993,23 @@ def extract_completion_context():
 def get_editor_layout():
     sel = state.app.relations.get('selection')
     return {
-        "left_column_w": state.app.components.get("left_column_w", 370),
+        "left_column_w": state.app.items.get_value("left_column_w", 370),
         "hierarchy": {
-            "panel_h": state.hierarchy.components.get("panel_h", 240),
-            "panel_w": state.hierarchy.components.get("panel_w"),
-            "dock": state.hierarchy.components.get("dock", "left_top"),
-            "expanded": [str(eid) for eid in state.hierarchy.components.get("expanded", set()) if isinstance(eid, UUID)],
+            "panel_h": state.hierarchy.items.get_value("panel_h", 240),
+            "panel_w": state.hierarchy.items.get_value("panel_w"),
+            "dock": state.hierarchy.items.get_value("dock", "left_top"),
+            "expanded": [str(eid) for eid in state.hierarchy.items.get_value("expanded", set()) if isinstance(eid, UUID)],
         },
         "inspector": {
-            "panel_h": state.inspector.components.get("panel_h"),
-            "panel_w": state.inspector.components.get("panel_w"),
-            "dock": state.inspector.components.get("dock", "left_bottom"),
+            "panel_h": state.inspector.items.get_value("panel_h"),
+            "panel_w": state.inspector.items.get_value("panel_w"),
+            "dock": state.inspector.items.get_value("dock", "left_bottom"),
         },
         "code_panel": {
-            "split_y": state.code_panel.components.get("split_y"),
-            "panel_w": state.code_panel.components.get("panel_w"),
-            "panel_h": state.code_panel.components.get("panel_h"),
-            "dock": state.code_panel.components.get("dock", "right_bottom"),
+            "split_y": state.code_panel.items.get_value("split_y"),
+            "panel_w": state.code_panel.items.get_value("panel_w"),
+            "panel_h": state.code_panel.items.get_value("panel_h"),
+            "dock": state.code_panel.items.get_value("dock", "right_bottom"),
         },
         "camera": {
             "x": state.camera.x,
@@ -1053,14 +1053,14 @@ def attach(*args, **kwargs):
 
 def inspect_system():
     owner = state.code.relations.get('owner')
-    name = state.code.components.get('system_name')
+    name = state.code.items.get_value('system_name')
     if owner is None or name not in owner.systems:
         raise ValueError('Open an attached system first')
     open_panel(name, owner)
 
 def detach_system():
     owner = state.code.relations.get('owner')
-    name = state.code.components.get('system_name')
+    name = state.code.items.get_value('system_name')
     if owner is None or (name not in owner.systems and name not in owner.scripts):
         message('Open an attached system first')
         return
@@ -1095,8 +1095,8 @@ def panels_sync():
         if close:
             put(close, x=panel.x + max(10, panel.w - 40), y=panel.y + 5, w=30, h=24)
         for child in panel.children:
-            if 'line_index' in child.components:
-                idx = child.components['line_index']
+            if child.items.has_value('line_index'):
+                idx = child.items.require_value('line_index')
                 put(child, x=panel.x + 12, y=panel.y + 35 + idx * 22, w=max(0, panel.w - 24), h=20)
         target = panel.relations.get('target')
         if target is None:
@@ -1110,14 +1110,14 @@ def panels_sync():
                 lines += [f'ERROR: {error.message}' for error in instance.errors]
                 lines += [f'{k}: {safe_repr(v)}' for k, v in instance.globals.items()]
         elif panel.view_type == 'component':
-            value = safe_repr(target.components.get(panel.component, '<removed>'))
+            value = safe_repr(target.items.get_value(panel.component, '<removed>'))
             lines = [panel.component] + [value[i:i + 50] for i in range(0, len(value), 50)]
         else:
             lines = [str(target.id), 'Tags: ' + ', '.join(target.tags)]
-            lines += [f'{k}: {safe_repr(v)}' for k, v in target.components.items()]
-            lines += [f"{k} -> {v.components.get('name', v.id)}" for k, v in target.relations.items()]
+            lines += [f'{k}: {safe_repr(v)}' for k, v in target.items.value_dict().items()]
+            lines += [f"{k} -> {v.items.get_value('name', v.id)}" for k, v in target.relations.items()]
         for child in panel.children:
-            if 'line_index' in child.components:
+            if child.items.has_value('line_index'):
                 index = child.line_index
                 put(child, text=lines[index] if index < len(lines) else '')
 
@@ -1132,10 +1132,10 @@ def get_game_world_pos(e):
 
 def find_hit_game_entity(wx, wy):
     for child in reversed(state.game.descendants):
-        if "x" in child.components and "y" in child.components:
+        if child.items.has_value("x") and child.items.has_value("y"):
             x, y = get_game_world_pos(child)
-            w = child.components.get("w", 0.0)
-            h = child.components.get("h", 0.0)
+            w = child.items.get_value("w", 0.0)
+            h = child.items.get_value("h", 0.0)
             l, r = min(x, x + w), max(x, x + w)
             b, t = min(y, y + h), max(y, y + h)
             if l <= wx <= r and b <= wy <= t:
@@ -1144,7 +1144,7 @@ def find_hit_game_entity(wx, wy):
 
 
 def viewport_click(control, event):
-    if state.app.components.get("asset_drag") is not None or state.app.components.get("entity_drag") is not None:
+    if state.app.items.get_value("asset_drag") is not None or state.app.items.get_value("entity_drag") is not None:
         return False
     control.drag_pos = None
     wx, wy = screen_to_world(state.camera, control, event[1], event[2])
@@ -1161,13 +1161,13 @@ def viewport_click(control, event):
 
 
 def viewport_drag(control, event):
-    if state.app.components.get("asset_drag") is not None or state.app.components.get("entity_drag") is not None:
+    if state.app.items.get_value("asset_drag") is not None or state.app.items.get_value("entity_drag") is not None:
         return False
     x, y = event[1], event[2]
     if len(event) >= 7:
         dx, dy = event[5], event[6]
     else:
-        last = control.components.get("drag_pos")
+        last = control.items.get_value("drag_pos")
         if last is None:
             control.drag_pos = (x, y)
             return True
@@ -1190,8 +1190,8 @@ def viewport_scroll(control, event):
 
 
 def toggle_game_running():
-    is_paused = bool(state.game.components.get("paused", False))
-    state.game.components["paused"] = not is_paused
+    is_paused = bool(state.game.items.get_value("paused", False))
+    state.game.items.set_value("paused", not is_paused)
     status = "Game paused (F5 to run)" if not is_paused else "Game running (F5 to pause)"
     message(status)
 
@@ -1210,7 +1210,7 @@ def on_asset_drop(asset_drag, event):
             state.code.buffer.cursor = state.code.buffer.anchor = idx
             token = f'asset("{uid}")'
             state.code.buffer.insert(token)
-            state.code.components.touch("buffer")
+            state.code.items.touch_value("buffer")
             message(f"Inserted reference to {asset_drag.get('name', 'asset')}")
             return
 
@@ -1256,7 +1256,7 @@ def on_asset_drop(asset_drag, event):
         target_folder = None
         for row in getattr(state, "file_explorer_rows", []):
             if state.ui.visible(row) and contains(row, mx, my):
-                item = row.components.get("file_item")
+                item = row.items.get_value("file_item")
                 if item and item.get("is_dir"):
                     target_folder = item["path"]
                     break
@@ -1284,7 +1284,7 @@ def on_entity_drop(entity_drag, event):
             state.code.buffer.cursor = state.code.buffer.anchor = idx
             token = f'resolve("{ent_id}")'
             state.code.buffer.insert(token)
-            state.code.components.touch("buffer")
+            state.code.items.touch_value("buffer")
             message(f"Inserted entity reference to {ent_name}")
             return
 
@@ -1295,14 +1295,14 @@ def on_entity_drop(entity_drag, event):
             target_comp_key = None
             for lbl, fld in getattr(state, "component_rows", []):
                 if state.ui.visible(fld) and (contains(lbl, mx, my) or contains(fld, mx, my)):
-                    target_comp_key = fld.components.get("component_key")
+                    target_comp_key = fld.items.get_value("component_key")
                     break
             if target_comp_key:
-                tgt.components[target_comp_key] = dragged_ent
+                tgt.items.set_value(target_comp_key, dragged_ent)
                 message(f"Set component '{target_comp_key}' to {ent_name}")
             else:
                 comp_key = ent_name.lower().replace(" ", "_")
-                tgt.components[comp_key] = dragged_ent
+                tgt.items.set_value(comp_key, dragged_ent)
                 message(f"Added component '{comp_key}' referencing {ent_name}")
             save_editor_project()
             inspector_sync()
@@ -1318,7 +1318,7 @@ def on_entity_drop(entity_drag, event):
                     break
             if target_parent is not None and target_parent is not dragged_ent:
                 dragged_ent.parent = target_parent
-                message(f"Moved {ent_name} under {target_parent.components.get('name', target_parent.id)}")
+                message(f"Moved {ent_name} under {target_parent.items.get_value('name', target_parent.id)}")
             elif target_parent is None:
                 dragged_ent.parent = state.game
                 message(f"Moved {ent_name} to root")
@@ -1332,7 +1332,7 @@ def on_entity_drop(entity_drag, event):
         if dragged_ent:
             wx, wy = screen_to_world(state.camera, state.viewport, mx, my)
             select(dragged_ent)
-            if "x" in dragged_ent.components and "y" in dragged_ent.components:
+            if dragged_ent.items.has_value("x") and dragged_ent.items.has_value("y"):
                 dragged_ent.x = wx
                 dragged_ent.y = wy
                 message(f"Placed {ent_name} at ({int(wx)}, {int(wy)})")
@@ -1360,31 +1360,31 @@ def apply_asset_to_entity(tgt, asset_drag, target_area=None):
                     tgt.systems.attach(path.stem, definition)
                 save_editor_project()
                 inspector_sync()
-                message(f"Attached system '{path.stem}' to {tgt.components.get('name', tgt.id)}")
+                message(f"Attached system '{path.stem}' to {tgt.items.get_value('name', tgt.id)}")
                 return
         else:
             ref = AssetRef(id=uid, type="system", name=name)
             comp_name = Path(path_str).stem if path_str else "system"
-            tgt.components[comp_name] = ref
+            tgt.items.set_value(comp_name, ref)
             save_editor_project()
             inspector_sync()
-            message(f"Added system component '{comp_name}' on {tgt.components.get('name', tgt.id)}")
+            message(f"Added system component '{comp_name}' on {tgt.items.get_value('name', tgt.id)}")
             return
 
     if atype == "image":
         ref = AssetRef(id=uid, type="image", name=name)
-        tgt.components["sprite"] = ref
+        tgt.items.set_value("sprite", ref)
         save_editor_project()
         inspector_sync()
-        message(f"Set sprite on {tgt.components.get('name', tgt.id)} to {name}")
+        message(f"Set sprite on {tgt.items.get_value('name', tgt.id)} to {name}")
         return
 
     ref = AssetRef(id=uid, type=atype, name=name)
     comp_name = path_str.split("/")[-1].split(".")[0] if path_str else "asset"
-    tgt.components[comp_name] = ref
+    tgt.items.set_value(comp_name, ref)
     save_editor_project()
     inspector_sync()
-    message(f"Set '{comp_name}' on {tgt.components.get('name', tgt.id)} to {name}")
+    message(f"Set '{comp_name}' on {tgt.items.get_value('name', tgt.id)} to {name}")
 
 
 def open_replace_asset_menu(pill_control):
@@ -1392,7 +1392,7 @@ def open_replace_asset_menu(pill_control):
     if not reg:
         return
     from lbe.assets import ASSET_ICONS
-    cur_id = pill_control.components.get("asset_id")
+    cur_id = pill_control.items.get_value("asset_id")
     actions = []
     for uid, entry in sorted(reg.entries(), key=lambda x: (x[1]["type"], x[1]["name"].lower())):
         icon = reg.icon(uid)
@@ -1410,8 +1410,8 @@ def open_replace_asset_menu(pill_control):
 
 
 def replace_asset_reference(pill_control, new_uid, new_entry):
-    row = pill_control.components.get("asset_row")
-    span = pill_control.components.get("asset_span")
+    row = pill_control.items.get_value("asset_row")
+    span = pill_control.items.get_value("asset_span")
     if row is None or span is None:
         return
     buf = state.code.buffer
@@ -1421,7 +1421,7 @@ def replace_asset_reference(pill_control, new_uid, new_entry):
     line_text = lines[row]
     col_start, col_end = span
     new_token = f'asset("{new_uid}")'
-    if pill_control.components.get('reference_kind') == 'Asset':
+    if pill_control.items.get_value('reference_kind') == 'Asset':
         new_token = f'<|Asset:{new_uid}|>'
     new_line = line_text[:col_start] + new_token + line_text[col_end:]
     lines[row] = new_line
@@ -1430,8 +1430,8 @@ def replace_asset_reference(pill_control, new_uid, new_entry):
 
 
 def remove_asset_reference(pill_control):
-    row = pill_control.components.get("asset_row")
-    span = pill_control.components.get("asset_span")
+    row = pill_control.items.get_value("asset_row")
+    span = pill_control.items.get_value("asset_span")
     if row is None or span is None:
         return
     buf = state.code.buffer
@@ -1469,10 +1469,10 @@ def assign_entity_sprite(ent, item):
     if uid is None and reg:
         uid = reg.register(item["path"])
         item["asset_id"] = uid
-    ent.components["sprite"] = AssetRef(id=uid, type="image", name=item["name"])
+    ent.items.set_value("sprite", AssetRef(id=uid, type="image", name=item["name"]))
     save_editor_project()
     inspector_sync()
-    message(f"Assigned sprite '{item['name']}' to {ent.components.get('name', ent.id)}")
+    message(f"Assigned sprite '{item['name']}' to {ent.items.get_value('name', ent.id)}")
 
 
 
@@ -1522,9 +1522,9 @@ def open_move_file_menu(*args, **kwargs):
 def keyboard(event):
     if event[1] == 'Z' and event[2]:
         focus = state.ui.focused
-        committed = focus is not None and 'buffer' in focus.components and focus.components.get('committed_text') == focus.buffer.text
-        text_history = focus is not None and 'buffer' in focus.components and focus.buffer.can_undo(redo=bool(event[3]))
-        if committed or not text_history or focus is None or not state.ui.visible(focus) or 'buffer' not in focus.components:
+        committed = focus is not None and focus.items.has_value('buffer') and focus.items.get_value('committed_text') == focus.buffer.text
+        text_history = focus is not None and focus.items.has_value('buffer') and focus.buffer.can_undo(redo=bool(event[3]))
+        if committed or not text_history or focus is None or not state.ui.visible(focus) or not focus.items.has_value('buffer'):
             label = state.files.history.undo(redo=bool(event[3]))
             result = state.files.history.result
             if label is not None:
@@ -1538,9 +1538,9 @@ def keyboard(event):
         open_system_log()
         return True
     if event[1] == "ESCAPE":
-        if not state.path_field.components.get("readonly", True):
-            state.path_field.components["readonly"] = True
-            state.path_field.components["ink"] = (160, 180, 205)
+        if not state.path_field.items.get_value("readonly", True):
+            state.path_field.items.set_value("readonly", True)
+            state.path_field.items.set_value("ink", (160, 180, 205))
             state.path_field.on_commit = None
             if state._saved_source:
                 state.path_field.buffer = TextBuffer(state._saved_source[0])
@@ -1558,11 +1558,11 @@ def keyboard(event):
         switch_left_tab("files" if cur == "hierarchy" else "hierarchy")
         return True
     if event[1] == "F3":
-        cur_debug = state.app.components.get("show_spatial_debug", False)
+        cur_debug = state.app.items.get_value("show_spatial_debug", False)
         new_debug = not cur_debug
-        state.app.components["show_spatial_debug"] = new_debug
+        state.app.items.set_value("show_spatial_debug", new_debug)
         if hasattr(state, "game") and state.game:
-            state.game.components["show_spatial_debug"] = new_debug
+            state.game.items.set_value("show_spatial_debug", new_debug)
         message(f"Spatial debug partition: {'ON' if new_debug else 'OFF'} (F3)")
         return True
     return False
@@ -1617,13 +1617,13 @@ def bind_actions():
         field.on_commit = lambda field=field: commit_component(field)
         field.on_click = component_click
     for button in state.system_rows:
-        button.components.pop("system_key", None)
+        button.items.remove_value("system_key", None)
     for button in state.system_edit_buttons:
-        button.components.pop("system_key", None)
+        button.items.remove_value("system_key", None)
     for button in state.system_detach_buttons:
-        button.components.pop("system_key", None)
-    state.app.components["on_asset_drop"] = on_asset_drop
-    state.app.components["on_entity_drop"] = on_entity_drop
+        button.items.remove_value("system_key", None)
+    state.app.items.set_value("on_asset_drop", on_asset_drop)
+    state.app.items.set_value("on_entity_drop", on_entity_drop)
     if hasattr(state, "tab_hierarchy") and hasattr(state, "tab_files"):
         state.tab_hierarchy.action = lambda: switch_left_tab("hierarchy")
         state.tab_files.action = lambda: switch_left_tab("files")
@@ -1663,23 +1663,23 @@ def update(dt):
         else:
             panel.visible=True
     owner = state.code.relations.get('owner', selected())
-    context_key = (state.project_graph.schema_revision, owner.id, tuple((key, type(value)) for key, value in owner.components.items()))
+    context_key = (state.project_graph.schema_revision, owner.id, tuple((key, type(value)) for key, value in owner.items.value_dict().items()))
     if getattr(state, "completion_context_key", None) != context_key:
-        state.code.completion_components = tuple(owner.components) if owner.alive else ()
+        state.code.completion_components = tuple(owner.items.value_dict()) if owner.alive else ()
         state.code.completion_context = extract_completion_context()
         state.completion_context_key = context_key
     state.code.source_path = state.project / state.path_field.buffer.text
     layout()
     panels_sync()
     row, column = state.code.buffer.position
-    diag = state.code.components.get("diagnostic")
-    run_status = "paused" if state.game.components.get("paused") else "running"
+    diag = state.code.items.get_value("diagnostic")
+    run_status = "paused" if state.game.items.get_value("paused") else "running"
     if diag:
         put(state.code_info, text=f"SyntaxError Ln {diag['line']}, Col {diag['column']}: {diag['message']}", ink=(248, 81, 73, 255))
-    elif state.code.components.get('completion_error'):
+    elif state.code.items.get_value('completion_error'):
         put(state.code_info, text=f"Completion unavailable: {state.code.completion_error}", ink=(248, 81, 73, 255))
     else:
-        put(state.code_info, text=f"Ln {row+1}, Col {column+1} | Attach target: {selected().components.get('name', selected().id)} | Ctrl+S save | F5 {run_status}", ink=MUTED)
+        put(state.code_info, text=f"Ln {row+1}, Col {column+1} | Attach target: {selected().items.get_value('name', selected().id)} | Ctrl+S save | F5 {run_status}", ink=MUTED)
 
 
 def context_rename(target):
@@ -1689,7 +1689,7 @@ def context_rename(target):
     buf = state.name_field.buffer
     buf.anchor = 0
     buf.cursor = len(buf.text)
-    ent_name = str(target.components.get('name', str(target.id)[:8]))
+    ent_name = str(target.items.get_value('name', str(target.id)[:8]))
     message(f"Renaming '{ent_name}' (type new name and press Enter)")
 
 
@@ -1732,8 +1732,8 @@ def get_highlight_stack(mx, my):
             idx = 0
             while curr is not None and curr is not state.game and hasattr(curr, "x") and hasattr(curr, "y"):
                 wx_e, wy_e = get_game_world_pos(curr)
-                bw = curr.components.get("w", 0)
-                bh = curr.components.get("h", 0)
+                bw = curr.items.get_value("w", 0)
+                bh = curr.items.get_value("h", 0)
                 sx0, sy0 = world_to_screen(state.camera, state.viewport, wx_e, wy_e + bh)
                 sw = max(4, bw * state.camera.zoom)
                 sh = max(4, bh * state.camera.zoom)
@@ -1756,7 +1756,7 @@ def get_highlight_stack(mx, my):
     hits = [c for c in state.ui.controls() if state.ui.visible(c) and contains(c, mx, my)]
     if hits:
         hits.reverse()
-        hits.sort(key=lambda c: (c.components.get("layer", 2), c.depth), reverse=True)
+        hits.sort(key=lambda c: (c.items.get_value("layer", 2), c.depth), reverse=True)
         leaf = hits[0]
         curr = leaf
         idx = 0
@@ -1780,26 +1780,26 @@ def context_target(control, event):
         leaf = stack[0][0] if stack else control
         return dict(deep=True, stack=stack, entity=leaf)
 
-    if 'preset_key' in control.components:
-        return dict(preset=control.components['preset_key'], control=control)
-    if 'system_key' in control.components:
-        owner_id, sys_name = control.components['system_key']
+    if control.items.has_value('preset_key'):
+        return dict(preset=control.items.require_value('preset_key'), control=control)
+    if control.items.has_value('system_key'):
+        owner_id, sys_name = control.items.require_value('system_key')
         owner = next((e for e in state.runtime.entities if e.id == owner_id), None)
         if owner:
             return dict(entity=owner, system=sys_name)
     if "asset_pill" in control.tags:
-        return dict(asset_pill=control, asset_id=control.components.get("asset_id"),
-                    asset_name=control.components.get("asset_name"), control=control)
+        return dict(asset_pill=control, asset_id=control.items.get_value("asset_id"),
+                    asset_name=control.items.get_value("asset_name"), control=control)
     for candidate in (control,) + control.ancestors:
-        if "file_item" in candidate.components:
-            return dict(file_item=candidate.components["file_item"], control=candidate)
+        if candidate.items.has_value("file_item"):
+            return dict(file_item=candidate.items.require_value("file_item"), control=candidate)
     if hasattr(state, "file_explorer") and (control is state.file_explorer or state.file_explorer in control.ancestors):
         return dict(file_explorer=True, control=state.file_explorer)
     if control is state.tags_field or control is state.tags_label:
         return dict(entity=inspected(), tags=True)
-    if 'component_key' in control.components and 'target' in control.relations:
+    if control.items.has_value('component_key') and 'target' in control.relations:
         return dict(entity=control.relations['target'], component=control.component_key)
-    if 'relation_key' in control.components and 'target' in control.relations:
+    if control.items.has_value('relation_key') and 'target' in control.relations:
         return dict(entity=control.relations['target'], relation=control.relation_key)
     if control is state.viewport:
         wx, wy = screen_to_world(state.camera, control, event[1], event[2])
@@ -1836,7 +1836,7 @@ def context_actions(target):
             # 1. Color-coded Selection options for EVERY entity in the stack
             for i, (ent, _, color) in enumerate(stack):
                 role = "Leaf" if i == 0 else ("Parent" if i == 1 else ("Root" if i == len(stack) - 1 else f"Depth {i}"))
-                ent_name = str(ent.components.get('name', str(getattr(ent, 'id', 'Entity'))[:8]))
+                ent_name = str(ent.items.get_value('name', str(getattr(ent, 'id', 'Entity'))[:8]))
                 actions.append(dict(
                     label=f"> Select '{ent_name}' ({role})",
                     ink=color,
@@ -1845,7 +1845,7 @@ def context_actions(target):
             actions.append(None)
 
             # 2. Detailed editing actions for the primary / leaf entity
-            leaf_name = str(leaf_ent.components.get('name', str(getattr(leaf_ent, 'id', 'Entity'))[:8]))
+            leaf_name = str(leaf_ent.items.get_value('name', str(getattr(leaf_ent, 'id', 'Entity'))[:8]))
             leaf_color = stack[0][2]
             actions.extend([
                 dict(label=f"Inspect '{leaf_name}'", ink=leaf_color, run=lambda _: open_panel(target=leaf_ent)),
@@ -1862,7 +1862,7 @@ def context_actions(target):
             if len(stack) > 1:
                 actions.append(None)
                 for ent, _, color in stack[1:]:
-                    e_name = str(ent.components.get('name', str(getattr(ent, 'id', 'Entity'))[:8]))
+                    e_name = str(ent.items.get_value('name', str(getattr(ent, 'id', 'Entity'))[:8]))
                     actions.append(dict(
                         label=f"Inspect '{e_name}'",
                         ink=color,
@@ -1870,7 +1870,7 @@ def context_actions(target):
                     ))
         else:
             ent = leaf_ent
-            ent_name = str(ent.components.get('name', str(getattr(ent, 'id', 'Entity'))[:8]))
+            ent_name = str(ent.items.get_value('name', str(getattr(ent, 'id', 'Entity'))[:8]))
             actions = [
                 dict(label=f"Select '{ent_name}'", run=lambda _: select(ent)),
                 dict(label=f"Inspect '{ent_name}'", run=lambda _: open_panel(target=ent)),
@@ -1889,7 +1889,7 @@ def context_actions(target):
         pill = target['control']
         uid = target.get('asset_id')
         name = target.get('asset_name', 'asset')
-        kind = pill.components.get('reference_kind')
+        kind = pill.items.get_value('reference_kind')
         if kind and kind != 'Asset':
             from uuid import UUID
             identity = UUID(uid)
@@ -1916,7 +1916,7 @@ def context_actions(target):
         actions = []
         if item['is_dir']:
             actions.append(dict(label="View as root folder", run=lambda _: state.set_file_root(item['path'])))
-            root = (state.project / state.file_explorer.components.get('view_root','systems/game')).resolve()
+            root = (state.project / state.file_explorer.items.get_value('view_root', 'systems/game')).resolve()
             if item['path'].resolve() == root and root != state.project:
                 actions.append(dict(label="Set parent as root folder", run=lambda _: state.set_file_root(root.parent)))
             actions.append(dict(label=f"+ New folder in '{item['name']}'...", run=lambda _: create_new_folder(item['path'])))
@@ -1935,13 +1935,13 @@ def context_actions(target):
                 if sel:
                     if item['type']=='script':
                         actions.append(dict(label="Attach script to selected entity", run=lambda _: sel.scripts.attach(assets[identity])))
-                    sel_name = str(sel.components.get('name', sel.id))
+                    sel_name = str(sel.items.get_value('name', sel.id))
                     if item['type']=='system':
                         actions.append(dict(label=f"Attach to '{sel_name}'", run=lambda _: attach_system_to_entity(sel, item['path'])))
             elif item['type'] == 'image':
                 sel = selected()
                 if sel:
-                    sel_name = str(sel.components.get('name', sel.id))
+                    sel_name = str(sel.items.get_value('name', sel.id))
                     actions.append(dict(label=f"Assign sprite to '{sel_name}'", run=lambda _: assign_entity_sprite(sel, item)))
             actions.append(dict(label="Move to folder...", run=lambda _: open_move_file_menu(item['path'])))
             actions.append(dict(label=f"Rename '{item['name']}'...", run=lambda _: prompt_rename_file_item(item)))
@@ -1954,9 +1954,9 @@ def context_actions(target):
 
     if isinstance(target, dict) and target.get('file_explorer'):
         return [
-            dict(label="+ New folder...", run=lambda _: create_new_folder(state.project / state.file_explorer.components.get("view_root", "systems/game"))),
-            dict(label="+ New system script...", run=lambda _: new_source_in_dir(state.project / state.file_explorer.components.get("view_root", "systems/game"))),
-            dict(label="+ New script...", run=lambda _: new_source_in_dir(state.project / state.file_explorer.components.get("view_root", "systems/game"), kind="script")),
+            dict(label="+ New folder...", run=lambda _: create_new_folder(state.project / state.file_explorer.items.get_value("view_root", "systems/game"))),
+            dict(label="+ New system script...", run=lambda _: new_source_in_dir(state.project / state.file_explorer.items.get_value("view_root", "systems/game"))),
+            dict(label="+ New script...", run=lambda _: new_source_in_dir(state.project / state.file_explorer.items.get_value("view_root", "systems/game"), kind="script")),
             dict(label="Refresh project files", run=lambda _: refresh_project_files()),
         ]
 
@@ -1966,11 +1966,11 @@ def context_actions(target):
             dict(label=f"Save / reload ('{cur_file}')", run=lambda _: save()),
             dict(label=f"Rename '{cur_file}'...", run=lambda _: prompt_rename_file()),
             dict(label="Open file...", run=lambda _: open_file_menu()),
-            dict(label="+ New system script...", run=lambda _: new_source_in_dir(state.project / state.file_explorer.components.get("view_root", "systems/game"))),
+            dict(label="+ New system script...", run=lambda _: new_source_in_dir(state.project / state.file_explorer.items.get_value("view_root", "systems/game"))),
         ]
-        if state.code.components.get("system_name") and 'owner' in state.code.relations:
+        if state.code.items.get_value("system_name") and 'owner' in state.code.relations:
             owner = state.code.relations['owner']
-            sys_name = state.code.components['system_name']
+            sys_name = state.code.items.require_value('system_name')
             actions.append(dict(label=f"Revert system '{sys_name}'", run=lambda _: open_system(owner, sys_name)))
         actions.append(None)
         actions.extend([
@@ -2015,10 +2015,10 @@ def context_actions(target):
         ent = target['entity']
         comp = target['component']
         try:
-            val = ent.components.get(comp)
+            val = ent.items.get_value(comp)
         except (KeyError, TypeError, ValueError):
             val = None
-        item = ent.components.item(comp)
+        item = ent.items.component(comp)
         type_name = type(val).__name__
         actions = [
             dict(label='Inspect component', run=lambda t: open_panel(target=ent, component=comp)),
@@ -2040,7 +2040,7 @@ def context_actions(target):
             ])
         from lbe.core import Entity
         if isinstance(val, Entity) and val.alive:
-            val_name = str(val.components.get('name', str(val.id)[:8]))
+            val_name = str(val.items.get_value('name', str(val.id)[:8]))
             actions.extend([
                 None,
                 dict(label=f"> Select Entity '{val_name}'", run=lambda _: select(val)),
@@ -2058,7 +2058,7 @@ def context_actions(target):
         ent = target['entity']
         rel = target['relation']
         tgt = ent.relations.get(rel)
-        tgt_label = str(tgt.components.get('name', str(tgt.id)[:8])) if tgt else 'None'
+        tgt_label = str(tgt.items.get_value('name', str(tgt.id)[:8])) if tgt else 'None'
         actions = []
         if tgt:
             actions.append(dict(label=f"Select target ({tgt_label})", run=lambda t: select(tgt)))
@@ -2066,7 +2066,7 @@ def context_actions(target):
         actions.append(dict(label=f"Unlink '{rel}'", run=lambda t: unlink_relation(rel)))
         return actions
 
-    if not hasattr(target, 'components') or not target.alive:
+    if not hasattr(target, "items") or not target.alive:
         return []
 
     actions = [
@@ -2084,7 +2084,7 @@ def context_actions(target):
         actions.append(dict(label='Set parent as root entity', run=lambda e: state.set_hierarchy_root(e.parent)))
     sel = selected()
     if target is not sel and sel is not None and sel.alive:
-        tgt_name = str(target.components.get('name', str(target.id)[:8]))
+        tgt_name = str(target.items.get_value('name', str(target.id)[:8]))
         actions.append(None)
         actions.append(dict(label=f"Link from selected as '{tgt_name.lower()}'", run=lambda e: quick_link_to(e)))
 
@@ -2098,7 +2098,7 @@ def context_actions(target):
         ]
         if target is not state.game:
             actions.append(dict(label='Delete entity', run=lambda e: (select(e), inspector_delete_entity())))
-        if 'x' in target.components and 'y' in target.components:
+        if target.items.has_value('x') and target.items.has_value('y'):
             actions.append(dict(label='Focus camera', run=context_focus_camera))
 
     return actions
@@ -2125,7 +2125,7 @@ def create_walk_shoot_demo():
     blueprint = create(parent=state.game, name='PlayerBlueprint', tags=('blueprint',), speed=6.0)
     player = create(parent=state.game, name='Player', tags=('player',), x=0.0, y=0.0,
                     w=0.9, h=0.9, color=(90, 205, 245), aim_x=1.0, aim_y=0.0)
-    player.components.inherit('speed', blueprint.components.item('speed'))
+    player.items.inherit_value('speed', blueprint.items.component('speed'))
     drawing = assets.get('f084e424-d2d9-5fd1-8624-63580396274c')
     if drawing:
         player.scripts.attach(drawing)
@@ -2141,7 +2141,7 @@ def create_walk_shoot_demo():
 
 def context_focus_camera(target):
     x, y = world_position(target, state.game)
-    w, h = target.components.get('w', 0), target.components.get('h', 0)
+    w, h = target.items.get_value('w', 0), target.items.get_value('h', 0)
     state.camera.x, state.camera.y = x + w / 2, y + h / 2
     vw = max(1.0, getattr(state.viewport, "w", 800) - 48)
     vh = max(1.0, getattr(state.viewport, "h", 600) - 48)
@@ -2155,7 +2155,7 @@ def frame_game():
     group = state.dock_tree.find_tab_group_with_panel('viewport')
     group.active = group.panels.index('viewport')
     layout()
-    boxes = [world_bounds(e) for e in state.game.descendants if e.components.get('color') is not None]
+    boxes = [world_bounds(e) for e in state.game.descendants if e.items.get_value('color') is not None]
     boxes = [box for box in boxes if box is not None]
     if not boxes:
         message('No drawable game entities to frame')

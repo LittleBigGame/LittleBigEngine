@@ -3,14 +3,14 @@
 
 def draw():
     viewport = entity.relations['viewport']
-    if not viewport.components.get('visible', True) or viewport.w <= 0 or viewport.h <= 0:
+    if not viewport.items.get_value('visible', True) or viewport.w <= 0 or viewport.h <= 0:
         return
     with graphics.view(entity.relations["camera"], entity.relations["viewport"]):
         camera = entity.relations.get("camera")
         viewport = entity.relations.get("viewport")
         zoom = getattr(camera, "zoom", 32.0) if camera else 32.0
-        cam_x = camera.components.get("x", 0.0) if camera else 0.0
-        cam_y = camera.components.get("y", 0.0) if camera else 0.0
+        cam_x = camera.items.get_value("x", 0.0) if camera else 0.0
+        cam_y = camera.items.get_value("y", 0.0) if camera else 0.0
 
         # Compute visible world bounds for viewport frustum culling
         if camera and viewport and zoom > 0:
@@ -23,9 +23,9 @@ def draw():
             view_max_x = view_max_y = 1e9
 
         # Space partition debug overlay (toggled via F3)
-        show_debug = entity.components.get("show_spatial_debug")
+        show_debug = entity.items.get_value("show_spatial_debug")
         if not show_debug and hasattr(entity, "parent") and entity.parent:
-            show_debug = entity.parent.components.get("show_spatial_debug")
+            show_debug = entity.parent.items.get_value("show_spatial_debug")
         if show_debug and "space" in globals():
             cell_size = getattr(space, "cell_size", 16.0)
             cells = space.cells() if hasattr(space, "cells") else getattr(space, "_cells", {})
@@ -77,7 +77,7 @@ def draw():
             th = getattr(target, "h", 1.5)
             if tx + tw < view_min_x or tx > view_max_x or ty + th < view_min_y or ty > view_max_y:
                 continue
-            clr = target.components.get("color")
+            clr = target.items.get_value("color")
             if isinstance(clr, (list, tuple)) and len(clr) >= 3:
                 graphics.rect(tx, ty, tw, th, color=clr[:3], key=(target.id.hex, "fallback_draw"), layer=1)
 

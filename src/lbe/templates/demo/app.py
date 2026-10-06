@@ -14,9 +14,9 @@ game.relations["viewport"] = viewport
 # Player entity (Entity A)
 player = create(parent=game, name="Entity A", x=-3.0, y=-1.0, w=2.0, h=2.0,
                 color=(75, 185, 210), tags=["player"])
-player.components.setdefault("vx", 0.0)
-player.components.setdefault("vy", 0.0)
-player.components.setdefault("score", 0)
+player.items.ensure_value("vx", 0.0)
+player.items.ensure_value("vy", 0.0)
+player.items.ensure_value("score", 0)
 
 # Target collectible entity (Entity B)
 target = create(parent=game, name="Entity B", x=1.0, y=0.0, w=1.5, h=1.5,
@@ -31,8 +31,8 @@ def on_key(event):
     k = event[1]
     # F3 toggles spatial partition grid visualization
     if k == "F3":
-        cur = game.components.get("show_spatial_debug", False)
-        game.components["show_spatial_debug"] = not cur
+        cur = game.items.get_value("show_spatial_debug", False)
+        game.items.set_value("show_spatial_debug", not cur)
         return True
     return False
 
@@ -79,7 +79,7 @@ def update(dt):
     hits = space.query_collisions(player)
     for other in hits:
         if "pickup" in other.tags:
-            player.components["score"] = player.components.get("score", 0) + 10
+            player.items.set_value("score", player.items.get_value("score", 0) + 10)
             spawn_spark(other.x + other.w / 2, other.y + other.h / 2)
             # Relocate collectible to new position
             other.x = random.uniform(-6.0, 6.0)
@@ -88,16 +88,16 @@ def update(dt):
     # 3. Update active particle sparks
     for child in tuple(game.children):
         if "fx" in child.tags:
-            child.components["life"] = child.components.get("life", 0.0) - dt
-            if child.components["life"] <= 0:
+            child.items.set_value("life", child.items.get_value("life", 0.0) - dt)
+            if child.items.require_value("life") <= 0:
                 child.destroy()
             else:
-                child.x += child.components.get("vx", 0.0) * dt
-                child.y += child.components.get("vy", 0.0) * dt
+                child.x += child.items.get_value("vx", 0.0) * dt
+                child.y += child.items.get_value("vy", 0.0) * dt
 
 
 def draw():
-    score = player.components.get("score", 0)
-    debug_on = game.components.get("show_spatial_debug", False)
+    score = player.items.get_value("score", 0)
+    debug_on = game.items.get_value("show_spatial_debug", False)
     dbg_text = "[F3] Spatial Grid: ON" if debug_on else "[F3] Spatial Grid: OFF"
     graphics.text(f"LittleBigEngine | Score: {score} | [WASD/Arrows] Move | {dbg_text}", 24, 20)

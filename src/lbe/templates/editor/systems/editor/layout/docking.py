@@ -21,7 +21,7 @@ def on_drag_col_splitter(control, event):
     w = state.window.width
     min_w = 200
     max_w = max(min_w, w - 300)
-    cur_w = state.app.components.get("left_column_w", 370)
+    cur_w = state.app.items.get_value("left_column_w", 370)
     if len(event) > 5 and event[5] != 0:
         new_w = max(min_w, min(max_w, cur_w + event[5]))
     elif len(event) > 1:
@@ -40,17 +40,17 @@ def on_drag_col_splitter(control, event):
 
 def on_drag_hierarchy_splitter(control, event):
     top_y = state.header.y + state.header.h
-    status_m = parse_box(state.status.components.get("margin", (0, 16, 5, 16)))
-    status_h = state.status.components.get("h", 20)
+    status_m = parse_box(state.status.items.get_value("margin", (0, 16, 5, 16)))
+    status_h = state.status.items.get_value("h", 20)
     status_y = state.window.height - status_m[2] - status_h
     available_h = status_y - top_y
     min_h = 100
     max_h = max(min_h, available_h - 150)
-    cur_h = state.hierarchy.components.get("panel_h", 240)
+    cur_h = state.hierarchy.items.get_value("panel_h", 240)
     if len(event) > 6 and event[6] != 0:
         new_h = max(min_h, min(max_h, cur_h + event[6]))
     elif len(event) > 2:
-        hm = parse_box(state.hierarchy.components.get("margin", (8, 8, 4, 8)))
+        hm = parse_box(state.hierarchy.items.get_value("margin", (8, 8, 4, 8)))
         new_h = max(min_h, min(max_h, event[2] - top_y - hm[0]))
     else:
         return
@@ -64,13 +64,13 @@ def on_drag_hierarchy_splitter(control, event):
 
 def on_drag_code_splitter(control, event):
     top_y = state.header.y + state.header.h
-    status_m = parse_box(state.status.components.get("margin", (0, 16, 5, 16)))
-    status_h = state.status.components.get("h", 20)
+    status_m = parse_box(state.status.items.get_value("margin", (0, 16, 5, 16)))
+    status_h = state.status.items.get_value("h", 20)
     status_y = state.window.height - status_m[2] - status_h
     available_h = status_y - top_y
     min_y = top_y + 80
     max_y = max(min_y, status_y - 120)
-    cur_split = state.code_panel.components.get("split_y", max(330, int(state.window.height * 0.45)))
+    cur_split = state.code_panel.items.get_value("split_y", max(330, int(state.window.height * 0.45)))
     if len(event) > 6 and event[6] != 0:
         new_split = max(min_y, min(max_y, cur_split + event[6]))
     elif len(event) > 2:
@@ -94,7 +94,7 @@ def start_panel_dock_drag(panel_name, event):
     if len(event) < 3:
         return
     mx, my = event[1], event[2]
-    state.app.components["dock_drag"] = {
+    state.app.items.set_value("dock_drag", {
         "panel": panel_name,
         "start_pos": (mx, my),
         "mouse_pos": (mx, my),
@@ -103,7 +103,7 @@ def start_panel_dock_drag(panel_name, event):
         "drop_zones": None,
         "zone": None,
         "preview_rect": None,
-    }
+    })
 
 
 def on_dock_drag(dock_drag, event):
@@ -218,9 +218,9 @@ def toggle_panel_view(panel_name):
 
 def reset_default_layout():
     state.dock_tree = DockTree()
-    state.app.components["left_column_w"] = 370
-    state.hierarchy.components["panel_h"] = 240
-    state.code_panel.components["split_y"] = max(330, int(state.window.height * 0.45))
+    state.app.items.set_value("left_column_w", 370)
+    state.hierarchy.items.set_value("panel_h", 240)
+    state.code_panel.items.set_value("split_y", max(330, int(state.window.height * 0.45)))
     message("Reset editor layout to default")
     layout()
     sync_all_editor_panels()
@@ -243,10 +243,10 @@ def layout():
     put(state.background, x=0, y=0, w=w, h=h)
 
     # Header layout (docked top with padding)
-    header_h = state.header.components.get("h", 44)
+    header_h = state.header.items.get_value("h", 44)
     put(state.header, x=0, y=0, w=w, h=header_h)
     btn_gap = 6
-    is_paused = bool(state.game.components.get("paused", False))
+    is_paused = bool(state.game.items.get_value("paused", False))
     put(state.run_button, text='Run (F5)' if is_paused else 'Pause (F5)')
     put(state.detach_button, text='Detach')
     put(state.panel_button, text='Inspect entity')
@@ -277,8 +277,8 @@ def layout():
         put(state.menu_view_btn, x=168, y=8, w=54, h=28)
 
     # Status bar layout (docked bottom with margin)
-    status_m = parse_box(state.status.components.get("margin", (0, 16, 5, 16)))
-    status_h = state.status.components.get("h", 20)
+    status_m = parse_box(state.status.items.get_value("margin", (0, 16, 5, 16)))
+    status_h = state.status.items.get_value("h", 20)
     status_y = h - status_m[2] - status_h
     put(state.status, x=status_m[3], y=status_y, w=max(0, w - status_m[3] - status_m[1]), h=status_h, text=state.app.status)
 
@@ -291,9 +291,9 @@ def layout():
 
 
     if hasattr(state, "dock_tree") and state.dock_tree.is_default():
-        left_col_w = state.app.components.get("left_column_w", 370)
-        panel_h = state.hierarchy.components.get("panel_h", 240)
-        split_y = state.code_panel.components.get("split_y", max(330, int(h * 0.45)))
+        left_col_w = state.app.items.get_value("left_column_w", 370)
+        panel_h = state.hierarchy.items.get_value("panel_h", 240)
+        split_y = state.code_panel.items.get_value("split_y", max(330, int(h * 0.45)))
         group_hf = state.dock_tree.find_tab_group_with_panel("hierarchy")
         panel_rects = state.dock_tree.compute_default_layout(
             w=w,
@@ -319,7 +319,7 @@ def layout():
     put(state.tab_files, visible=False)
 
     # Panels layout
-    if state.hierarchy.components.get("dock") == "float":
+    if state.hierarchy.items.get_value("dock") == "float":
         put(state.hierarchy, visible=True)
     elif "hierarchy" in panel_rects:
         hx, hy, hw, hh = panel_rects["hierarchy"]
@@ -328,7 +328,7 @@ def layout():
         put(state.hierarchy, visible=False)
 
     if hasattr(state, "file_explorer"):
-        if state.file_explorer.components.get("dock") == "float":
+        if state.file_explorer.items.get_value("dock") == "float":
             put(state.file_explorer, visible=True)
         elif "files" in panel_rects:
             fx, fy, fw, fh = panel_rects["files"]
@@ -336,7 +336,7 @@ def layout():
         else:
             put(state.file_explorer, visible=False)
 
-    if state.inspector.components.get("dock") == "float":
+    if state.inspector.items.get_value("dock") == "float":
         pass
     elif "inspector" in panel_rects:
         ix, iy, iw, ih = panel_rects["inspector"]
@@ -344,7 +344,7 @@ def layout():
     else:
         put(state.inspector, visible=False)
 
-    if state.viewport.components.get("dock") == "float":
+    if state.viewport.items.get_value("dock") == "float":
         pass
     elif "viewport" in panel_rects:
         vx, vy, vw, vh = panel_rects["viewport"]
@@ -361,17 +361,17 @@ def layout():
         put(state.viewport, visible=False)
         put(state.viewport_panel, visible=False)
 
-    if state.code_panel.components.get("dock") == "float":
+    if state.code_panel.items.get_value("dock") == "float":
         pass
     elif "code_panel" in panel_rects:
         cx, cy, cw, ch = panel_rects["code_panel"]
         put(state.code_panel, visible=True, x=cx, y=cy, w=cw, h=ch)
         cp = state.code_panel
-        c_pad = parse_box(cp.components.get("padding", (8, 12, 8, 12)))
+        c_pad = parse_box(cp.items.get_value("padding", (8, 12, 8, 12)))
         tb_y = cy + 32
-        if state.ui.focused is not state.path_field and not state.path_field.components.get("readonly", True):
-            state.path_field.components["readonly"] = True
-            state.path_field.components["ink"] = (160, 180, 205)
+        if state.ui.focused is not state.path_field and not state.path_field.items.get_value("readonly", True):
+            state.path_field.items.set_value("readonly", True)
+            state.path_field.items.set_value("ink", (160, 180, 205))
             state.path_field.on_commit = None
             if state._saved_source:
                 state.path_field.buffer = TextBuffer(state._saved_source[0])
@@ -385,35 +385,35 @@ def layout():
 
     # Panel close buttons (X)
     if hasattr(state, "close_hierarchy_btn"):
-        if "hierarchy" in panel_rects and state.hierarchy.components.get("visible", True):
+        if "hierarchy" in panel_rects and state.hierarchy.items.get_value("visible", True):
             hx, hy, hw, hh = panel_rects["hierarchy"]
             put(state.close_hierarchy_btn, visible=True, x=hx + hw - 24, y=hy + 4, w=18, h=18)
         else:
             put(state.close_hierarchy_btn, visible=False)
 
     if hasattr(state, "close_files_btn"):
-        if "files" in panel_rects and state.file_explorer.components.get("visible", True):
+        if "files" in panel_rects and state.file_explorer.items.get_value("visible", True):
             fx, fy, fw, fh = panel_rects["files"]
             put(state.close_files_btn, visible=True, x=fx + fw - 24, y=fy + 4, w=18, h=18)
         else:
             put(state.close_files_btn, visible=False)
 
     if hasattr(state, "close_inspector_btn"):
-        if "inspector" in panel_rects and state.inspector.components.get("visible", True):
+        if "inspector" in panel_rects and state.inspector.items.get_value("visible", True):
             ix, iy, iw, ih = panel_rects["inspector"]
             put(state.close_inspector_btn, visible=True, x=ix + iw - 24, y=iy + 4, w=18, h=18)
         else:
             put(state.close_inspector_btn, visible=False)
 
     if hasattr(state, "close_viewport_btn"):
-        if "viewport" in panel_rects and state.viewport.components.get("visible", True):
+        if "viewport" in panel_rects and state.viewport.items.get_value("visible", True):
             vx, vy, vw, vh = state.dock_tree.find_tab_group_with_panel('viewport').tab_bar_rect
             put(state.close_viewport_btn, visible=True, x=vx + vw - 24, y=vy + 4, w=18, h=18)
         else:
             put(state.close_viewport_btn, visible=False)
 
     if hasattr(state, "close_code_btn"):
-        if "code_panel" in panel_rects and state.code_panel.components.get("visible", True):
+        if "code_panel" in panel_rects and state.code_panel.items.get_value("visible", True):
             cx, cy, cw, ch = panel_rects["code_panel"]
             put(state.close_code_btn, visible=True, x=cx + cw - 24, y=cy + 4, w=18, h=18)
         else:
@@ -453,7 +453,7 @@ def layout():
 
                 act = _make_click(group, p_idx, p_name)
                 btn.action = act
-                btn.components["action"] = act
+                btn.items.set_value("action", act)
                 btn.on_click = lambda c, ev, a=act: a()
                 btn.on_drag = _make_drag(p_name)
 

@@ -195,7 +195,7 @@ def launch(build, *, headless=False, frames=None, screenshot=None):
             runtime = load_project(window, graphics, input_state, directory, template=tpl_p)
             runtime.services["switch_project"] = switch_project
             if template and "game" in runtime.services and runtime.services["game"]:
-                runtime.services["game"].components["paused"] = True
+                runtime.services["game"].items.set_value("paused", True)
         except Exception as err:
             print(f"Error switching project to {directory}: {err}", file=sys.stderr)
             import traceback

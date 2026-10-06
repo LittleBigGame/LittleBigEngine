@@ -45,7 +45,7 @@ def create_launcher_runtime(window, graphics, input_state, on_select_project):
     state.last_page = -1
     state.mode = "browse"  # "browse" or "pick_template"
     state.target_project_path = None
-    root.components["browser_state"] = state
+    root.items.set_value("browser_state", state)
 
     # --- TOP TOOLBAR ---
     # Row 1: Address Bar & Navigation

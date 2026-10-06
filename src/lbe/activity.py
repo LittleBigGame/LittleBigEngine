@@ -48,7 +48,7 @@ class ActivityLog:
         if not source:
             return 'external'
         entity = self._runtime._entities.get(source[0])
-        name = entity.components._values.get('name', '') if entity else ''
+        name = entity.items.get_value('name', '') if entity and entity.alive else ''
         label=source[1]
         registry=self._runtime.assets.registry
         if registry is not None:
@@ -62,7 +62,7 @@ class ActivityLog:
 
     @staticmethod
     def _target(entity):
-        name = entity.components._values.get('name', '')
+        name = entity.items.get_value('name', '') if entity.alive else ''
         return f'{snapshot(name)} ({entity.id})'
 
     def _change(self, change):
@@ -74,18 +74,22 @@ class ActivityLog:
                     self.excluded.discard(entity.id)
                 return
             current = current._parent
-        editor = 'ui' in entity.tags._values or 'editor' in entity.tags._values
+        tags = entity.items.tag_names() if entity.alive else ()
+        editor = 'ui' in tags or 'editor' in tags
         detail = change.key or ''
         if change.kind == 'entity.create':
-            detail = ('components: '+snapshot(dict(entity.components._values))
-                      +'; tags: '+snapshot(set(entity.tags._values))
+            detail = ('components: '+snapshot(entity.items.value_dict())
+                      +'; tags: '+snapshot(set(tags))
                       +'; parent: '+snapshot(entity._parent))
         if change.kind.startswith(('component.', 'relation.', 'tag.')) or change.kind == 'hierarchy.parent':
             old = 'unknown prior value' if change.kind == 'component.mutate' else change.old
             detail += f': {old} -> {change.new}'
         if change.kind in ('system.error','script.error'):
-            collection = entity.scripts if change.kind == 'script.error' else entity.systems
-            instance = collection._values.get(change.key)
+            from .scripts import ScriptInstance
+            from .systems import SystemInstance
+            category = ScriptInstance if change.kind == 'script.error' else SystemInstance
+            instance = next((item for item in entity.items.all(category)
+                             if item.name == change.key and entity.items.category(item) is category), None)
             if instance and instance.errors:
                 detail += ': '+instance.errors[-1].message
                 if change.kind == 'script.error':
@@ -108,11 +112,11 @@ class ActivityLog:
             if phase in ('update', 'draw') and not self.frame_calls:
                 return
             self.write(name, system+'.'+phase, target=self._target(entity), source=self._source(),
-                       editor='ui' in entity.tags._values or 'editor' in entity.tags._values)
+                       editor=any(tag in entity.items.tag_names() for tag in ('ui', 'editor')))
         else:
             source = self._runtime.changes.source
             owner = self._runtime._entities.get(source[0]) if source else None
-            editor = bool(owner and ('ui' in owner.tags._values or 'editor' in owner.tags._values))
+            editor = bool(owner and any(tag in owner.items.tag_names() for tag in ('ui', 'editor')))
             target = self._target(args[0]) if args and isinstance(args[0], Entity) else ''
             self.write(name if name == 'event.error' else 'event.'+name,
                        snapshot(args)+' '+snapshot(kwargs), target=target, source=self._source(), editor=editor)

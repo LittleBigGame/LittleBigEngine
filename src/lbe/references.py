@@ -134,7 +134,7 @@ def reference_label(runtime, kind, identity):
         expected = source_references(f"<|{kind}:{identity}|>", strict=True)[0]
         bind_reference(runtime, expected)
         item = runtime.linker.resolve(identity)
-        name = item.components.get("name", "Entity") if isinstance(item, Entity) else item.name
+        name = item.items.get_value("name", "Entity") if isinstance(item, Entity) else item.name
         return f"{kind}: {name}", True
     except (KeyError, ValueError, TypeError, FileNotFoundError):
         return f"Missing {kind}: {str(identity)[:8]}", False

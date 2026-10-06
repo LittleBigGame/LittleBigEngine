@@ -46,7 +46,7 @@ def open_path():
     state.code.buffer = TextBuffer(text)
     state._saved_source = (state.path_field.buffer.text, text)
     state.code.source_path = str(path)
-    state.code.components['system_name'] = path.stem
+    state.code.items.set_value('system_name', path.stem)
     sel = selected()
     if sel and path.stem in sel.systems:
         state.code.relations['owner'] = sel
@@ -67,7 +67,7 @@ def open_specific_file(path):
     state.code.buffer = TextBuffer(text)
     state._saved_source = (rel_name, text)
     state.code.source_path = str(path)
-    state.code.components['system_name'] = path.stem
+    state.code.items.set_value('system_name', path.stem)
     sel = selected()
     if sel and path.stem in sel.systems:
         state.code.relations['owner'] = sel
@@ -118,8 +118,8 @@ def show_source_panel():
 
 def prompt_rename_file():
     show_source_panel()
-    state.path_field.components["readonly"] = False
-    state.path_field.components["ink"] = INK
+    state.path_field.items.set_value("readonly", False)
+    state.path_field.items.set_value("ink", INK)
     state.ui.focus(state.path_field)
     state.path_field.buffer.anchor = 0
     state.path_field.buffer.cursor = len(state.path_field.buffer.text)
@@ -128,8 +128,8 @@ def prompt_rename_file():
 
 def commit_rename_file():
     new_name = state.path_field.buffer.text.strip()
-    state.path_field.components["readonly"] = True
-    state.path_field.components["ink"] = (160, 180, 205)
+    state.path_field.items.set_value("readonly", True)
+    state.path_field.items.set_value("ink", (160, 180, 205))
     state.path_field.on_commit = None
     old_text = state._saved_source[0] if state._saved_source else state.path_field.buffer.text
     if not new_name or new_name == old_text:
@@ -161,7 +161,7 @@ def rename_file(new_name, old_name=None):
     return destination
 
 def update_open_source_location(source, destination):
-    open_path = Path(state.code.components.get("source_path", source_path())).resolve()
+    open_path = Path(state.code.items.get_value("source_path", source_path())).resolve()
     if open_path == source or open_path.is_relative_to(source):
         new_path = destination / open_path.relative_to(source) if open_path != source else destination
         relative = new_path.relative_to(state.project).as_posix()
@@ -169,7 +169,7 @@ def update_open_source_location(source, destination):
         if state._saved_source:
             state._saved_source = (relative, state._saved_source[1])
         state.code.source_path = str(new_path)
-        if state.code.components.get("system_name") == open_path.stem:
+        if state.code.items.get_value("system_name") == open_path.stem:
             state.code.system_name = new_path.stem
 
 def open_system(owner, name):
@@ -239,7 +239,7 @@ def attach():
     state.code.relations['owner'] = owner
     save_editor_project()
     inspector_sync()
-    message(f"Attached {path.stem} to {owner.components.get('name', owner.id)}")
+    message(f"Attached {path.stem} to {owner.items.get_value('name', owner.id)}")
 
 def refresh_project_files():
     reg = getattr(state.runtime.assets, "registry", None)
@@ -268,7 +268,7 @@ def new_source_in_dir(folder_path, *, kind="system"):
     state.code.buffer = TextBuffer(text)
     state._saved_source = (new_name, state.code.buffer.text)
     state.code.source_path = str(state.project / new_name)
-    state.code.components["system_name"] = f"{kind}_{i}"
+    state.code.items.set_value("system_name", f"{kind}_{i}")
     save()
     state.files.record_create(f_path / f"{kind}_{i}.py", save=save_editor_project)
     state.reveal_file(f_path / f"{kind}_{i}.py")
@@ -311,7 +311,7 @@ def delete_file_item(item):
             required = Path(instance.definition.path).resolve() if instance.definition.path else None
             if required is not None and (required == path or required.is_relative_to(path)):
                 raise ValueError(f"Required editor source cannot be deleted: {required.name}")
-    open_path = Path(state.code.components.get("source_path", source_path())).resolve()
+    open_path = Path(state.code.items.get_value("source_path", source_path())).resolve()
     is_open = open_path == path or open_path.is_relative_to(path)
     if is_open and not confirm_discard(('delete', str(path))):
         return
@@ -321,13 +321,13 @@ def delete_file_item(item):
         state.code.buffer = TextBuffer('def update(dt):\n    pass\n')
         state.code.source_path = str(state.project / 'new_system.py')
         state._saved_source = None
-        state.code.components.pop('system_name', None)
+        state.code.items.remove_value('system_name', None)
         state.code.relations.pop('owner', None)
     refresh_project_files()
     message(f"Deleted '{path.name}'; references remain recoverable")
 
 def create_new_folder(parent_dir=None):
-    pdir = Path(parent_dir).resolve() if parent_dir else (state.project / state.file_explorer.components.get('view_root','systems/game')).resolve()
+    pdir = Path(parent_dir).resolve() if parent_dir else (state.project / state.file_explorer.items.get_value('view_root', 'systems/game')).resolve()
     if not pdir.is_relative_to(state.project) or not pdir.is_dir():
         raise ValueError('Choose an existing folder inside the project')
     base_name = "New Folder"

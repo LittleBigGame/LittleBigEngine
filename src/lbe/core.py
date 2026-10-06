@@ -234,6 +234,8 @@ class Entity:
 
     @property
     def _parent(self):
+        if not self._alive:
+            return None
         try:
             return self.runtime.resolve(self.items.named(Parent, "parent").target)
         except KeyError:

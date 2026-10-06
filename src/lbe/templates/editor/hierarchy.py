@@ -40,7 +40,7 @@ def reveal_hierarchy(target):
 
 
 def hierarchy_sync():
-    if not getattr(state, "hierarchy", None) or not state.hierarchy.components.get("visible", True):
+    if not getattr(state, "hierarchy", None) or not state.hierarchy.items.get_value("visible", True):
         for row in getattr(state, "hierarchy_rows", []):
             put(row, visible=False)
         if hasattr(state, "hierarchy_scroll_track"):
@@ -62,8 +62,8 @@ def hierarchy_sync():
     state.hierarchy.visible_count = len(visible)
     max_scroll = max(0, len(visible) - capacity)
     target = selected()
-    if state.hierarchy.components.get('revealed_selection') != target.id:
-        state.hierarchy.components['revealed_selection'] = target.id
+    if state.hierarchy.items.get_value('revealed_selection') != target.id:
+        state.hierarchy.items.set_value('revealed_selection', target.id)
         index = next((i for i,(e,_) in enumerate(visible) if e is target), 0)
         state.hierarchy.scroll = max(0,index-capacity+1)
 
@@ -87,7 +87,7 @@ def hierarchy_sync():
         target, depth = visible[source]
         if row.relations.get('target') is not target:
             row.relations['target'] = target
-        name = str(target.components.get('name', str(target.id)[:8]))
+        name = str(target.items.get_value('name', str(target.id)[:8]))
         marker = '-' if target.id in expanded else '+'
         is_selected = target is selected()
         indicator = '> ' if is_selected else '  '
@@ -167,18 +167,18 @@ def hierarchy_click(row, event):
 
 
 def hierarchy_row_drag(row, event):
-    if state.app.components.get("entity_drag") is not None or state.app.components.get("asset_drag") is not None:
+    if state.app.items.get_value("entity_drag") is not None or state.app.items.get_value("asset_drag") is not None:
         return True
     target = row.relations.get("target")
     if target is None:
         return False
-    ent_name = str(target.components.get("name", str(target.id)[:8]))
-    state.app.components["entity_drag"] = {
+    ent_name = str(target.items.get_value("name", str(target.id)[:8]))
+    state.app.items.set_value("entity_drag", {
         "id": str(target.id),
         "name": ent_name,
         "type": "entity",
         "entity": target,
-    }
+    })
     return True
 
 
