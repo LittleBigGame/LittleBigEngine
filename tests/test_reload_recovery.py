@@ -119,3 +119,19 @@ def update(*, self, dt): self.x += dt
         self.runtime.step(2)
         self.assertEqual(child.x, 2)
         self.assertEqual(list(instance.errors), [])
+
+    def test_failed_stop_rejects_replacement_and_restores_old_attachment(self):
+        self.owner.x = 1
+        previous = self.owner.systems.attach('worker', SystemDefinition('''
+def update(dt): self.x += dt
+def stop():
+    self.x = 999
+    raise ValueError('cleanup failed')
+'''))
+        active = self.owner.systems.reload('worker', SystemDefinition('def start(): self.x = 100'))
+        self.assertIs(active, previous)
+        self.assertTrue(previous.running)
+        self.assertEqual(self.owner.x, 1)
+        self.assertIn('cleanup failed', previous.errors[-1].message)
+        self.runtime.step(2)
+        self.assertEqual(self.owner.x, 3)

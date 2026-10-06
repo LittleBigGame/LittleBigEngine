@@ -380,7 +380,10 @@ def reload_attachment(collection, name, definition, instance_type, role):
             raise RuntimeError('initialization failed')
         if not collection._entity.alive or collection._values.get(name) is not current:
             raise RuntimeError('Reload changed its owning attachment during initialization')
+        stop_errors = tuple(current.errors)
         current.stop()
+        if tuple(current.errors) != stop_errors:
+            raise RuntimeError(f'Previous attachment failed to stop: {current.errors[-1].message}')
         if not collection._entity.alive or collection._values.get(name) is not current:
             raise RuntimeError('Reload changed its owning attachment during stop')
         collection._values[name] = candidate
