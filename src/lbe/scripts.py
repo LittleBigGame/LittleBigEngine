@@ -85,7 +85,8 @@ class ScriptInstance(SystemInstance):
 class Scripts(MutableMapping):
     def __init__(self,entity):
         self._entity=entity
-        self._values={}
+        from .items import NamedValues
+        self._values=NamedValues(entity, ScriptInstance)
 
     def __getitem__(self,key):
         self._entity._check()
@@ -116,7 +117,7 @@ class Scripts(MutableMapping):
         instance.stop()
         self._entity._changed('script.detach',instance.name)
 
-    def attach(self,reference):
+    def attach(self,reference, *, identity=None):
         self._entity._check()
         if self._entity._destroying:
             raise RuntimeError('Cannot attach scripts during destruction')
@@ -127,7 +128,7 @@ class Scripts(MutableMapping):
         key=str(uid)
         if key in self._values:
             raise ValueError('Script is already attached')
-        instance=ScriptInstance(self._entity,key,definition)
+        instance=ScriptInstance(self._entity,key,definition,identity=identity)
         self._values[key]=instance
         self._entity._changed('script.attach',key)
         if instance.initialize() and self._entity.alive and self._values.get(key) is instance:
@@ -136,7 +137,7 @@ class Scripts(MutableMapping):
 
     def reload(self, key, definition):
         current=self[key]
-        candidate=ScriptInstance(self._entity,current.name,definition)
+        candidate=ScriptInstance(self._entity,current.name,definition,identity=current.id)
         if not candidate.initialize():
             current.errors.extend(candidate.errors)
             return current

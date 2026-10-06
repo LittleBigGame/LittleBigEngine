@@ -7,6 +7,7 @@ from uuid import UUID, uuid4
 from math import isfinite
 
 from .events import Changes, Events, ABSENT
+from .items import Component, InheritedComponent, Items, NamedValues, Tag, TagValues, Relation, Parent
 
 _MISSING = object()
 
@@ -14,7 +15,34 @@ _MISSING = object()
 class Components(MutableMapping):
     def __init__(self, entity):
         self._entity = entity
-        self._values = {}
+        self._values = NamedValues(entity, Component)
+
+    def item(self, key):
+        """Persistent declaration behind a named component value."""
+        self._entity._check()
+        return self._values.record(key)
+
+    def inherit(self, key, source, patch=()):
+        """Attach a source UUID and local patch without copying authoritative data."""
+        source = source.id if isinstance(source, (Component, InheritedComponent)) else UUID(str(source))
+        candidate = InheritedComponent(key, source, tuple(deepcopy(patch)))
+        # Validate before altering the entity. Missing/cyclic sources are errors.
+        self._entity.runtime.linker.component_value(source)
+        if key in self:
+            raise ValueError(f"Component {key!r} already exists")
+        return self._entity.items.add(candidate)
+
+    def patch(self, key, operations):
+        from dataclasses import replace
+        from .items import compose
+        current = self.item(key)
+        if not isinstance(current, InheritedComponent):
+            raise TypeError("Only inherited components have patches")
+        operations = tuple(deepcopy(operations))
+        value = compose(self._entity.runtime.linker.component_value(current.source), operations)
+        previous = self[key]
+        self._entity.items._put(replace(current, patch=operations))
+        self._entity._changed("component.set", key, old=previous, new=value)
 
     def __getitem__(self, key):
         self._entity._check()
@@ -56,7 +84,7 @@ class Components(MutableMapping):
 class Tags(MutableSet):
     def __init__(self, entity):
         self._entity = entity
-        self._values = set()
+        self._values = TagValues(entity)
 
     def __contains__(self, value):
         self._entity._check()
@@ -90,7 +118,7 @@ class Relations(MutableMapping):
 
     def __init__(self, entity):
         self._entity = entity
-        self._values = {}
+        self._values = NamedValues(entity, Relation)
 
     def __getitem__(self, key):
         self._entity._check()
@@ -136,7 +164,7 @@ class Relations(MutableMapping):
 
 class Entity:
     __slots__ = (
-        "_runtime", "_id", "_alive", "_destroying", "_parent", "_children",
+        "_runtime", "_id", "_alive", "_destroying", "_items",
         "_components", "_tags", "_relations", "_systems", "_scripts",
     )
 
@@ -148,8 +176,7 @@ class Entity:
         object.__setattr__(self, "_id", identity)
         object.__setattr__(self, "_alive", True)
         object.__setattr__(self, "_destroying", False)
-        object.__setattr__(self, "_parent", None)
-        object.__setattr__(self, "_children", [])
+        object.__setattr__(self, "_items", Items(self))
         object.__setattr__(self, "_components", Components(self))
         object.__setattr__(self, "_tags", Tags(self))
         object.__setattr__(self, "_relations", Relations(self))
@@ -164,6 +191,38 @@ class Entity:
     relations = property(lambda self: self._relations)
     systems = property(lambda self: self._systems)
     scripts = property(lambda self: self._scripts)
+    items = property(lambda self: self._items)
+    handle = property(lambda self: self.runtime.linker.handle(self.id))
+
+    def __getitem__(self, identity):
+        return self.items[identity]
+
+    def all(self, item_type):
+        return self.items.all(item_type)
+
+    @property
+    def _parent(self):
+        try:
+            return self.runtime.resolve(self.items.named(Parent, "parent").target)
+        except KeyError:
+            return None
+
+    @_parent.setter
+    def _parent(self, target):
+        try:
+            item = self.items.named(Parent, "parent")
+        except KeyError:
+            item = None
+        if target is None:
+            if item is not None:
+                self.items._drop(item.id)
+        else:
+            self.items._put(Parent(target.id, item.id if item else uuid4()))
+
+    @property
+    def _children(self):
+        # Derived adjacency/sibling order, never recursively owned entity records.
+        return self.runtime._children.setdefault(self.id, [])
 
     def run(self, reference, *args, **kwargs):
         return self.scripts.run(reference,*args,**kwargs)
@@ -364,6 +423,9 @@ class Runtime:
         from .systems import Assets
 
         self._entities = {}
+        self._children = {}
+        from .linker import Linker
+        self.linker = Linker(self)
         self._incoming = {}
         self.changes = Changes()
         self.events = Events()
@@ -407,11 +469,12 @@ class Runtime:
             raise ValueError("Tags must be nonempty strings")
         if identity is not None:
             identity = UUID(str(identity))
-            if identity in self._entities:
+            if identity in self.linker.objects:
                 raise ValueError(f"Entity with id {identity} already exists")
         else:
             identity = uuid4()
         entity = Entity(self, identity)
+        self.linker.register(entity)
         entity._components._values.update(data)
         entity._tags._values.update(tags)
         object.__setattr__(entity, "_parent", parent)
@@ -457,6 +520,10 @@ class Runtime:
                 node._parent._children.remove(node)
             object.__setattr__(node, "_parent", None)
             del self._entities[node.id]
+            for identity in tuple(node.items):
+                node.items._drop(identity)
+            self.linker.unregister(node.id)
+            self._children.pop(node.id, None)
             object.__setattr__(node, "_alive", False)
             node._changed("entity.destroy")
 

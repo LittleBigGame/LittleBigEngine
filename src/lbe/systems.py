@@ -105,7 +105,9 @@ class Assets:
 
 
 class SystemInstance:
-    def __init__(self, entity, name, definition):
+    def __init__(self, entity, name, definition, *, identity=None):
+        from uuid import UUID, uuid4
+        self.id = UUID(str(identity)) if identity is not None else uuid4()
         self.entity = entity
         self.name = name
         self.definition = definition
@@ -325,7 +327,8 @@ class SystemInstance:
 class Systems(MutableMapping):
     def __init__(self, entity):
         self._entity = entity
-        self._values = {}
+        from .items import NamedValues
+        self._values = NamedValues(entity, SystemInstance)
 
     def __getitem__(self, name):
         self._entity._check()
@@ -348,7 +351,7 @@ class Systems(MutableMapping):
         instance.stop()
         self._entity._changed("system.detach", name)
 
-    def attach(self, name, definition=None):
+    def attach(self, name, definition=None, *, identity=None):
         if definition is None:
             definition = self._entity.runtime.assets.resolve(name) if not isinstance(name,SystemDefinition) else name
             identity = definition.asset_id
@@ -366,7 +369,7 @@ class Systems(MutableMapping):
             raise ValueError(f"System {name!r} already attached; use reload")
         if not isinstance(definition, SystemDefinition):
             raise TypeError("Expected a SystemDefinition")
-        instance = SystemInstance(self._entity, name, definition)
+        instance = SystemInstance(self._entity, name, definition, identity=identity)
         self._values[name] = instance
         self._entity._changed("system.attach", name)
         if instance.initialize() and self._entity.alive and self._values.get(name) is instance:
@@ -385,7 +388,7 @@ class Systems(MutableMapping):
             current.errors.append(Diagnostic(f"{name}.compile", str(error), traceback.format_exc()))
             self._entity._changed("system.error", name)
             return current
-        candidate = SystemInstance(self._entity, name, definition)
+        candidate = SystemInstance(self._entity, name, definition, identity=current.id)
         if not candidate.initialize():
             current.errors.extend(candidate.errors)
             return current
@@ -411,7 +414,7 @@ class Systems(MutableMapping):
         pair = next(item for item in items if item[0] == name)
         items.remove(pair)
         items.insert(index, pair)
-        self._values = dict(items)
+        self._values.reorder(items)
         self._entity._changed("system.reorder", name)
 
     def relocate(self, name, path, *, new_name=None):
@@ -421,8 +424,9 @@ class Systems(MutableMapping):
         if new_name != name and new_name in self._values:
             raise ValueError(f"System {new_name!r} is already attached")
         definition = SystemDefinition(instance.definition.source, str(path), instance.definition.asset_id)
-        self._values = {new_name if key == name else key: value for key, value in self._values.items()}
+        self._entity.items._names.pop((SystemInstance, name))
         instance.name = new_name
+        self._entity.items._names[SystemInstance, new_name] = instance.id
         instance.definition = definition
         instance.namespace["__file__"] = str(path)
         self._entity._changed("system.relocate", new_name)
