@@ -18,12 +18,22 @@ class CompletionTests(unittest.TestCase):
     def test_unwritable_cache_uses_temporary_storage(self):
         import errno
         from lbe.completion import analyze
-        with patch('jedi.settings.cache_directory', 'unwritable-cache'):
+        with tempfile.TemporaryDirectory() as directory, \
+             patch('jedi.settings.cache_directory', directory):
             operation = unittest.mock.Mock(side_effect=[OSError(errno.EROFS, 'read-only cache'), ['ok']])
             self.assertEqual(analyze(operation), ['ok'])
             self.assertEqual(operation.call_count, 2)
             import jedi
-            self.assertNotEqual(jedi.settings.cache_directory, 'unwritable-cache')
+            self.assertNotEqual(jedi.settings.cache_directory, directory)
+
+    def test_unusable_cache_preserves_imported_member_completion(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cache = Path(directory, 'not-a-directory')
+            cache.write_text('occupied', encoding='utf-8')
+            source = 'from pathlib import Path\nlocation = Path(".")\nlocation.ex'
+            with patch('jedi.settings.cache_directory', str(cache)):
+                _, matches = complete(source, len(source), Path(directory, 'script.py'))
+            self.assertIn(('exists', 'function'), matches)
 
     def test_infers_local_type_instead_of_assuming_entity(self):
         source = 'class Tool:\n    def perform(self): pass\nthing = Tool()\nthing.per'
@@ -126,4 +136,3 @@ class CompletionTests(unittest.TestCase):
         self.assertIn('query', all_names)
         self.assertIn('destroy', all_names)
         self.assertIn('children', all_names)
-

@@ -17,18 +17,35 @@ class AnalysisError(RuntimeError):
     """Static analysis failed; the editor can display the underlying cause."""
 
 
+def temporary_cache():
+    global _fallback_cache
+    import jedi
+    if _fallback_cache is None:
+        _fallback_cache = tempfile.TemporaryDirectory(prefix='lbe-analysis-')
+    jedi.settings.cache_directory = _fallback_cache.name
+
+
+def ensure_cache():
+    """Jedi can swallow cache errors and return empty imported-member results."""
+    import jedi
+    try:
+        cache = Path(jedi.settings.cache_directory)
+        cache.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryFile(dir=cache):
+            pass
+    except OSError:
+        temporary_cache()
+
+
 def analyze(operation):
     """Retry unwritable caches once, then report failures instead of empty results."""
-    global _fallback_cache
+    ensure_cache()
     try:
         return operation()
     except OSError as error:
         if error.errno not in (errno.EACCES, errno.EPERM, errno.EROFS):
             raise AnalysisError(str(error)) from error
-        import jedi
-        if _fallback_cache is None:
-            _fallback_cache = tempfile.TemporaryDirectory(prefix='lbe-analysis-')
-        jedi.settings.cache_directory = _fallback_cache.name
+        temporary_cache()
         try:
             return operation()
         except Exception as retry_error:

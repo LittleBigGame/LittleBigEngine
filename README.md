@@ -46,10 +46,14 @@ See [UI and application scripting](docs/ui.md) to build your own application.
 ```console
 python tests/run_suite.py -v
 python tests/desktop_walkthrough.py
+python tests/desktop_soak.py --seconds 90
 ```
 
 Continuous integration checks Python 3.11 and 3.14 on Windows and Linux.
 The desktop walkthrough uses real graphics and synthetic editor input.
+The timed soak repeats visible editing, undo/redo, menus and project saves while
+checking script health and bounded entity/graphics counts. Use `--seconds 1800`
+for a 30-minute run or `--visible` to watch it.
 The suite runner isolates preferences and caches and enables EGL on Linux.
 The desktop CI job runs the full suite with completion and graphics installed.
 

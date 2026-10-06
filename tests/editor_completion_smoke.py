@@ -25,7 +25,8 @@ def main():
                 if state.get('active'):
                     break
                 time.sleep(0.01)
-            assert any(name == 'exists' for name, _ in state.get('matches', ())), state
+            assert any(name == 'exists' for name, _ in state.get('matches', ())), (
+                state, code.components.get('completion_error'))
             assert code.buffer.text == source
             if '--selection' in sys.argv:
                 input_state.pending.append(('key', 'ESCAPE', False, False))

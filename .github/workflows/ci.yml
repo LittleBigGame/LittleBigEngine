@@ -33,5 +33,6 @@ jobs:
       - run: python -m lbe --headless --frames 3
       - run: python tests/desktop_walkthrough.py
       - run: python tests/editor_completion_smoke.py --selection
+      - run: python tests/desktop_soak.py --seconds 90
       - run: python -m lbe --template counter --headless --frames 3
       - run: python -m lbe --template demo --headless --frames 3
