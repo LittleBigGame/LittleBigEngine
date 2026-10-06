@@ -13,7 +13,7 @@ from lbe import Assets, Runtime, TextureAsset
 from lbe.assets import AssetRegistry
 from lbe.desktop import Graphics, Input
 from lbe.project import load_project, template_path, serialize_value
-from lbe.project_files import ProjectFiles
+from lbe.project_files import ProjectFiles, recover_file_operation
 from test_scene import RecordingGraphics
 
 
@@ -123,12 +123,39 @@ class TextureTests(unittest.TestCase):
         runtime.entities[0].systems['app'].namespace['apply_asset_to_entity'](target, data)
         runtime.step(0)
         self.assertTrue(any(kw.get('key') == target.id for _, kw in graphics.sprites))
+        failures = []
+        runtime.events.on('texture.error', lambda *args: failures.append(args))
+        original_sprite = graphics.sprite
+        def broken_sprite(*args, **kwargs):
+            raise ValueError('corrupt texture')
+        graphics.sprite = broken_sprite
+        for _ in range(3):
+            runtime.step(0)
+        self.assertEqual(len(failures), 1)
+        self.assertTrue(editor.game.systems['render'].running)
+        graphics.sprite = original_sprite
+        runtime.step(0)
         runtime.close()
         reopened = load_project(window, RecordingGraphics(), Input(), project, template=template_path('editor'))
         self.addCleanup(reopened.close)
         restored = reopened.resolve(target.id)
         self.assertEqual(restored.sprite.id, uid)
         self.assertEqual(reopened.assets.resolve(restored.sprite).path, project / 'textures/ball.png')
+
+    def test_interrupted_import_recovers_only_the_uncommitted_copy(self):
+        runtime = Runtime()
+        self.addCleanup(runtime.close)
+        runtime.assets.registry = self.registry
+        files = ProjectFiles(runtime, self.directory)
+        def interrupted():
+            raise KeyboardInterrupt()
+        with self.assertRaises(KeyboardInterrupt):
+            files.import_file(self.path, 'textures/interrupted.png', save=interrupted)
+        self.assertTrue((self.directory / 'textures/interrupted.png').exists())
+        recover_file_operation(self.directory)
+        self.assertFalse((self.directory / 'textures/interrupted.png').exists())
+        self.assertTrue(self.path.exists())
+        self.assertFalse((self.directory / '.lbe-file-operation.json').exists())
 
 
 @unittest.skipUnless(importlib.util.find_spec('pyglet'), 'optional desktop dependency')
@@ -182,6 +209,28 @@ class NativeTextureTests(unittest.TestCase):
         self.graphics.sprite(self.ref, 0, 0, key='fixed')
         self.graphics.finish()
         self.assertEqual(len(self.graphics._pool), 1)
+
+    def test_project_switch_can_reuse_graphics_without_stale_gpu_groups(self):
+        self.graphics.begin()
+        self.graphics.sprite(self.ref, 0, 0, key='before')
+        self.graphics.finish()
+        self.graphics.close()
+        self.graphics.begin()
+        self.graphics.sprite(self.ref, 0, 0, key='after')
+        self.graphics.finish()
+        self.assertEqual(len(self.graphics._pool), 1)
+
+    @unittest.skipUnless(importlib.util.find_spec('PIL'), 'optional image decoder')
+    def test_jpeg_project_texture_uses_portable_decoder(self):
+        from PIL import Image
+        path = self.path.with_suffix('.jpg')
+        Image.new('RGB', (3, 3), (20, 200, 100)).save(path)
+        registry = self.ref.registry
+        texture = Assets(registry).resolve(registry.register(path))
+        self.graphics.begin()
+        self.graphics.sprite(texture, 0, 0, key='jpeg')
+        self.graphics.finish()
+        self.assertEqual(self.graphics._pool[('sprite', 'jpeg', 1)].image.width, 3)
 
     def test_world_sprites_are_clipped_to_viewport_and_restore_gl_state(self):
         import pyglet

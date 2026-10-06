@@ -67,7 +67,7 @@ def build_scene(directory, count, *, seed=271828):
     return directory
 
 
-def zip_bundle(directory, destination):
+def zip_bundle(directory, destination, *, include_profiles=True):
     directory, destination = Path(directory).resolve(), Path(destination).resolve()
     if destination.is_relative_to(directory):
         raise ValueError('ZIP must be outside the scene bundle')
@@ -75,6 +75,8 @@ def zip_bundle(directory, destination):
         raise FileExistsError(destination)
     with zipfile.ZipFile(destination, 'x', compression=zipfile.ZIP_DEFLATED, compresslevel=6) as archive:
         for path in sorted(directory.rglob('*')):
+            if not include_profiles and path.relative_to(directory).parts[0] == 'profiles':
+                continue
             if path.is_file() and '__pycache__' not in path.parts and not any(p.startswith('.') for p in path.relative_to(directory).parts):
                 archive.write(path, path.relative_to(directory).as_posix())
     return destination
@@ -92,7 +94,8 @@ def main():
         path = build_scene(args.output / f'BouncyBox_{count:05d}', count, seed=args.seed)
         print(f'Saved {count} balls: {path}', flush=True)
     shutil.copy2(Path(__file__).parent / 'profile_scenes.py', args.output / 'profile_scenes.py')
-    shutil.copy2(Path(__file__).parent / 'README.md', args.output / 'README.md')
+    for document in ('README.md', 'RESULTS.md'):
+        shutil.copy2(Path(__file__).parent / document, args.output / document)
     if args.zip:
         print(zip_bundle(args.output, args.zip))
 

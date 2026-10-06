@@ -1,5 +1,6 @@
 """Saved, portable profiling workloads must exercise real collision/data paths."""
 import importlib.util
+import json
 from pathlib import Path
 import shutil
 import tempfile
@@ -98,10 +99,36 @@ class BouncyBoxTests(unittest.TestCase):
     def test_build_refuses_existing_scene_and_archive_has_relative_projects(self):
         with self.assertRaises(FileExistsError):
             build.build_scene(self.directory, 16)
-        archive = build.zip_bundle(self.directory, self.directory.parent / 'scenes.zip')
+        (self.directory / 'profiles').mkdir()
+        (self.directory / 'profiles/raw.txt').write_text('profiling output', encoding='utf-8')
+        archive = build.zip_bundle(self.directory, self.directory.parent / 'scenes.zip', include_profiles=False)
         import zipfile
         with zipfile.ZipFile(archive) as bundle:
             self.assertIsNone(bundle.testzip())
             self.assertIn('project.json', bundle.namelist())
             self.assertIn('textures/ball.png', bundle.namelist())
+            self.assertNotIn('profiles/raw.txt', bundle.namelist())
             self.assertFalse(any(Path(name).is_absolute() or '..' in Path(name).parts for name in bundle.namelist()))
+
+    def test_distributed_zip_has_exact_saved_inputs_and_current_portable_sources(self):
+        import zipfile
+        example = Path(__file__).resolve().parents[1] / 'examples/bouncy_box'
+        with zipfile.ZipFile(example / 'LBETestScenes.zip') as bundle:
+            self.assertIsNone(bundle.testzip())
+            self.assertFalse(any(name.startswith('profiles/') for name in bundle.namelist()))
+            self.assertEqual(bundle.read('profile_scenes.py'), (example / 'profile_scenes.py').read_bytes())
+            for count in (128, 512, 2048, 4096):
+                prefix = f'BouncyBox_{count:05d}/'
+                data = json.loads(bundle.read(prefix + 'project.json'))
+                self.assertEqual(len(data['entities']), count + 3)
+                self.assertEqual(json.loads(bundle.read(prefix + 'scene.json'))['balls'], count)
+                assets = data['assets']
+                texture = next(uid for uid, value in assets.items() if value['path'] == 'textures/ball.png')
+                balls = [e for e in data['entities'] if 'ball' in e['tags']]
+                self.assertEqual(len(balls), count)
+                self.assertTrue(all(ball['components']['sprite']['id'] == texture for ball in balls))
+                for path in (example / 'template').rglob('*.py'):
+                    relative = path.relative_to(example / 'template').as_posix()
+                    self.assertEqual(bundle.read(prefix + relative), path.read_bytes())
+                self.assertTrue(all(not Path(value['path']).is_absolute() and '..' not in Path(value['path']).parts
+                                    for value in assets.values()))

@@ -14,7 +14,8 @@ python -m venv .venv
 ```
 
 The ZIP includes saved **128, 512, 2048 and 4096-ball** projects, initial entity
-state, seeds/settings, shared RGBA ball texture, UUID-attached scripts and profiles.
+state, seeds/settings, shared RGBA ball texture, UUID-attached scripts and a measured
+results summary (`RESULTS.md`). The full profiling bundle also includes raw profiles.
 Space/F5 pauses; S saves the current scene. Closing without S leaves the measured
 initial state intact. Choose a lower-count scene first on a slower machine.
 
@@ -26,8 +27,8 @@ initial state intact. Choose a lower-count scene first on a slower machine.
 
 Add `--visible` to watch rendering, `--counts 128 512` to select loads, or
 `--frames 300 --warmup 60 --profile-frames 60` for a longer sample. Output must be
-new/empty, so old measurements are not overwritten. The prebuilt cloud results
-are in `profiles/`; compare on your own hardware rather than treating software
+new/empty, so old measurements are not overwritten. The cloud results summary
+is in `RESULTS.md` (raw data in `profiles/` in the full bundle); compare on your own hardware rather than treating software
 EGL throughput as your Windows GPU performance.
 
 There are independent **physics-only, render-only and combined** runs, each loaded
@@ -69,3 +70,5 @@ Scene construction is deterministic for the saved seed, refuses to overwrite
 existing projects, and uses no optional graphics dependencies. Rendering and
 profiling require `.[desktop]`. Archive generation excludes caches and hidden
 working state; use `build.zip_bundle(...)` after profiling to package results.
+The committed `LBETestScenes.zip` excludes raw profiles/logs/screenshots and
+contains only portable project assets, tools and user-facing documentation.
