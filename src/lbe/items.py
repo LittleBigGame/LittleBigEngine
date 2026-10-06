@@ -545,10 +545,6 @@ class NamedValues(MutableMapping):
 
     def __getitem__(self, name):
         item = self.record(name)
-        if self.category is Component:
-            if isinstance(item, Component):
-                return item.value
-            return self.entity.runtime.linker.component_value(item.id)
         if self.category is Relation:
             return self.entity.runtime.resolve(item.target)
         return item
@@ -559,12 +555,7 @@ class NamedValues(MutableMapping):
         except KeyError:
             current = None
         identity = current.id if current else uuid4()
-        if self.category is Component:
-            if isinstance(current, InheritedComponent):
-                item = replace(current, patch=({"op": "replace", "value": value},))
-            else:
-                item = Component(name, value, identity)
-        elif self.category is Relation:
+        if self.category is Relation:
             item = Relation(name, value.id, identity)
         else:
             item = value

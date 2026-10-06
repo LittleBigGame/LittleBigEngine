@@ -21,7 +21,7 @@ def open_menu(ui, target, x, y, actions=None):
         actions = []
         owners = (ui.root,) if target is ui.root else (ui.root, target)
         for owner in owners:
-            provider = getattr(owner, "components", {}).get("context_actions")
+            provider = owner.items.get_value("context_actions") if isinstance(owner, Entity) else None
             if provider:
                 actions.extend(provider(target))
     actions = [dict(a, enabled=a.get('enabled', True) and callable(a.get('run'))) if a is not None else None

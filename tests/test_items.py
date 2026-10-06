@@ -11,9 +11,9 @@ class ItemTests(unittest.TestCase):
 
     def test_named_apis_share_one_store_and_stable_identities(self):
         e = self.runtime.create(tags=["player"], x=1)
-        x = e.components.item("x")
+        x = e.items.component("x")
         e.x = 2
-        self.assertEqual(e.components.item("x").id, x.id)
+        self.assertEqual(e.items.component("x").id, x.id)
         self.assertEqual(e[x.id].value, 2)
         self.assertEqual(len(e.items), 2)
         self.assertEqual(len(e.all(Tag)), 1)
@@ -54,7 +54,7 @@ class ItemTests(unittest.TestCase):
     def test_composition_resolves_live_sources_without_mutating_them(self):
         source = self.runtime.create(stats={"hp": 10, "items": [1]})
         child = self.runtime.create()
-        item = child.components.inherit("stats", source.components.item("stats"), (
+        item = child.items.inherit_value("stats", source.items.component("stats"), (
             {"op": "add", "path": ["hp"], "value": 2},
             {"op": "add", "path": ["items"], "value": [2]},
         ))
@@ -71,7 +71,7 @@ class ItemTests(unittest.TestCase):
     def test_handles_cannot_resurrect_destroyed_objects(self):
         e = self.runtime.create(x=1)
         handle = e.handle
-        component_handle = self.runtime.linker.handle(e.components.item("x").id)
+        component_handle = self.runtime.linker.handle(e.items.component("x").id)
         e.destroy()
         self.runtime.create(x=2)
         for old in (handle, component_handle):
@@ -81,7 +81,7 @@ class ItemTests(unittest.TestCase):
     def test_missing_and_cyclic_composition_is_explicit(self):
         e = self.runtime.create()
         with self.assertRaises(KeyError):
-            e.components.inherit("x", uuid4())
+            e.items.inherit_value("x", uuid4())
         self.assertFalse(e.items)
         uid = uuid4()
         e.items._put(InheritedComponent("x", uid, id=uid))

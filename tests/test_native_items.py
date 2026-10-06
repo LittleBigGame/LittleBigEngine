@@ -209,3 +209,34 @@ class NativeItemTests(unittest.TestCase):
         self.assertIs(owner.items.add(record), record)
         self.assertEqual(owner.all(DefinitionMetadata), (record,))
         self.assertNotIn(record.id, self.runtime.linker.dependencies)
+
+    def test_entity_has_no_component_collection_facade(self):
+        owner = self.runtime.create(x=1)
+        self.assertNotIn('components', type(owner).__dict__)
+        self.assertNotIn('_components', type(owner).__slots__)
+        self.assertFalse(hasattr(owner, 'components'))
+        with self.assertRaises(AttributeError):
+            _ = owner.components
+        self.assertEqual(owner.items.require_value('x'), 1)
+
+    def test_entity_creation_accepts_actual_typed_uuid_records(self):
+        source = Component('speed', 4)
+        inherited = InheritedComponent('speed_copy', source.id)
+        transform = TransformComponent('transform', {'x': 1})
+        record = CustomRecord('arbitrary', {'kind': 'data'})
+        owner = self.runtime.create(items=(inherited, source, transform, record))
+        self.assertEqual(tuple(owner.items), (inherited.id, source.id, transform.id, record.id))
+        self.assertEqual(owner.items.value(inherited.id), 4)
+        self.assertIs(owner.items[transform.id], transform)
+        with self.assertRaises(TypeError):
+            self.runtime.create(components={'x': 1})
+
+    def test_native_creation_rejects_duplicate_item_uuid_without_mutation(self):
+        record = Component('x', 1)
+        before = self.runtime.entities
+        with self.assertRaises(ValueError):
+            self.runtime.create(items=(record, record))
+        self.assertEqual(self.runtime.entities, before)
+        with self.assertRaises(ValueError):
+            self.runtime.create(items={uuid4(): record})
+        self.assertEqual(self.runtime.entities, before)

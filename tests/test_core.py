@@ -8,12 +8,13 @@ class CoreTests(unittest.TestCase):
         self.runtime = Runtime()
 
     def test_arbitrary_components_and_reserved_names(self):
-        entity = self.runtime.create(x=1, custom={"a": [1]}, components={"id": "data"})
+        from lbe import Component
+        entity = self.runtime.create(x=1, custom={"a": [1]}, items=(Component("id", "data"),))
         identity = entity.id
         self.assertEqual(entity.x, 1)
         entity.x = 4
-        self.assertEqual(entity.components["x"], 4)
-        self.assertEqual(entity.components["id"], "data")
+        self.assertEqual(entity.items.require_value("x"), 4)
+        self.assertEqual(entity.items.require_value("id"), "data")
         with self.assertRaises(AttributeError):
             entity.id = "replacement"
         self.assertEqual(entity.id, identity)
@@ -26,18 +27,18 @@ class CoreTests(unittest.TestCase):
         entity = self.runtime.create(settings={"items": [1]})
         observed = []
         self.runtime.changes.subscribe(observed.append)
-        with entity.components.edit("settings") as value:
+        with entity.items.edit_value("settings") as value:
             value["items"].append(2)
         self.assertEqual(entity.settings, {"items": [1, 2]})
         self.assertEqual(len(observed), 1)
         with self.assertRaises(ValueError):
-            with entity.components.edit("settings") as value:
+            with entity.items.edit_value("settings") as value:
                 value.clear()
                 raise ValueError("cancel")
         self.assertEqual(entity.settings, {"items": [1, 2]})
         self.assertEqual(len(observed), 1)
         entity.settings["items"].append(3)
-        entity.components.touch("settings")
+        entity.items.touch_value("settings")
         self.assertEqual(observed[-1].kind, "component.mutate")
 
     def test_invalid_create_does_not_leave_partial_entity(self):
@@ -162,7 +163,7 @@ class CoreTests(unittest.TestCase):
         # Component names
         for bad in ("", 123, None):
             with self.assertRaises(ValueError):
-                entity.components[bad] = 1
+                entity.items.set_value(bad, 1)
         with self.assertRaises(ValueError):
             self.runtime.create(**{"": 1})
 
@@ -179,10 +180,10 @@ class CoreTests(unittest.TestCase):
                 entity.relations[bad] = target
 
         # Collection lengths
-        entity.components["a"] = 1
+        entity.items.set_value("a", 1)
         entity.tags.add("t1")
         entity.relations["r1"] = target
-        self.assertEqual(len(entity.components), 1)
+        self.assertEqual(len(entity.items.value_dict()), 1)
         self.assertEqual(len(entity.tags), 1)
         self.assertEqual(len(entity.relations), 1)
 

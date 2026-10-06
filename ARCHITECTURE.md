@@ -20,12 +20,15 @@ rebuilt from the UUID dictionary; they retain canonical record order after edits
 Named value/link helpers operate on those records, and `value_dict()` returns a
 disposable snapshot, not writable authoritative state. Engine UI, editor template
 and backend component consumers now use these native item operations. The older
-Entity collection properties still exist at this intermediate checkpoint; their
-removal, native persistence and unified item inspector are outstanding cutover work.
+tag/link/behaviour properties and dynamic data attributes still exist at this
+intermediate checkpoint; their removal, native persistence and unified item
+inspector are outstanding cutover work. `Entity.components`, its storage slot and
+the Components projection class have been removed. `Runtime.create(items=...)`
+accepts actual typed UUID records; the old `components=` argument is rejected.
 
 On `codex/uuid-kernel-gui`, entity data is owned by one UUID-keyed `Items` store.
-Named components/tags/relations/system/script collections are compatibility
-projections. Components, inherited declarations, tags, relation/parent links and
+Remaining named tag/relation/system/script collections are interim projections.
+Components, inherited declarations, tags, relation/parent links and
 behavior attachments have persistent UUIDs; links store target UUIDs. Name/type
 indexes and ordered child adjacency are derived runtime state.
 

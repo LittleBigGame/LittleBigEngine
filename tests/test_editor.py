@@ -62,7 +62,7 @@ class EditorTests(unittest.TestCase):
         namespace=ed.app.systems['app'].namespace
         namespace['frame_game']()
         for target in ed.game.children:
-            if target.components.get('color') is not None:
+            if target.items.get_value('color') is not None:
                 sx,sy=world_to_screen(ed.camera,ed.viewport,target.x,target.y)
                 self.assertGreaterEqual(sx,ed.viewport.x)
                 self.assertLessEqual(sx,ed.viewport.x+ed.viewport.w)
@@ -82,7 +82,7 @@ class EditorTests(unittest.TestCase):
         self.runtime.step(1)
         ed.select(target)
         ed.inspector_sync()
-        self.assertTrue(any(r.visible and r.components.get('system_key')==(target.id,'external') for r in ed.system_rows))
+        self.assertTrue(any(r.visible and r.items.get_value('system_key')==(target.id,'external') for r in ed.system_rows))
         self.assertTrue(any(r.asset is None and r.system=='external' for r in self.runtime.services['effects'].affecting(target)))
         self.assertFalse([list(i.errors) for e in self.runtime.entities for i in e.systems.values() if i.errors])
 
@@ -90,7 +90,7 @@ class EditorTests(unittest.TestCase):
         ed = self.editor
         target = ed.game.children[0]
         ed.select(target)
-        field = next(f for _,f in ed.component_rows if f.visible and f.components.get('component_key')=='x')
+        field = next(f for _,f in ed.component_rows if f.visible and f.items.get_value('component_key')=='x')
         before = target.x
         ed.ui.focus(field)
         field.buffer.anchor = 0
@@ -164,7 +164,7 @@ class EditorTests(unittest.TestCase):
         reopened.step(0)
         ed = reopened.entities[0].application_state
         self.assertIs(ed.hierarchy.relations['view_root'], ed.game)
-        self.assertEqual(ed.file_explorer.components.get('view_root','systems/game'),'systems/game')
+        self.assertEqual(ed.file_explorer.items.get_value('view_root', 'systems/game'),'systems/game')
         target = reopened.create(parent=ed.game,name='Scoped')
         ed.set_hierarchy_root(target)
         self.assertIs(ed.hierarchy.relations['view_root'],target)
@@ -223,7 +223,7 @@ class EditorTests(unittest.TestCase):
         self.assertEqual(ed.affected_entities()[target.id], (90,195,125))
         ed.select(target)
         ed.inspector_sync()
-        row = next(r for r in ed.system_rows if r.visible and r.components.get('system_key') == (ed.game.id,'observed'))
+        row = next(r for r in ed.system_rows if r.visible and r.items.get_value('system_key') == (ed.game.id,'observed'))
         self.assertEqual(row.ink,(90,195,125))
         self.assertEqual(row.asset_id,identity)
         path.write_text('def update(dt):\n    list(query("effect_target"))', encoding='utf-8')
@@ -316,9 +316,9 @@ class EditorTests(unittest.TestCase):
                                       get_clipboard_text=lambda: self.clipboard)
         self.runtime = load_project(self.window, self.graphics, self.input, self.directory.name, template=template_path("editor"))
         self.addCleanup(self.runtime.close)
-        self.editor = self.runtime.entities[0].components["application_state"]
+        self.editor = self.runtime.entities[0].items.require_value("application_state")
         self.editor.hierarchy.relations['view_root'] = self.editor.app
-        self.editor.file_explorer.components['view_root'] = '.'
+        self.editor.file_explorer.items.set_value('view_root', '.')
         self.runtime.step(0)
         self.assert_healthy()
 
@@ -333,24 +333,24 @@ class EditorTests(unittest.TestCase):
         self.assert_healthy()
 
     def click(self, entity):
-        if hasattr(entity, "components") and not entity.components.get("visible", True):
+        if hasattr(entity, "items") and not entity.items.get_value("visible", True):
             if callable(getattr(entity, "action", None)):
                 try:
                     entity.action()
                 except Exception as error:
                     msg = f"{type(error).__name__}: {error}"
-                    cb = getattr(self.editor.app, "components", {}).get("on_ui_error")
+                    cb = self.editor.app.items.get_value("on_ui_error")
                     if cb:
                         cb(msg)
                 return
-            on_click = entity.components.get("on_click")
+            on_click = entity.items.get_value("on_click")
             if callable(on_click):
                 on_click(entity, ("click", entity.x, entity.y, 1, 0))
                 return
         self.send(("click", entity.x+entity.w/2, entity.y+entity.h/2, 1, 0))
 
     def type(self, entity, text, commit=False):
-        if hasattr(entity, "components") and entity.components.get("readonly", False):
+        if hasattr(entity, "items") and entity.items.get_value("readonly", False):
             from lbe.ui import TextBuffer
             entity.buffer = TextBuffer(text)
             if commit and hasattr(entity, "on_commit") and callable(entity.on_commit):
@@ -402,7 +402,7 @@ class EditorTests(unittest.TestCase):
         stationary = still.x, still.y
         self.click(self.editor.add_comp_menu_button)
         menu = self.editor.app.relations.get("context_menu")
-        vel_item = next(c for c in menu.children if "+ Velocity" in c.components.get("text", ""))
+        vel_item = next(c for c in menu.children if "+ Velocity" in c.items.get_value("text", ""))
         self.click(vel_item)
         vx_field = next(fld for _, fld in self.editor.component_rows if fld.visible and fld.component_key == "vx")
         vy_field = next(fld for _, fld in self.editor.component_rows if fld.visible and fld.component_key == "vy")
@@ -470,7 +470,7 @@ class EditorTests(unittest.TestCase):
         self.assertEqual(self.editor.code.buffer.text, "hello")
 
     def test_unsupported_value_is_readonly(self):
-        self.editor.app.relations["selection"].components.clear()
+        self.editor.app.relations["selection"].items.clear_values()
         self.editor.app.relations["selection"].opaque = object()
         self.runtime.step(0)
         field = next(field for _, field in self.editor.component_rows if field.visible)
@@ -536,8 +536,8 @@ class EditorTests(unittest.TestCase):
 
     def test_source_editor_cursor_and_selection_alignment(self):
         code = self.editor.code
-        pitch = code.components.get("pitch", 8.0)
-        line_height = code.components.get("line_height", 20)
+        pitch = code.items.get_value("pitch", 8.0)
+        line_height = code.items.get_value("line_height", 20)
         self.click(code)
         self.send(("key", "A", True, False), ("text", "abcdefghijklmnopqrstuvwxyz\n1234567890"))
 
@@ -556,7 +556,7 @@ class EditorTests(unittest.TestCase):
         self.assertEqual(code.buffer.cursor, 15)
 
         # Caret entity alignment
-        caret = next(c for c in code.children if c.components.get("part") == "cursor")
+        caret = next(c for c in code.children if c.items.get_value("part") == "cursor")
         self.assertTrue(caret.visible)
         self.assertAlmostEqual(caret.x, code.x + 48 + 15 * pitch, delta=0.01)
         self.assertAlmostEqual(caret.y, code.y + 6, delta=0.01)
@@ -564,28 +564,28 @@ class EditorTests(unittest.TestCase):
         # Select columns 5 to 12 on line 0
         code.buffer.anchor = 5
         code.buffer.cursor = 12
-        code.components.touch("buffer")
+        code.items.touch_value("buffer")
         self.runtime.step(0)
 
-        highlight = next(c for c in code.children if c.components.get("part") == "selection:0")
+        highlight = next(c for c in code.children if c.items.get_value("part") == "selection:0")
         self.assertTrue(highlight.visible)
-        line = next(c for c in code.children if c.components.get("part") == "line:0")
+        line = next(c for c in code.children if c.items.get_value("part") == "line:0")
         self.assertAlmostEqual(highlight.x, line.x + 5 * pitch, delta=0.01)
         self.assertAlmostEqual(highlight.w, (12 - 5) * pitch, delta=0.01)
 
         # Caret reveal and alignment on line 1
         code.buffer.cursor = code.buffer.anchor = len(code.buffer.text)
-        code.components.touch("buffer")
+        code.items.touch_value("buffer")
         self.runtime.step(0)
-        caret = next(c for c in code.children if c.components.get("part") == "cursor")
+        caret = next(c for c in code.children if c.items.get_value("part") == "cursor")
         row, col = code.buffer.position
         self.assertAlmostEqual(caret.x, code.x + 48 + (col - code.buffer.horizontal) * pitch, delta=0.01)
         self.assertAlmostEqual(caret.y, code.y + 6 + (row - code.buffer.scroll) * line_height, delta=0.01)
 
     def test_source_editor_crlf_pasting_and_cursor_alignment(self):
         code = self.editor.code
-        pitch = code.components.get("pitch", 8.0)
-        line_height = code.components.get("line_height", 20)
+        pitch = code.items.get_value("pitch", 8.0)
+        line_height = code.items.get_value("line_height", 20)
         self.click(code)
         # Select all and paste text containing CRLF
         self.window.set_clipboard_text("hello world\r\nnext line\r\n")
@@ -594,11 +594,11 @@ class EditorTests(unittest.TestCase):
 
         # Move to line 0 end (END key)
         code.buffer.cursor = code.buffer.anchor = 0
-        code.components.touch("buffer")
+        code.items.touch_value("buffer")
         self.runtime.step(0)
         self.send(("key", "END", False, False))
         self.assertEqual(code.buffer.position, (0, 11))
-        caret = next(c for c in code.children if c.components.get("part") == "cursor")
+        caret = next(c for c in code.children if c.items.get_value("part") == "cursor")
         self.assertAlmostEqual(caret.x, code.x + 48 + 11 * pitch, delta=0.01)
 
         # Type character at line end; typed character appears directly at previous cursor position
@@ -720,7 +720,7 @@ class EditorTests(unittest.TestCase):
         ed = self.editor
 
         # 1. Resize left column width from 370 to 420
-        ed.app.components["left_column_w"] = 420
+        ed.app.items.set_value("left_column_w", 420)
         self.runtime.step(0)
         self.assertEqual(ed.hierarchy.w, 404)
         self.assertEqual(ed.inspector.w, 404)
@@ -753,7 +753,7 @@ class EditorTests(unittest.TestCase):
         panel = ed.extra_panels[-1]
         self.assertEqual(panel.dock, "float")
         close_btn = next(c for c in panel.children if "button" in c.tags)
-        line0 = next(c for c in panel.children if c.components.get("line_index") == 0)
+        line0 = next(c for c in panel.children if c.items.get_value("line_index") == 0)
 
         initial_close_x = close_btn.x
         initial_line_x = line0.x
@@ -777,17 +777,17 @@ class EditorTests(unittest.TestCase):
         self.assertIs(ed.app.relations["selection"], ed.code_panel)
 
         sys_buttons = [b for b in ed.system_rows if b.visible]
-        self.assertTrue(any(b.components.get("text", "").endswith(" code_editor.py") for b in sys_buttons))
+        self.assertTrue(any(b.items.get_value("text", "").endswith(" code_editor.py") for b in sys_buttons))
 
         # Clicking system button opens its source in code editor
-        code_sys_btn = next(b for b in sys_buttons if b.components.get("text", "").endswith(" code_editor.py"))
+        code_sys_btn = next(b for b in sys_buttons if b.items.get_value("text", "").endswith(" code_editor.py"))
         self.click(code_sys_btn)
         self.assertEqual(ed.path_field.buffer.text, "code_editor.py")
         self.assertIn("Code editor panel and coding-specific specialization system", ed.code.buffer.text)
 
         # 2. Navigate to child control (TextArea) from CodeEditorPanel
         child_buttons = [b for b in ed.child_rows if b.visible]
-        text_area_btn = next(b for b in child_buttons if b.components.get("text") == "TextArea")
+        text_area_btn = next(b for b in child_buttons if b.items.get_value("text") == "TextArea")
         self.click(text_area_btn)
         self.runtime.step(0)
 
@@ -796,31 +796,31 @@ class EditorTests(unittest.TestCase):
         self.assertIn(ed.code_panel.id, ed.hierarchy.expanded)
 
         # 3. Inspect TextArea's reusable behavior and coding-specific behavior
-        text_area_sys = [b.components.get("text", "").split(" ", 1)[-1] for b in ed.system_rows if b.visible]
+        text_area_sys = [b.items.get_value("text", "").split(" ", 1)[-1] for b in ed.system_rows if b.visible]
         self.assertIn("text_area.py", text_area_sys)
         self.assertIn("code_editor.py", text_area_sys)
 
         # Open text_area system source
-        ta_btn = next(b for b in ed.system_rows if b.visible and b.components.get("text", "").endswith(" text_area.py"))
+        ta_btn = next(b for b in ed.system_rows if b.visible and b.items.get_value("text", "").endswith(" text_area.py"))
         self.click(ta_btn)
         self.assertEqual(ed.path_field.buffer.text, "text_area.py")
         self.assertIn("Reusable multiline text area entity system", ed.code.buffer.text)
 
         # Open code_editor specialization system source
-        ce_btn = next(b for b in ed.system_rows if b.visible and b.components.get("text", "").endswith(" code_editor.py"))
+        ce_btn = next(b for b in ed.system_rows if b.visible and b.items.get_value("text", "").endswith(" code_editor.py"))
         self.click(ce_btn)
         self.assertEqual(ed.path_field.buffer.text, "code_editor.py")
 
         # 4. Verify same approach works for other controls (e.g. HierarchyPanel, InspectorPanel)
         self.select(ed.hierarchy)
         self.runtime.step(0)
-        h_btn = next(b for b in ed.system_rows if b.visible and b.components.get("text", "").endswith(" hierarchy.py"))
+        h_btn = next(b for b in ed.system_rows if b.visible and b.items.get_value("text", "").endswith(" hierarchy.py"))
         self.click(h_btn)
         self.assertEqual(ed.path_field.buffer.text, "hierarchy.py")
 
         self.select(ed.inspector)
         self.runtime.step(0)
-        i_btn = next(b for b in ed.system_rows if b.visible and b.components.get("text", "").endswith(" inspector.py"))
+        i_btn = next(b for b in ed.system_rows if b.visible and b.items.get_value("text", "").endswith(" inspector.py"))
         self.click(i_btn)
         self.assertEqual(ed.path_field.buffer.text, "inspector.py")
 
@@ -837,7 +837,7 @@ class EditorTests(unittest.TestCase):
         self.select(moving)
         self.click(ed.add_comp_menu_button)
         menu = ed.app.relations.get("context_menu")
-        vel_item = next(c for c in menu.children if "+ Velocity" in c.components.get("text", ""))
+        vel_item = next(c for c in menu.children if "+ Velocity" in c.items.get_value("text", ""))
         self.click(vel_item)
         vx_field = next(fld for _, fld in ed.component_rows if fld.visible and fld.component_key == "vx")
         vy_field = next(fld for _, fld in ed.component_rows if fld.visible and fld.component_key == "vy")
@@ -876,7 +876,7 @@ class EditorTests(unittest.TestCase):
         # 7. Reopen project
         runtime2 = load_project(self.window, self.graphics, self.input, self.directory.name, template=template_path("editor"))
         self.addCleanup(runtime2.close)
-        ed2 = runtime2.entities[0].components["application_state"]
+        ed2 = runtime2.entities[0].items.require_value("application_state")
         runtime2.step(0)
 
         # 8. Verify recovered entities and UUID identity
@@ -915,25 +915,25 @@ class EditorTests(unittest.TestCase):
         self.runtime.step(0)
 
         # Check line_spans on code
-        spans = code.components.get("line_spans")
+        spans = code.items.get_value("line_spans")
         self.assertIsNotNone(spans)
         self.assertEqual(len(spans), 3)
 
         # Verify line 0 spans (def in keyword color, update in definition color)
-        line0 = next(c for c in code.children if c.components.get("part") == "line:0")
-        line0_spans = line0.components.get("spans")
+        line0 = next(c for c in code.children if c.items.get_value("part") == "line:0")
+        line0_spans = line0.items.get_value("spans")
         self.assertIsNotNone(line0_spans)
         self.assertTrue(any(chunk == "def" and color == (255, 123, 114) for chunk, color in line0_spans))
         self.assertTrue(any(chunk == "update" and color == (220, 180, 255) for chunk, color in line0_spans))
 
         # Verify line 1 spans (number 42 in warm orange color)
-        line1 = next(c for c in code.children if c.components.get("part") == "line:1")
-        line1_spans = line1.components.get("spans")
+        line1 = next(c for c in code.children if c.items.get_value("part") == "line:1")
+        line1_spans = line1.items.get_value("spans")
         self.assertTrue(any(chunk == "42" and color == (255, 166, 87) for chunk, color in line1_spans))
 
         # Verify line 2 spans (string "LBE" in soft blue color)
-        line2 = next(c for c in code.children if c.components.get("part") == "line:2")
-        line2_spans = line2.components.get("spans")
+        line2 = next(c for c in code.children if c.items.get_value("part") == "line:2")
+        line2_spans = line2.items.get_value("spans")
         self.assertTrue(any(chunk == '"LBE"' and color == (165, 214, 255) for chunk, color in line2_spans))
 
     def test_inline_syntax_and_compile_error_diagnostics(self):
@@ -945,17 +945,17 @@ class EditorTests(unittest.TestCase):
         self.runtime.step(0)
 
         # Diagnostic component on code
-        diag = code.components.get("diagnostic")
+        diag = code.items.get_value("diagnostic")
         self.assertIsNotNone(diag)
         self.assertEqual(diag["type"], "syntax")
         self.assertEqual(diag["line"], 1)
 
         # Gutter number:0 ink is red (ERROR)
-        num0 = next(c for c in code.children if c.components.get("part") == "number:0")
+        num0 = next(c for c in code.children if c.items.get_value("part") == "number:0")
         self.assertEqual(num0.ink, (248, 81, 73, 255))
 
         # Error underline rect is visible
-        err0 = next(c for c in code.children if c.components.get("part") == "error:0")
+        err0 = next(c for c in code.children if c.items.get_value("part") == "error:0")
         self.assertTrue(err0.visible)
 
         # Status info displays error message in red
@@ -965,7 +965,7 @@ class EditorTests(unittest.TestCase):
         # Fix syntax error
         self.send(("key", "A", True, False), ("text", "def update(dt):\n    pass\n"))
         self.runtime.step(0)
-        self.assertIsNone(code.components.get("diagnostic"))
+        self.assertIsNone(code.items.get_value("diagnostic"))
         self.assertFalse(err0.visible)
         self.assertNotIn("SyntaxError", info.text)
 
@@ -1000,11 +1000,11 @@ class EditorTests(unittest.TestCase):
         # 5. Matching bracket visual highlight
         code.buffer.cursor = code.buffer.anchor = 1 # inside [target], adjacent to [
         self.runtime.step(0)
-        matching = code.components.get("matching_brackets")
+        matching = code.items.get_value("matching_brackets")
         self.assertIsNotNone(matching)
         self.assertEqual(matching, ((0, 0), (0, 7)))
-        b0 = next(c for c in code.children if c.components.get("part") == "bracket:0")
-        b1 = next(c for c in code.children if c.components.get("part") == "bracket:1")
+        b0 = next(c for c in code.children if c.items.get_value("part") == "bracket:0")
+        b1 = next(c for c in code.children if c.items.get_value("part") == "bracket:1")
         self.assertTrue(b0.visible)
         self.assertTrue(b1.visible)
 
@@ -1016,11 +1016,11 @@ class EditorTests(unittest.TestCase):
         deadline = time.monotonic() + 10
         while time.monotonic() < deadline:
             self.runtime.step(0)
-            state = self.editor.code.components.get("autocomplete_state", {})
+            state = self.editor.code.items.get_value("autocomplete_state", {})
             if state.get("active"):
                 return
             time.sleep(0.01)
-        self.fail(str(self.editor.code.components.get("completion_error", "Completion did not arrive")))
+        self.fail(str(self.editor.code.items.get_value("completion_error", "Completion did not arrive")))
 
     def test_autocomplete_and_code_completion(self):
         code = self.editor.code
@@ -1031,14 +1031,14 @@ class EditorTests(unittest.TestCase):
         self.send(("text", "entity.c"))
         self.await_completion()
 
-        ac_state = code.components.get("autocomplete_state")
+        ac_state = code.items.get_value("autocomplete_state")
         self.assertIsNotNone(ac_state)
         self.assertTrue(ac_state.get("active"))
         match_names = [m[0] for m in ac_state.get("matches", [])]
         self.assertIn("components", match_names)
 
         # Popup panel entity is visible
-        popup = next(c for c in code.children if c.components.get("part") == "autocomplete_popup")
+        popup = next(c for c in code.children if c.items.get_value("part") == "autocomplete_popup")
         self.assertTrue(popup.visible)
 
         # Press DOWN to select next suggestion and TAB to complete
@@ -1058,7 +1058,7 @@ class EditorTests(unittest.TestCase):
         self.send(("text", "entity.t"))
         self.await_completion()
         self.assertTrue(ac_state.get("active"))
-        item0 = next(c for c in code.children if c.components.get("part") == "ac_item:0")
+        item0 = next(c for c in code.children if c.items.get_value("part") == "ac_item:0")
         self.assertTrue(item0.visible)
         self.click(item0)
         self.runtime.step(0)
@@ -1080,13 +1080,13 @@ class EditorTests(unittest.TestCase):
         pos_before = moving.x
         self.runtime.step(0.5)
         self.assertEqual(moving.x, pos_before + 1.0)
-        self.assertFalse(self.editor.game.components.get("paused", False))
+        self.assertFalse(self.editor.game.items.get_value("paused", False))
         self.assertEqual(self.editor.run_button.text, "Pause (F5)")
 
         # 2. Press F5: pauses the game
         self.send(("key", "F5", False, False))
         self.runtime.step(0)
-        self.assertTrue(self.editor.game.components.get("paused"))
+        self.assertTrue(self.editor.game.items.get_value("paused"))
         self.assertEqual(self.editor.run_button.text, "Run (F5)")
         self.assertIn("Game paused", self.editor.app.status)
 
@@ -1101,7 +1101,7 @@ class EditorTests(unittest.TestCase):
         self.send(("key", "PERIOD", False, False), ("text", "."))
         self.runtime.step(0)
         # Still paused!
-        self.assertTrue(self.editor.game.components.get("paused"))
+        self.assertTrue(self.editor.game.items.get_value("paused"))
         self.assertEqual(self.editor.code.buffer.text, text_before + ".")
         # Position did not advance
         self.runtime.step(0.5)
@@ -1110,7 +1110,7 @@ class EditorTests(unittest.TestCase):
         # 4. Press F5 again while focused in the editor: resumes/runs the game
         self.send(("key", "F5", False, False))
         self.runtime.step(0)
-        self.assertFalse(self.editor.game.components.get("paused"))
+        self.assertFalse(self.editor.game.items.get_value("paused"))
         self.assertEqual(self.editor.run_button.text, "Pause (F5)")
         self.assertIn("Game running", self.editor.app.status)
 
@@ -1121,7 +1121,7 @@ class EditorTests(unittest.TestCase):
         # 5. Clicking the header Run/Pause button also toggles state
         self.click(self.editor.run_button)
         self.runtime.step(0)
-        self.assertTrue(self.editor.game.components.get("paused"))
+        self.assertTrue(self.editor.game.items.get_value("paused"))
         self.assertEqual(self.editor.run_button.text, "Run (F5)")
 
     def test_typing_period_in_code_editor_retains_all_panels_and_ui_systems(self):
@@ -1133,17 +1133,17 @@ class EditorTests(unittest.TestCase):
         self.await_completion(explicit=False)
 
         # Autocomplete popup is active and rendered
-        ac_state = code.components.get("autocomplete_state")
+        ac_state = code.items.get_value("autocomplete_state")
         self.assertIsNotNone(ac_state)
         self.assertTrue(ac_state.get("active"))
-        popup = next((c for c in code.children if c.components.get("part") == "autocomplete_popup"), None)
+        popup = next((c for c in code.children if c.items.get_value("part") == "autocomplete_popup"), None)
         self.assertIsNotNone(popup)
         self.assertTrue(popup.visible)
 
         # All editor panels and UI systems remain running and visible
         self.assertTrue(self.editor.app.systems["ui"].running)
         self.assertEqual(tuple(self.editor.app.systems["ui"].errors), ())
-        self.assertNotIn("ui_error", self.editor.app.components)
+        self.assertNotIn("ui_error", self.editor.app.items.value_dict())
 
         self.assertTrue(self.editor.hierarchy.visible)
         self.assertTrue(self.editor.inspector.visible)
@@ -1173,55 +1173,55 @@ class EditorTests(unittest.TestCase):
         self.assertTrue(ed.code_splitter.visible)
 
         # 1. Hover color feedback
-        normal_color = ed.col_splitter.components.get("normal_color", (38, 50, 66))
-        hover_color = ed.col_splitter.components.get("hover_color", (69, 182, 199))
+        normal_color = ed.col_splitter.items.get_value("normal_color", (38, 50, 66))
+        hover_color = ed.col_splitter.items.get_value("hover_color", (69, 182, 199))
         self.send(("motion", ed.col_splitter.x + 2, ed.col_splitter.y + 100))
         self.assertEqual(ed.col_splitter.color, hover_color)
         self.send(("motion", 10, 10))
         self.assertEqual(ed.col_splitter.color, normal_color)
 
         # 2. Moving mouse while dragging from outside (e.g. viewport) does NOT initiate splitter resize
-        orig_col_w = ed.app.components.get("left_column_w", 370)
+        orig_col_w = ed.app.items.get_value("left_column_w", 370)
         orig_hier_w = ed.hierarchy.w
         orig_vp_x = ed.viewport_panel.x
 
         self.send(("click", ed.viewport.x + 20, ed.viewport.y + 20, 1))
         self.send(("drag", ed.col_splitter.x + 2, ed.col_splitter.y + 100, 1, 0, 50, 0))
         self.send(("release", ed.col_splitter.x + 2, ed.col_splitter.y + 100, 1, 0))
-        self.assertEqual(ed.app.components.get("left_column_w"), orig_col_w)
+        self.assertEqual(ed.app.items.get_value("left_column_w"), orig_col_w)
 
         # 3. Direct click and drag on column splitter horizontally
         self.send(("click", ed.col_splitter.x + 2, ed.col_splitter.y + 100, 1))
         self.send(("drag", ed.col_splitter.x + 2, ed.col_splitter.y + 100, 1, 0, 50, 0))
         self.send(("release", ed.col_splitter.x + 2, ed.col_splitter.y + 100, 1, 0))
-        self.assertEqual(ed.app.components.get("left_column_w"), orig_col_w + 50)
+        self.assertEqual(ed.app.items.get_value("left_column_w"), orig_col_w + 50)
         self.assertEqual(ed.hierarchy.w, orig_hier_w + 50)
         self.assertEqual(ed.inspector.w, orig_hier_w + 50)
         self.assertEqual(ed.viewport_panel.x, orig_vp_x + 50)
         self.assertEqual(ed.code_panel.x, orig_vp_x + 50)
 
         # 4. Drag hierarchy splitter vertically
-        orig_hier_h = ed.hierarchy.components.get("panel_h", 240)
+        orig_hier_h = ed.hierarchy.items.get_value("panel_h", 240)
         orig_insp_y = ed.inspector.y
         orig_insp_h = ed.inspector.h
 
         self.send(("click", ed.hierarchy_splitter.x + 20, ed.hierarchy_splitter.y + 2, 1))
         self.send(("drag", ed.hierarchy_splitter.x + 20, ed.hierarchy_splitter.y + 2, 1, 0, 0, 40))
         self.send(("release", ed.hierarchy_splitter.x + 20, ed.hierarchy_splitter.y + 2, 1, 0))
-        self.assertEqual(ed.hierarchy.components.get("panel_h"), orig_hier_h + 40)
+        self.assertEqual(ed.hierarchy.items.get_value("panel_h"), orig_hier_h + 40)
         self.assertEqual(ed.hierarchy.h, orig_hier_h + 40)
         self.assertEqual(ed.inspector.y, orig_insp_y + 40)
         self.assertEqual(ed.inspector.h, orig_insp_h - 40)
 
         # 5. Drag code panel splitter vertically
-        orig_split_y = ed.code_panel.components.get("split_y", ed.code_panel.y)
+        orig_split_y = ed.code_panel.items.get_value("split_y", ed.code_panel.y)
         orig_vp_h = ed.viewport.h
         orig_cp_h = ed.code_panel.h
 
         self.send(("click", ed.code_splitter.x + 50, ed.code_splitter.y + 2, 1))
         self.send(("drag", ed.code_splitter.x + 50, ed.code_splitter.y + 2, 1, 0, 0, -30))
         self.send(("release", ed.code_splitter.x + 50, ed.code_splitter.y + 2, 1, 0))
-        self.assertEqual(ed.code_panel.components.get("split_y"), orig_split_y - 30)
+        self.assertEqual(ed.code_panel.items.get_value("split_y"), orig_split_y - 30)
         self.assertEqual(ed.viewport.h, orig_vp_h - 30)
         self.assertEqual(ed.code_panel.h, orig_cp_h + 30)
 
@@ -1235,7 +1235,7 @@ class EditorTests(unittest.TestCase):
         from lbe.project import load_project, template_path
         runtime2 = load_project(self.window, self.graphics, self.input, self.directory.name, template=template_path("editor"))
         self.addCleanup(runtime2.close)
-        ed2 = runtime2.entities[0].components["application_state"]
+        ed2 = runtime2.entities[0].items.require_value("application_state")
         runtime2.step(0)
 
         self.assertEqual(ed2.app.left_column_w, orig_col_w + 50)
@@ -1267,7 +1267,7 @@ class EditorTests(unittest.TestCase):
             self.assertLessEqual(btn.y + btn.h, ip.y + ip.h + 2)
 
         # Verify metadata correctly reflects total children without layout overflow
-        self.assertIn(f"{children_count} children", ed.metadata.components.get("text", ""))
+        self.assertIn(f"{children_count} children", ed.metadata.items.get_value("text", ""))
 
         # Verify component rows do NOT overlap the systems section
         visible_comp_rows = [(lbl, fld) for lbl, fld in ed.component_rows if fld.visible]
@@ -1317,7 +1317,7 @@ class EditorTests(unittest.TestCase):
         # 2. Inspector scrollbar appears when component count exceeds capacity
         target = self.runtime.create(parent=ed.game, name="ManyComponentsEntity")
         for i in range(30):
-            target.components[f"prop_{i:02d}"] = float(i)
+            target.items.set_value(f"prop_{i:02d}", float(i))
         self.select(target)
         self.runtime.step(0)
 
@@ -1348,36 +1348,36 @@ class EditorTests(unittest.TestCase):
 
         # 1. Edit entity name directly from name_field
         self.type(ed.name_field, "HeroShip", commit=True)
-        self.assertEqual(entity_a.components.get("name"), "HeroShip")
+        self.assertEqual(entity_a.items.get_value("name"), "HeroShip")
         self.assertIn("HeroShip", ed.name_field.buffer.text)
 
         # 2. Right-click context action: Add child entity
         self.send(("click", ed.name_field.x + 10, ed.name_field.y + 5, 4, 0))
         menu = ed.app.relations.get("context_menu")
         self.assertIsNotNone(menu)
-        add_child_item = next(c for c in menu.children if c.components.get("text") == "Add child entity")
+        add_child_item = next(c for c in menu.children if c.items.get_value("text") == "Add child entity")
         self.click(add_child_item)
         new_child = ed.app.relations["selection"]
         self.assertIs(new_child.parent, entity_a)
-        self.assertIn("Entity", new_child.components.get("name", ""))
+        self.assertIn("Entity", new_child.items.get_value("name", ""))
 
         # 3. Right-click context action: Duplicate entity
-        new_child.components["tag_sample"] = "original"
+        new_child.items.set_value("tag_sample", "original")
         self.send(("click", ed.name_field.x + 10, ed.name_field.y + 5, 4, 0))
         menu = ed.app.relations.get("context_menu")
-        dup_item = next(c for c in menu.children if c.components.get("text") == "Duplicate entity")
+        dup_item = next(c for c in menu.children if c.items.get_value("text") == "Duplicate entity")
         self.click(dup_item)
         dup = ed.app.relations["selection"]
         self.assertIsNot(dup, new_child)
         self.assertIs(dup.parent, entity_a)
-        self.assertEqual(dup.components.get("tag_sample"), "original")
-        self.assertTrue(dup.components.get("name", "").endswith("_copy"))
+        self.assertEqual(dup.items.get_value("tag_sample"), "original")
+        self.assertTrue(dup.items.get_value("name", "").endswith("_copy"))
 
         # 4. Right-click context action: Delete entity
-        dup_name = dup.components.get("name")
+        dup_name = dup.items.get_value("name")
         self.send(("click", ed.name_field.x + 10, ed.name_field.y + 5, 4, 0))
         menu = ed.app.relations.get("context_menu")
-        del_item = next(c for c in menu.children if c.components.get("text") == "Delete entity")
+        del_item = next(c for c in menu.children if c.items.get_value("text") == "Delete entity")
         self.click(del_item)
         self.assertFalse(dup.alive)
         self.assertIs(ed.app.relations["selection"], entity_a)
@@ -1386,7 +1386,7 @@ class EditorTests(unittest.TestCase):
         self.select(ed.game)
         self.send(("click", ed.name_field.x + 10, ed.name_field.y + 5, 4, 0))
         menu = ed.app.relations.get("context_menu")
-        del_item = next((c for c in menu.children if c.components.get("text") == "Delete entity"), None)
+        del_item = next((c for c in menu.children if c.items.get_value("text") == "Delete entity"), None)
         self.assertIsNone(del_item)
         self.assertTrue(ed.game.alive)
 
@@ -1401,35 +1401,35 @@ class EditorTests(unittest.TestCase):
         # 1. Quick presets via '+ Add' dropdown menu: + Pos, + Size, + Vel, + Color
         self.click(ed.add_comp_menu_button)
         menu = ed.app.relations.get("context_menu")
-        self.click(next(c for c in menu.children if "+ Transform" in c.components.get("text", "")))
-        self.assertIn("x", bare.components)
-        self.assertIn("y", bare.components)
+        self.click(next(c for c in menu.children if "+ Transform" in c.items.get_value("text", "")))
+        self.assertIn("x", bare.items.value_dict())
+        self.assertIn("y", bare.items.value_dict())
 
         self.click(ed.add_comp_menu_button)
         menu = ed.app.relations.get("context_menu")
-        self.click(next(c for c in menu.children if "+ Size" in c.components.get("text", "")))
-        self.assertIn("w", bare.components)
-        self.assertIn("h", bare.components)
+        self.click(next(c for c in menu.children if "+ Size" in c.items.get_value("text", "")))
+        self.assertIn("w", bare.items.value_dict())
+        self.assertIn("h", bare.items.value_dict())
 
         self.click(ed.add_comp_menu_button)
         menu = ed.app.relations.get("context_menu")
-        self.click(next(c for c in menu.children if "+ Velocity" in c.components.get("text", "")))
-        self.assertIn("vx", bare.components)
-        self.assertIn("vy", bare.components)
+        self.click(next(c for c in menu.children if "+ Velocity" in c.items.get_value("text", "")))
+        self.assertIn("vx", bare.items.value_dict())
+        self.assertIn("vy", bare.items.value_dict())
 
         self.click(ed.add_comp_menu_button)
         menu = ed.app.relations.get("context_menu")
-        self.click(next(c for c in menu.children if "+ Color" in c.components.get("text", "")))
-        self.assertIn("color", bare.components)
+        self.click(next(c for c in menu.children if "+ Color" in c.items.get_value("text", "")))
+        self.assertIn("color", bare.items.value_dict())
 
         # 2. Component deletion via right-click context menu
         lbl, fld = next((lbl, fld) for (lbl, fld) in ed.component_rows if fld.visible and fld.component_key == "color")
         self.send(("click", fld.x + 10, fld.y + 10, 4, 0))
         menu = ed.app.relations.get("context_menu")
         self.assertIsNotNone(menu)
-        del_item = next(c for c in menu.children if "Delete" in c.components.get("text", ""))
+        del_item = next(c for c in menu.children if "Delete" in c.items.get_value("text", ""))
         self.click(del_item)
-        self.assertNotIn("color", bare.components)
+        self.assertNotIn("color", bare.items.value_dict())
 
         # 3. Interactive relations list and unlinking via context menu
         other = self.runtime.create(parent=ed.game, name="TargetAlly")
@@ -1439,12 +1439,12 @@ class EditorTests(unittest.TestCase):
         # Check relation row exists and unlink via right click context menu
         self.assertEqual(len([r for r, u in ed.relation_rows if r.visible]), 1)
         rel_btn, _ = ed.relation_rows[0]
-        self.assertIn("ally -> TargetAlly", rel_btn.components.get("text", ""))
+        self.assertIn("ally -> TargetAlly", rel_btn.items.get_value("text", ""))
 
         self.send(("click", rel_btn.x + 10, rel_btn.y + 10, 4, 0))
         menu = ed.app.relations.get("context_menu")
         self.assertIsNotNone(menu)
-        unlink_item = next(c for c in menu.children if "Unlink" in c.components.get("text", ""))
+        unlink_item = next(c for c in menu.children if "Unlink" in c.items.get_value("text", ""))
         self.click(unlink_item)
         self.assertNotIn("ally", bare.relations)
         self.assertEqual(len([r for r, u in ed.relation_rows if r.visible]), 0)
@@ -1459,7 +1459,7 @@ class EditorTests(unittest.TestCase):
         self.send(("click", row.x + 20, row.y + 10, 4, 0))
         menu = ed.app.relations.get("context_menu")
         self.assertIsNotNone(menu)
-        rename_btn = next(c for c in menu.children if c.components.get("text") == "Rename")
+        rename_btn = next(c for c in menu.children if c.items.get_value("text") == "Rename")
         self.click(rename_btn)
 
         # Verify target is selected and name_field is focused with all text selected
@@ -1469,14 +1469,14 @@ class EditorTests(unittest.TestCase):
 
         # Type new name and commit with Enter
         self.type(ed.name_field, "RenamedHero", commit=True)
-        self.assertEqual(target.components.get("name"), "RenamedHero")
+        self.assertEqual(target.items.get_value("name"), "RenamedHero")
 
         # 2. Right click inside Inspector background / identity label
         self.send(("click", ed.identity_label.x + 10, ed.identity_label.y + 5, 4, 0))
         menu2 = ed.app.relations.get("context_menu")
         self.assertIsNotNone(menu2)
         self.assertIs(menu2.context_target, target)
-        rename_btn2 = next(c for c in menu2.children if c.components.get("text") == "Rename")
+        rename_btn2 = next(c for c in menu2.children if c.items.get_value("text") == "Rename")
         self.click(rename_btn2)
         self.assertIs(ed.ui.focused, ed.name_field)
         self.assertEqual(ed.name_field.buffer.selected_text, "RenamedHero")
@@ -1492,22 +1492,22 @@ class EditorTests(unittest.TestCase):
         menu = ed.app.relations.get("context_menu")
         self.assertIsNotNone(menu)
 
-        add_item = next(c for c in menu.children if "+ Add Component" in c.components.get("text", ""))
+        add_item = next(c for c in menu.children if "+ Add Component" in c.items.get_value("text", ""))
         self.click(add_item)
         menu = ed.app.relations.get("context_menu")
         self.assertIsNotNone(menu)
 
-        speed_item = next(c for c in menu.children if "+ Speed" in c.components.get("text", ""))
+        speed_item = next(c for c in menu.children if "+ Speed" in c.items.get_value("text", ""))
         self.click(speed_item)
-        self.assertEqual(ent.components.get("speed"), 100.0)
+        self.assertEqual(ent.items.get_value("speed"), 100.0)
 
         # 2. Context menu '+ Custom Component...' focuses add_name
         self.send(("click", ed.identity_label.x + 10, ed.identity_label.y + 5, 4, 0))
         menu = ed.app.relations.get("context_menu")
-        add_item = next(c for c in menu.children if "+ Add Component" in c.components.get("text", ""))
+        add_item = next(c for c in menu.children if "+ Add Component" in c.items.get_value("text", ""))
         self.click(add_item)
         menu = ed.app.relations.get("context_menu")
-        custom_item = next(c for c in menu.children if "+ Custom Component..." in c.components.get("text", ""))
+        custom_item = next(c for c in menu.children if "+ Custom Component..." in c.items.get_value("text", ""))
         self.click(custom_item)
         custom_lbl = next(l for l, _ in ed.component_rows if l.visible and l.component_key == "custom_component")
         self.assertIs(ed.ui.focused, custom_lbl)
@@ -1517,9 +1517,9 @@ class EditorTests(unittest.TestCase):
         self.click(ed.add_comp_menu_button)
         menu = ed.app.relations.get("context_menu")
         self.assertIsNotNone(menu)
-        color_item = next(c for c in menu.children if "+ Color" in c.components.get("text", ""))
+        color_item = next(c for c in menu.children if "+ Color" in c.items.get_value("text", ""))
         self.click(color_item)
-        self.assertEqual(ent.components.get("color"), (200, 200, 200))
+        self.assertEqual(ent.items.get_value("color"), (200, 200, 200))
 
     def test_relation_add_and_edit_workflow(self):
         ed = self.editor
@@ -1554,7 +1554,7 @@ class EditorTests(unittest.TestCase):
         self.send(("click", rel_btn.x + 10, rel_btn.y + 5, 4, 0))
         menu = ed.app.relations.get("context_menu")
         self.assertIsNotNone(menu)
-        unlink_item = next(c for c in menu.children if "Unlink 'home_port'" in c.components.get("text", ""))
+        unlink_item = next(c for c in menu.children if "Unlink 'home_port'" in c.items.get_value("text", ""))
         self.click(unlink_item)
         self.assertNotIn("home_port", ship.relations)
 
@@ -1576,7 +1576,7 @@ class EditorTests(unittest.TestCase):
 
         # Check section header COMPONENTS and divider
         self.assertTrue(ed.components_title.visible)
-        self.assertIn("COMPONENTS", ed.components_title.components.get("text"))
+        self.assertIn("COMPONENTS", ed.components_title.items.get_value("text"))
         self.assertTrue(ed.add_comp_menu_button.visible)
         self.assertLess(ed.divider_identity.y, ed.components_title.y)
 
@@ -1602,14 +1602,14 @@ class EditorTests(unittest.TestCase):
         self.assertNotIn('text_drag', self.editor.app.relations)
         code.buffer.anchor, code.buffer.cursor = 3, 5
         self.runtime.step(0)
-        parts = {c.components.get('part'): c for c in code.children}
+        parts = {c.items.get_value('part'): c for c in code.children}
         self.assertTrue(parts['selection:0'].visible)
         self.assertTrue(parts['selection:1'].visible)
         self.assertEqual(parts['selection:1'].w, pitch)
 
     def test_completion_does_not_reopen_on_navigation_or_swallow_enter(self):
         code = self.editor.code
-        self.type(code, 'entity.components')
+        self.type(code, 'entity.items')
         self.assertFalse(code.autocomplete_state['active'])
         self.send(('key', 'HOME', False, False))
         self.send(('key', 'RIGHT', False, False))
@@ -1654,8 +1654,8 @@ class EditorTests(unittest.TestCase):
         if importlib.util.find_spec("jedi") is None:
             self.skipTest("Jedi is an optional editor dependency")
         ship = self.editor.game.children[0]
-        ship.components["name"] = "HeroShip"
-        ship.components["vx"] = 5.0
+        ship.items.set_value("name", "HeroShip")
+        ship.items.set_value("vx", 5.0)
         self.runtime.step(0)
 
         code = self.editor.code
@@ -1664,7 +1664,7 @@ class EditorTests(unittest.TestCase):
         self.send(("text", 'resolve("HeroShip").v'))
         self.await_completion()
 
-        ac_state = code.components.get("autocomplete_state", {})
+        ac_state = code.items.get_value("autocomplete_state", {})
         self.assertTrue(ac_state.get("active"))
         match_names = [m[0] for m in ac_state.get("matches", [])]
         self.assertIn("vx", match_names)
@@ -1678,29 +1678,29 @@ class EditorTests(unittest.TestCase):
         # 1. Clicking to focus or navigate does not trigger autocomplete
         self.click(code)
         self.runtime.step(0)
-        self.assertFalse(code.components.get("autocomplete_state", {}).get("active", False))
+        self.assertFalse(code.items.get_value("autocomplete_state", {}).get("active", False))
 
         # 2. Moving cursor via Arrow keys does not trigger autocomplete
         self.send(("key", "DOWN", False, False))
         self.send(("key", "RIGHT", False, False))
         self.runtime.step(0)
-        self.assertFalse(code.components.get("autocomplete_state", {}).get("active", False))
+        self.assertFalse(code.items.get_value("autocomplete_state", {}).get("active", False))
 
         # 3. Mouse scrolling does not trigger autocomplete
         self.send(("scroll", code.x + 80, code.y + 40, 0, 1))
         self.runtime.step(0)
-        self.assertFalse(code.components.get("autocomplete_state", {}).get("active", False))
+        self.assertFalse(code.items.get_value("autocomplete_state", {}).get("active", False))
 
         # 4. Text selection does not trigger autocomplete
         code.buffer.anchor = 0
         code.buffer.cursor = 8
         self.runtime.step(0)
-        self.assertFalse(code.components.get("autocomplete_state", {}).get("active", False))
+        self.assertFalse(code.items.get_value("autocomplete_state", {}).get("active", False))
 
         # 5. Idling across frames does not trigger autocomplete
         for _ in range(5):
             self.runtime.step(0.1)
-            self.assertFalse(code.components.get("autocomplete_state", {}).get("active", False))
+            self.assertFalse(code.items.get_value("autocomplete_state", {}).get("active", False))
 
     def test_scrollable_autocomplete_and_scrolling(self):
         if importlib.util.find_spec("jedi") is None:
@@ -1711,13 +1711,13 @@ class EditorTests(unittest.TestCase):
         self.send(("text", "entity."))
         self.await_completion()
 
-        ac_state = code.components.get("autocomplete_state", {})
+        ac_state = code.items.get_value("autocomplete_state", {})
         self.assertTrue(ac_state.get("active"))
         matches = ac_state.get("matches", [])
         self.assertGreater(len(matches), 8)
 
         # Popup and scrollbar thumb are visible
-        thumb = next(c for c in code.children if c.components.get("part") == "ac_scroll_thumb")
+        thumb = next(c for c in code.children if c.items.get_value("part") == "ac_scroll_thumb")
         self.assertTrue(thumb.visible)
 
         # Scrolling down with DOWN arrow key
@@ -1726,7 +1726,7 @@ class EditorTests(unittest.TestCase):
         self.assertGreater(ac_state.get("scroll", 0), 0)
 
         # Scrolling with mouse wheel on popup
-        popup = next(c for c in code.children if c.components.get("part") == "autocomplete_popup")
+        popup = next(c for c in code.children if c.items.get_value("part") == "autocomplete_popup")
         self.send(("scroll", popup.x + 10, popup.y + 10, 0, -2))
         self.runtime.step(0)
         self.assertGreater(ac_state.get("scroll", 0), 1)
@@ -1758,8 +1758,8 @@ class EditorTests(unittest.TestCase):
 
     def test_double_click_and_triple_click_selection(self):
         code = self.editor.code
-        pitch = code.components.get("pitch", 8.0)
-        line_height = code.components.get("line_height", 20)
+        pitch = code.items.get_value("pitch", 8.0)
+        line_height = code.items.get_value("line_height", 20)
         code.buffer.text = "def update(dt):\n    pass\n"
         code.buffer.cursor = code.buffer.anchor = 0
         self.runtime.step(0)
@@ -1790,8 +1790,8 @@ class EditorTests(unittest.TestCase):
         if importlib.util.find_spec("jedi") is None:
             self.skipTest("Jedi is an optional editor dependency")
         code = self.editor.code
-        pitch = code.components.get("pitch", 8.0)
-        line_height = code.components.get("line_height", 20)
+        pitch = code.items.get_value("pitch", 8.0)
+        line_height = code.items.get_value("line_height", 20)
         self.click(code)
         self.send(("key", "A", True, False), ("key", "BACKSPACE", False, False))
         self.send(("text", "def update(dt):\n    for child in query('x'):\n        pass\n"))
@@ -1807,7 +1807,7 @@ class EditorTests(unittest.TestCase):
         deadline = time.monotonic() + 10
         while time.monotonic() < deadline:
             self.runtime.step(0.05)
-            h_state = code.components.get("hover_state", {})
+            h_state = code.items.get_value("hover_state", {})
             if h_state.get("active"):
                 break
             time.sleep(0.01)
@@ -1816,14 +1816,14 @@ class EditorTests(unittest.TestCase):
         self.assertEqual(h_state["info"]["name"], "query")
 
         # Hover panel is visible
-        tip = next((c for c in code.children if c.components.get("part") == "hover_panel"), None)
+        tip = next((c for c in code.children if c.items.get_value("part") == "hover_panel"), None)
         self.assertIsNotNone(tip)
         self.assertTrue(tip.visible)
 
         # Moving mouse away dismisses hover
         self.send(("motion", code.x - 100, code.y - 100))
         self.runtime.step(0)
-        self.assertFalse(code.components.get("hover_state", {}).get("active", False))
+        self.assertFalse(code.items.get_value("hover_state", {}).get("active", False))
 
     def test_hover_range_overloads_and_docstrings(self):
         """Issue #55: Multi-signature overloads and multi-line docstring rendering for range."""
@@ -1841,8 +1841,8 @@ class EditorTests(unittest.TestCase):
 
         # Test editor UI hover rendering
         code = self.editor.code
-        pitch = code.components.get("pitch", 8.0)
-        line_height = code.components.get("line_height", 20)
+        pitch = code.items.get_value("pitch", 8.0)
+        line_height = code.items.get_value("line_height", 20)
         self.click(code)
         self.send(("key", "A", True, False), ("key", "BACKSPACE", False, False))
         self.send(("text", "x = range(10)\n"))
@@ -1858,24 +1858,24 @@ class EditorTests(unittest.TestCase):
         deadline = time.monotonic() + 10
         while time.monotonic() < deadline:
             self.runtime.step(0.05)
-            h_state = code.components.get("hover_state", {})
+            h_state = code.items.get_value("hover_state", {})
             if h_state.get("active"):
                 break
             time.sleep(0.01)
 
         self.assertTrue(h_state.get("active"), "Hover tooltip should activate for range")
-        tip = next((c for c in code.children if c.components.get("part") == "hover_panel"), None)
+        tip = next((c for c in code.children if c.items.get_value("part") == "hover_panel"), None)
         self.assertIsNotNone(tip)
         self.assertTrue(tip.visible)
 
         # Check that hover_line:0 displays the alternate signature and hover_line:1 displays docstring
-        line0 = next((c for c in code.children if c.components.get("part") == "hover_line:0"), None)
+        line0 = next((c for c in code.children if c.items.get_value("part") == "hover_line:0"), None)
         self.assertIsNotNone(line0)
         self.assertTrue(line0.visible)
         self.assertIn("range", line0.text)
         self.assertIn("step", line0.text)
 
-        line1 = next((c for c in code.children if c.components.get("part") == "hover_line:1"), None)
+        line1 = next((c for c in code.children if c.items.get_value("part") == "hover_line:1"), None)
         self.assertIsNotNone(line1)
         self.assertTrue(line1.visible)
         self.assertTrue(len(line1.text) > 0)
@@ -1919,7 +1919,7 @@ class EditorTests(unittest.TestCase):
         self.assertIs(self.editor.ui.focused, code)
 
         # Autocomplete is not active
-        ac_state = code.components.get("autocomplete_state", {})
+        ac_state = code.items.get_value("autocomplete_state", {})
         self.assertFalse(ac_state.get("active", False))
 
         # Press Escape - should NOT drop focus
@@ -1929,17 +1929,17 @@ class EditorTests(unittest.TestCase):
     def test_callbacks_attached_once_not_per_frame(self):
         """Issue #47: on_text/on_key/on_scroll should be set once in start(), not every frame."""
         code = self.editor.code
-        self.assertIsNotNone(code.components.get("on_text"))
-        self.assertIsNotNone(code.components.get("on_key"))
-        self.assertIsNotNone(code.components.get("on_scroll"))
+        self.assertIsNotNone(code.items.get_value("on_text"))
+        self.assertIsNotNone(code.items.get_value("on_key"))
+        self.assertIsNotNone(code.items.get_value("on_scroll"))
 
-        on_text = code.components["on_text"]
-        on_key = code.components["on_key"]
+        on_text = code.items.require_value("on_text")
+        on_key = code.items.require_value("on_key")
 
         for _ in range(5):
             self.runtime.step(0)
-        self.assertIs(code.components["on_text"], on_text)
-        self.assertIs(code.components["on_key"], on_key)
+        self.assertIs(code.items.require_value("on_text"), on_text)
+        self.assertIs(code.items.require_value("on_key"), on_key)
 
     def test_bracket_match_cached_when_unchanged(self):
         """Issue #47: matching_brackets should not be recomputed when text+cursor unchanged."""
@@ -1948,12 +1948,12 @@ class EditorTests(unittest.TestCase):
         self.send(("key", "A", True, False), ("text", "(hello)"))
         self.runtime.step(0)
 
-        match1 = code.components.get("matching_brackets")
+        match1 = code.items.get_value("matching_brackets")
 
         for _ in range(3):
             self.runtime.step(0)
 
-        match2 = code.components.get("matching_brackets")
+        match2 = code.items.get_value("matching_brackets")
         self.assertIs(match1, match2)
 
     def test_hover_does_not_spam_requests_on_non_symbol(self):
@@ -1962,8 +1962,7 @@ class EditorTests(unittest.TestCase):
         self.click(code)
         self.send(("key", "A", True, False), ("text", "   "))
 
-        hover_state = code.components.setdefault("hover_state",
-            {"active": False, "dwell_start": 0.0, "last_mouse": (-100, -100)})
+        hover_state = code.items.ensure_value("hover_state", {"active": False, "dwell_start": 0.0, "last_mouse": (-100, -100)})
 
         # Position inside the code editor over whitespace
         mx, my = code.x + 55, code.y + 10
@@ -1988,7 +1987,7 @@ class EditorTests(unittest.TestCase):
         self.click(code)
         self.send(("text", "entity."))
         self.runtime.step(0)
-        popup = next((c for c in code.children if c.components.get("part") == "autocomplete_popup"), None)
+        popup = next((c for c in code.children if c.items.get_value("part") == "autocomplete_popup"), None)
         if popup is not None:
             code.systems["code_editor"].stop()
             self.assertFalse(popup.visible)
@@ -2047,7 +2046,7 @@ class EditorTests(unittest.TestCase):
         idx_open = source.index("def foo(") + len("def foo(")
         code.buffer.cursor = code.buffer.anchor = idx_open
         self.runtime.step(0)
-        matching = code.components.get("matching_brackets")
+        matching = code.items.get_value("matching_brackets")
         self.assertIsNotNone(matching)
         # Should match foo(x)'s closing paren on line 2
         self.assertEqual(matching[0][0], 2)
@@ -2057,7 +2056,7 @@ class EditorTests(unittest.TestCase):
         idx_comment_paren = source.index("(unmatched")
         code.buffer.cursor = code.buffer.anchor = idx_comment_paren
         self.runtime.step(0)
-        self.assertIsNone(code.components.get("matching_brackets"))
+        self.assertIsNone(code.items.get_value("matching_brackets"))
 
     def test_editor_tab_and_shift_tab_multiline_indent_dedent(self):
         """Issue #49: Tab and Shift+Tab in code editor indents/dedents selected lines."""
@@ -2070,7 +2069,7 @@ class EditorTests(unittest.TestCase):
         # Select lines 1-2
         code.buffer.anchor = code.buffer.text.index("    a")
         code.buffer.cursor = len(code.buffer.text)
-        code.components.touch("buffer")
+        code.items.touch_value("buffer")
         self.runtime.step(0)
 
         # Tab indents both lines to 8 spaces
@@ -2111,12 +2110,12 @@ class EditorTests(unittest.TestCase):
         self.send(("text", long_code))
         code.buffer.cursor = code.buffer.anchor = 0
         code.buffer.scroll = 0
-        code.components.touch("buffer")
+        code.items.touch_value("buffer")
         self.runtime.step(0)
 
         # Find scroll_track and scrollbar (thumb)
-        track = next((c for c in code.children if c.components.get("part") == "scroll_track"), None)
-        thumb = next((c for c in code.children if c.components.get("part") == "scrollbar"), None)
+        track = next((c for c in code.children if c.items.get_value("part") == "scroll_track"), None)
+        thumb = next((c for c in code.children if c.items.get_value("part") == "scrollbar"), None)
         self.assertIsNotNone(track)
         self.assertIsNotNone(thumb)
         self.assertTrue(track.visible)
@@ -2148,7 +2147,7 @@ class EditorTests(unittest.TestCase):
         self.send(("text", long_code))
         code.buffer.cursor = code.buffer.anchor = 0
         code.buffer.scroll = 0
-        code.components.touch("buffer")
+        code.items.touch_value("buffer")
         self.runtime.step(0)
 
         # Click near top of code editor to start selection drag
@@ -2185,7 +2184,7 @@ class EditorTests(unittest.TestCase):
         self.click(ed.add_system_button)
         menu = ed.app.relations.get("context_menu")
         self.assertIsNotNone(menu)
-        render_item = next((c for c in menu.children if "render" in c.components.get("text", "")), None)
+        render_item = next((c for c in menu.children if "render" in c.items.get_value("text", "")), None)
         self.assertIsNotNone(render_item)
 
         # Click to attach render system to ActorEntity
@@ -2194,7 +2193,7 @@ class EditorTests(unittest.TestCase):
         self.assertFalse(ed.no_systems_label.visible)
 
         # 3. System appears in inspector row with Edit button
-        sys_btn = next((b for b in ed.system_rows if b.visible and "render" in b.components.get("text", "")), None)
+        sys_btn = next((b for b in ed.system_rows if b.visible and "render" in b.items.get_value("text", "")), None)
         self.assertIsNotNone(sys_btn)
         edit_btn = ed.system_edit_buttons[0]
         self.assertTrue(edit_btn.visible)
@@ -2207,7 +2206,7 @@ class EditorTests(unittest.TestCase):
         self.send(("click", sys_btn.x + 10, sys_btn.y + 10, 4, 0))
         detach_menu = ed.app.relations.get("context_menu")
         self.assertIsNotNone(detach_menu)
-        detach_item = next((c for c in detach_menu.children if "Detach" in c.components.get("text", "")), None)
+        detach_item = next((c for c in detach_menu.children if "Detach" in c.items.get_value("text", "")), None)
         self.assertIsNotNone(detach_item)
         self.click(detach_item)
 
@@ -2243,10 +2242,10 @@ class EditorTests(unittest.TestCase):
         self.click(ed.add_comp_menu_button)
         menu = ed.app.relations.get("context_menu")
         self.assertIsNotNone(menu)
-        pos_item = next(c for c in menu.children if "+ Transform" in c.components.get("text", ""))
+        pos_item = next(c for c in menu.children if "+ Transform" in c.items.get_value("text", ""))
         self.click(pos_item)
-        self.assertIn("x", ent.components)
-        self.assertIn("y", ent.components)
+        self.assertIn("x", ent.items.value_dict())
+        self.assertIn("y", ent.items.value_dict())
         # Value field is focused with text highlighted
         x_fld = next(fld for _, fld in ed.component_rows if fld.visible and fld.component_key == "x")
         self.assertIs(ed.ui.focused, x_fld)
@@ -2257,7 +2256,7 @@ class EditorTests(unittest.TestCase):
         self.send(("click", y_fld.x + 10, y_fld.y + 10, 4, 0))
         menu = ed.app.relations.get("context_menu")
         self.assertIsNotNone(menu)
-        rename_item = next(c for c in menu.children if "Rename" in c.components.get("text", ""))
+        rename_item = next(c for c in menu.children if "Rename" in c.items.get_value("text", ""))
         self.click(rename_item)
 
         # Label field is now focused with 'y' selected
@@ -2267,15 +2266,15 @@ class EditorTests(unittest.TestCase):
 
         # Commit rename to 'pos_y'
         self.type(lbl, "pos_y", commit=True)
-        self.assertNotIn("y", ent.components)
-        self.assertIn("pos_y", ent.components)
+        self.assertNotIn("y", ent.items.value_dict())
+        self.assertIn("pos_y", ent.items.value_dict())
 
         # 3. Add Custom Component automatically focuses name field with highlight
         self.click(ed.add_comp_menu_button)
         menu = ed.app.relations.get("context_menu")
-        custom_item = next(c for c in menu.children if "Custom Component" in c.components.get("text", ""))
+        custom_item = next(c for c in menu.children if "Custom Component" in c.items.get_value("text", ""))
         self.click(custom_item)
-        self.assertIn("custom_component", ent.components)
+        self.assertIn("custom_component", ent.items.value_dict())
         custom_lbl = next(l for l, _ in ed.component_rows if l.visible and l.component_key == "custom_component")
         self.assertIs(ed.ui.focused, custom_lbl)
         self.assertEqual(custom_lbl.buffer.selection, (0, len("custom_component")))
@@ -2308,8 +2307,8 @@ class EditorTests(unittest.TestCase):
         """Hierarchy row colors have matching normal/hover colors between sync and motion, preventing flashing."""
         ed = self.editor
         row = next(r for r in ed.hierarchy_rows if r.visible)
-        self.assertIn("normal_color", row.components)
-        self.assertIn("hover_color", row.components)
+        self.assertIn("normal_color", row.items.value_dict())
+        self.assertIn("hover_color", row.items.value_dict())
         self.assertEqual(row.hover_color, (35, 45, 58))
 
         # Mouse motion over row sets hover_color
@@ -2364,7 +2363,7 @@ class EditorTests(unittest.TestCase):
         self.assertIsNotNone(menu)
         self.assertIsInstance(menu.context_target, dict)
         self.assertTrue(menu.context_target.get("code"))
-        action_labels = [c.text for c in menu.children if "text" in c.components]
+        action_labels = [c.text for c in menu.children if c.items.has_value("text")]
         self.assertIn("Select All", action_labels)
         self.assertIn("Copy", action_labels)
         self.assertNotIn("Select 'CodeEditor' in hierarchy", action_labels)
@@ -2404,7 +2403,7 @@ class EditorTests(unittest.TestCase):
         menu_game = ed.app.relations.get("context_menu")
         self.assertIsNotNone(menu_game)
         self.assertTrue(menu_game.context_target.get("deep"))
-        game_items = [c for c in menu_game.children if "text" in c.components]
+        game_items = [c for c in menu_game.children if c.items.has_value("text")]
         sel_labels = [c.text for c in game_items if "Select" in c.text]
         self.assertTrue(any("Player" in lbl and "Leaf" in lbl for lbl in sel_labels))
         self.assertTrue(any("Viewport" in lbl and "Parent" in lbl for lbl in sel_labels))
@@ -2422,7 +2421,7 @@ class EditorTests(unittest.TestCase):
         self.assertIsNotNone(menu_btn)
         self.assertTrue(menu_btn.context_target.get("deep"))
         self.assertIs(menu_btn.context_target.get("entity"), ed.run_button)
-        deep_labels = [c.text for c in menu_btn.children if "text" in c.components]
+        deep_labels = [c.text for c in menu_btn.children if c.items.has_value("text")]
         self.assertTrue(any("Select" in lbl and "ToggleRun" in lbl for lbl in deep_labels))
         self.send(("key", "ESCAPE", False, False))
 
@@ -2446,7 +2445,7 @@ class EditorTests(unittest.TestCase):
         self.send(("click", tx, ty, 4, 2))
         menu_turret = ed.app.relations.get("context_menu")
         self.assertIsNotNone(menu_turret)
-        turret_items = [c.text for c in menu_turret.children if "text" in c.components and "Select" in c.text]
+        turret_items = [c.text for c in menu_turret.children if c.items.has_value("text") and "Select" in c.text]
         self.assertTrue(any("Turret" in lbl and "Leaf" in lbl for lbl in turret_items))
         self.assertTrue(any("Player" in lbl and "Parent" in lbl for lbl in turret_items))
         self.send(("key", "ESCAPE", False, False))
@@ -2474,8 +2473,8 @@ class EditorTests(unittest.TestCase):
         self.assertIsNotNone(menu)
 
         # Verify Change type item exists
-        change_item = next(c for c in menu.children if "Change type" in c.components.get("text", ""))
-        self.assertIn("float", change_item.components.get("text", ""))
+        change_item = next(c for c in menu.children if "Change type" in c.items.get_value("text", ""))
+        self.assertIn("float", change_item.items.get_value("text", ""))
 
         # Click Change type to open types submenu
         self.click(change_item)
@@ -2483,34 +2482,34 @@ class EditorTests(unittest.TestCase):
         self.assertIsNotNone(type_menu)
 
         # Change to int
-        int_choice = next(c for c in type_menu.children if "int" in c.components.get("text", ""))
+        int_choice = next(c for c in type_menu.children if "int" in c.items.get_value("text", ""))
         self.click(int_choice)
-        self.assertEqual(ent.components["score"], 42)
-        self.assertIsInstance(ent.components["score"], int)
+        self.assertEqual(ent.items.require_value("score"), 42)
+        self.assertIsInstance(ent.items.require_value("score"), int)
 
         # Change to bool
         _, score_fld = next((lbl, fld) for (lbl, fld) in ed.component_rows if fld.visible and fld.component_key == "score")
         self.send(("click", score_fld.x + 10, score_fld.y + 10, 4, 0))
         menu = ed.app.relations.get("context_menu")
-        change_item = next(c for c in menu.children if "Change type" in c.components.get("text", ""))
+        change_item = next(c for c in menu.children if "Change type" in c.items.get_value("text", ""))
         self.click(change_item)
         type_menu = ed.app.relations.get("context_menu")
-        bool_choice = next(c for c in type_menu.children if "bool" in c.components.get("text", ""))
+        bool_choice = next(c for c in type_menu.children if "bool" in c.items.get_value("text", ""))
         self.click(bool_choice)
-        self.assertEqual(ent.components["score"], True)
-        self.assertIsInstance(ent.components["score"], bool)
+        self.assertEqual(ent.items.require_value("score"), True)
+        self.assertIsInstance(ent.items.require_value("score"), bool)
 
         # Change to str
         _, score_fld = next((lbl, fld) for (lbl, fld) in ed.component_rows if fld.visible and fld.component_key == "score")
         self.send(("click", score_fld.x + 10, score_fld.y + 10, 4, 0))
         menu = ed.app.relations.get("context_menu")
-        change_item = next(c for c in menu.children if "Change type" in c.components.get("text", ""))
+        change_item = next(c for c in menu.children if "Change type" in c.items.get_value("text", ""))
         self.click(change_item)
         type_menu = ed.app.relations.get("context_menu")
-        str_choice = next(c for c in type_menu.children if "str" in c.components.get("text", ""))
+        str_choice = next(c for c in type_menu.children if "str" in c.items.get_value("text", ""))
         self.click(str_choice)
-        self.assertEqual(ent.components["score"], "True")
-        self.assertIsInstance(ent.components["score"], str)
+        self.assertEqual(ent.items.require_value("score"), "True")
+        self.assertIsInstance(ent.items.require_value("score"), str)
 
     def test_component_context_menu_entity_type_actions(self):
         """Issue #65: Right-clicking an entity-typed component reveals entity-specific context actions."""
@@ -2526,7 +2525,7 @@ class EditorTests(unittest.TestCase):
         menu = ed.app.relations.get("context_menu")
         self.assertIsNotNone(menu)
 
-        texts = [c.components.get("text", "") for c in menu.children if "text" in c.components]
+        texts = [c.items.get_value("text", "") for c in menu.children if c.items.has_value("text")]
         # Should have component actions
         self.assertTrue(any("Inspect component" in t for t in texts))
         self.assertTrue(any("Change type" in t for t in texts))
@@ -2539,7 +2538,7 @@ class EditorTests(unittest.TestCase):
         self.assertTrue(any("Add Component to 'BossShip'" in t for t in texts))
 
         # Clicking select entity selects BossShip
-        select_item = next(c for c in menu.children if "Select Entity 'BossShip'" in c.components.get("text", ""))
+        select_item = next(c for c in menu.children if "Select Entity 'BossShip'" in c.items.get_value("text", ""))
         self.click(select_item)
         self.assertIs(ed.app.relations.get("selection"), target_ent)
 
@@ -2555,16 +2554,16 @@ class EditorTests(unittest.TestCase):
         self.send(("click", sx, sy, 4, 0))
         vp_menu = ed.app.relations.get("context_menu")
         self.assertIsNotNone(vp_menu)
-        vp_texts = [c.components.get("text", "") for c in vp_menu.children if "text" in c.components]
+        vp_texts = [c.items.get_value("text", "") for c in vp_menu.children if c.items.has_value("text")]
         self.assertIn("+ Add Component...", vp_texts)
         self.assertNotIn("+ Add Pos (x, y)", vp_texts)  # Inlined items removed
 
         # Click + Add Component... and verify presets expand
-        add_btn = next(c for c in vp_menu.children if c.components.get("text") == "+ Add Component...")
+        add_btn = next(c for c in vp_menu.children if c.items.get_value("text") == "+ Add Component...")
         self.click(add_btn)
         vp_submenu = ed.app.relations.get("context_menu")
         self.assertIsNotNone(vp_submenu)
-        sub_texts = [c.components.get("text", "") for c in vp_submenu.children if "text" in c.components]
+        sub_texts = [c.items.get_value("text", "") for c in vp_submenu.children if c.items.has_value("text")]
         self.assertTrue(any("+ Transform / Pos" in t for t in sub_texts))
         self.assertTrue(any("+ Velocity" in t for t in sub_texts))
         self.assertTrue(any("+ Custom Component" in t for t in sub_texts))
@@ -2575,7 +2574,7 @@ class EditorTests(unittest.TestCase):
         self.send(("click", row.x + 40, row.y + 10, 4, 0))
         h_menu = ed.app.relations.get("context_menu")
         self.assertIsNotNone(h_menu)
-        h_texts = [c.components.get("text", "") for c in h_menu.children if "text" in c.components]
+        h_texts = [c.items.get_value("text", "") for c in h_menu.children if c.items.has_value("text")]
         self.assertIn("+ Add Component...", h_texts)
         self.assertNotIn("+ Add Pos (x, y)", h_texts)
 
@@ -2583,12 +2582,12 @@ class EditorTests(unittest.TestCase):
         ed = self.editor
         self.runtime.step(0)
         # Verify path_field is read-only
-        self.assertTrue(ed.path_field.components.get("readonly", False))
+        self.assertTrue(ed.path_field.items.get_value("readonly", False))
         # Verify toolbar action buttons are hidden (visible=False)
-        self.assertFalse(ed.new_button.components.get("visible", True))
-        self.assertFalse(ed.open_button.components.get("visible", True))
-        self.assertFalse(ed.save_button.components.get("visible", True))
-        self.assertFalse(ed.attach_button.components.get("visible", True))
+        self.assertFalse(ed.new_button.items.get_value("visible", True))
+        self.assertFalse(ed.open_button.items.get_value("visible", True))
+        self.assertFalse(ed.save_button.items.get_value("visible", True))
+        self.assertFalse(ed.attach_button.items.get_value("visible", True))
 
     def test_code_editor_context_menu_actions(self):
         ed = self.editor
@@ -2597,7 +2596,7 @@ class EditorTests(unittest.TestCase):
         self.send(("click", ed.code.x + 40, ed.code.y + 40, 4, 0))
         menu = ed.app.relations.get("context_menu")
         self.assertIsNotNone(menu)
-        texts = [c.components.get("text", "") for c in menu.children if "text" in c.components]
+        texts = [c.items.get_value("text", "") for c in menu.children if c.items.has_value("text")]
         self.assertTrue(any("Save / reload" in t for t in texts))
         self.assertTrue(any("Rename" in t for t in texts))
         self.assertTrue(any("Open file..." in t for t in texts))
@@ -2647,32 +2646,32 @@ class EditorTests(unittest.TestCase):
         orig_name = ed.path_field.buffer.text
         # Trigger rename prompt
         ed.prompt_rename_file()
-        self.assertFalse(ed.path_field.components.get("readonly", True))
-        self.assertEqual(self.runtime.entities[0].components["ui"].focused, ed.path_field)
+        self.assertFalse(ed.path_field.items.get_value("readonly", True))
+        self.assertEqual(self.runtime.entities[0].items.require_value("ui").focused, ed.path_field)
 
         # Press Escape to cancel
         self.send(("key", "ESCAPE", False, False))
         self.runtime.step(0)
-        self.assertTrue(ed.path_field.components.get("readonly", False))
+        self.assertTrue(ed.path_field.items.get_value("readonly", False))
         self.assertEqual(ed.path_field.buffer.text, orig_name)
 
     def test_f3_key_toggles_spatial_debug_grid(self):
         ed = self.editor
         self.runtime.step(0)
-        self.assertFalse(ed.app.components.get("show_spatial_debug", False))
+        self.assertFalse(ed.app.items.get_value("show_spatial_debug", False))
 
         # Press F3 to enable
         self.send(("key", "F3", False, False))
         self.runtime.step(0)
-        self.assertTrue(ed.app.components.get("show_spatial_debug", False))
-        self.assertTrue(ed.game.components.get("show_spatial_debug", False))
+        self.assertTrue(ed.app.items.get_value("show_spatial_debug", False))
+        self.assertTrue(ed.game.items.get_value("show_spatial_debug", False))
         self.assertIn("Spatial debug partition: ON", ed.app.status)
 
         # Press F3 again to disable
         self.send(("key", "F3", False, False))
         self.runtime.step(0)
-        self.assertFalse(ed.app.components.get("show_spatial_debug", True))
-        self.assertFalse(ed.game.components.get("show_spatial_debug", True))
+        self.assertFalse(ed.app.items.get_value("show_spatial_debug", True))
+        self.assertFalse(ed.game.items.get_value("show_spatial_debug", True))
         self.assertIn("Spatial debug partition: OFF", ed.app.status)
 
     def test_interactive_panel_docking_and_drop_overlay(self):
@@ -2683,7 +2682,7 @@ class EditorTests(unittest.TestCase):
         insp_x = ed.inspector.x + 20
         insp_y = ed.inspector.y + 10
         self.send(("drag", insp_x, insp_y, 1, 0, 5, 5))
-        dock_drag = ed.app.components.get("dock_drag")
+        dock_drag = ed.app.items.get_value("dock_drag")
         self.assertIsNotNone(dock_drag)
         self.assertEqual(dock_drag.get("panel"), "inspector")
 
@@ -2691,7 +2690,7 @@ class EditorTests(unittest.TestCase):
         vp_cx = ed.viewport.x + ed.viewport.w // 2
         vp_cy = ed.viewport.y + ed.viewport.h // 2
         self.send(("drag", vp_cx, vp_cy, 1, 0, 0, 0))
-        dock_drag = ed.app.components.get("dock_drag")
+        dock_drag = ed.app.items.get_value("dock_drag")
         self.assertIsNotNone(dock_drag.get("target_group"))
         self.assertEqual(dock_drag.get("zone"), "center")
         self.assertIsNotNone(dock_drag.get("preview_rect"))
@@ -2705,12 +2704,12 @@ class EditorTests(unittest.TestCase):
         # 4. Moving drag to right side of viewport
         vp_rx = ed.viewport.x + ed.viewport.w - 15
         self.send(("drag", vp_rx, vp_cy, 1, 0, 0, 0))
-        dock_drag = ed.app.components.get("dock_drag")
+        dock_drag = ed.app.items.get_value("dock_drag")
         self.assertEqual(dock_drag.get("zone"), "right")
 
         # 5. Releasing mouse drops inspector into right side of viewport
         self.send(("release", vp_rx, vp_cy, 1, 0))
-        self.assertIsNone(ed.app.components.get("dock_drag"))
+        self.assertIsNone(ed.app.items.get_value("dock_drag"))
 
         # Verify layout reflowed: Inspector and Viewport are now docked side by side
         self.runtime.step(0)
@@ -2731,13 +2730,13 @@ class EditorTests(unittest.TestCase):
         hier_cy = ed.hierarchy.y + ed.hierarchy.h // 2
         self.send(("drag", hier_cx, hier_cy, 1, 0, 0, 0))
 
-        dock_drag = ed.app.components.get("dock_drag")
+        dock_drag = ed.app.items.get_value("dock_drag")
         self.assertIsNotNone(dock_drag)
         self.assertEqual(dock_drag.get("zone"), "center")
 
         # Drop into center to create tab
         self.send(("release", hier_cx, hier_cy, 1, 0))
-        self.assertIsNone(ed.app.components.get("dock_drag"))
+        self.assertIsNone(ed.app.items.get_value("dock_drag"))
 
         # Verify Inspector is now in the tab group with hierarchy
         group = ed.dock_tree.find_tab_group_with_panel("hierarchy")
@@ -2755,23 +2754,23 @@ class EditorTests(unittest.TestCase):
         ed.app.systems["app"].namespace["layout"]()
 
         # Check tab buttons rendered for the group
-        visible_tabs = [b for b in ed.dock_tab_buttons if b.components.get("visible", False)]
+        visible_tabs = [b for b in ed.dock_tab_buttons if b.items.get_value("visible", False)]
         self.assertGreaterEqual(len(visible_tabs), 2)
         tab_texts = [b.text for b in visible_tabs]
         self.assertIn("VIEWPORT", tab_texts)
         self.assertIn("INSPECTOR", tab_texts)
 
         # Inspector was just docked so it is active
-        self.assertTrue(ed.inspector.components.get("visible", False))
-        self.assertFalse(ed.viewport.components.get("visible", False))
+        self.assertTrue(ed.inspector.items.get_value("visible", False))
+        self.assertFalse(ed.viewport.items.get_value("visible", False))
 
         # Click the Viewport tab button
         vp_tab = next(b for b in visible_tabs if b.text == "VIEWPORT")
         vp_tab.action()
 
         # Now Viewport is active and Inspector is inactive
-        self.assertTrue(ed.viewport.components.get("visible", False))
-        self.assertFalse(ed.inspector.components.get("visible", False))
+        self.assertTrue(ed.viewport.items.get_value("visible", False))
+        self.assertFalse(ed.inspector.items.get_value("visible", False))
 
     def test_close_panel_removes_panel_and_expands_sibling(self):
         """Req 2: Closing a panel expands remaining panels and removes the splitter."""
@@ -2779,24 +2778,24 @@ class EditorTests(unittest.TestCase):
         orig_code_h = ed.code_panel.h
 
         # Click close button on Viewport
-        self.assertTrue(ed.close_viewport_btn.components.get("visible", False))
+        self.assertTrue(ed.close_viewport_btn.items.get_value("visible", False))
         ed.close_viewport_btn.action()
 
         # Viewport is now closed and not in layout
-        self.assertFalse(ed.viewport.components.get("visible", False))
+        self.assertFalse(ed.viewport.items.get_value("visible", False))
         self.assertIsNone(ed.dock_tree.find_tab_group_with_panel("viewport"))
 
         # code_panel expanded into the space left by viewport
         self.assertGreater(ed.code_panel.h, orig_code_h + 100)
 
         # Splitter between viewport and code_panel was pruned and is hidden
-        self.assertFalse(ed.code_splitter.components.get("visible", False))
+        self.assertFalse(ed.code_splitter.items.get_value("visible", False))
 
     def test_view_menu_opens_system_log(self):
         ed = self.editor
         self.click(ed.menu_view_btn)
         menu = ed.app.relations['context_menu']
-        item = next(c for c in menu.children if c.components.get('text') == 'System Log (Ctrl+L)')
+        item = next(c for c in menu.children if c.items.get_value('text') == 'System Log (Ctrl+L)')
         self.click(item)
         panel = ed.app.relations['system_log_panel']
         self.assertTrue(panel.visible)
@@ -2807,27 +2806,27 @@ class EditorTests(unittest.TestCase):
         ed = self.editor
 
         # Top menu buttons exist and are visible
-        self.assertTrue(ed.menu_file_btn.components.get("visible", False))
-        self.assertTrue(ed.menu_edit_btn.components.get("visible", False))
-        self.assertTrue(ed.menu_view_btn.components.get("visible", False))
+        self.assertTrue(ed.menu_file_btn.items.get_value("visible", False))
+        self.assertTrue(ed.menu_edit_btn.items.get_value("visible", False))
+        self.assertTrue(ed.menu_view_btn.items.get_value("visible", False))
 
         # Close Inspector via close button
         orig_hier_h = ed.hierarchy.h
         ed.close_inspector_btn.action()
-        self.assertFalse(ed.inspector.components.get("visible", False))
-        self.assertFalse(ed.close_inspector_btn.components.get("visible", False))
+        self.assertFalse(ed.inspector.items.get_value("visible", False))
+        self.assertFalse(ed.close_inspector_btn.items.get_value("visible", False))
 
         # Hierarchy expanded to fill left column and splitter is hidden
         self.assertGreater(ed.hierarchy.h, orig_hier_h + 100)
-        self.assertFalse(ed.hierarchy_splitter.components.get("visible", False))
+        self.assertFalse(ed.hierarchy_splitter.items.get_value("visible", False))
 
         # Restore Inspector from View menu
         ed.app.systems["app"].namespace["toggle_panel_view"]("inspector")
 
         # Inspector is restored and visible
-        self.assertTrue(ed.inspector.components.get("visible", False))
-        self.assertTrue(ed.close_inspector_btn.components.get("visible", False))
-        self.assertTrue(ed.hierarchy_splitter.components.get("visible", False))
+        self.assertTrue(ed.inspector.items.get_value("visible", False))
+        self.assertTrue(ed.close_inspector_btn.items.get_value("visible", False))
+        self.assertTrue(ed.hierarchy_splitter.items.get_value("visible", False))
         # Hierarchy returned to its upper half and inspector is below it
         self.assertLess(ed.hierarchy.h, orig_hier_h + 50)
         self.assertGreater(ed.inspector.y, ed.hierarchy.y)

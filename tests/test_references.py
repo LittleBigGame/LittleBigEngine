@@ -36,7 +36,7 @@ actual = {token}
 
     def test_bound_entity_and_component_follow_live_changes(self):
         source = self.runtime.create(x=1)
-        component = source.components.item("x")
+        component = source.items.component("x")
         owner = self.runtime.create()
         definition = SystemDefinition(f"target = <|Entity:{source.id}|>\nvalue = <|Component:{component.id}|>\ndef update(dt):\n    target.x = value.value + 1\n")
         attachment = owner.systems.attach("worker", definition)

@@ -142,7 +142,7 @@ class ActivityTests(unittest.TestCase):
             state.game.test_value = 12
             runtime.step(0)
             self.assertTrue(any(r.kind == 'component.set' and 'test_value' in r.detail for r in runtime.services['log'].view()))
-            self.assertTrue(any(c.text and 'test_value' in c.text for c in panel.children if 'text' in c.components))
+            self.assertTrue(any(c.text and 'test_value' in c.text for c in panel.children if c.items.has_value('text')))
             controls = {c.name:c for c in panel.children}
             panel.selected_record = next(r for r in runtime.services['log'].view() if 'test_value' in r.detail)
             controls['FilterLog'].buffer.text = 'no matching audit record'
@@ -266,7 +266,7 @@ class ActivityTests(unittest.TestCase):
             del panel.systems['system_log']
             self.assertEqual(panel.children, (custom,))
             self.assertIs(panel.on_click, replacement)
-            self.assertNotIn('on_drag', panel.components)
+            self.assertNotIn('on_drag', panel.items.value_dict())
             self.assertNotIn(panel.id, runtime.services['log'].excluded)
             self.assertFalse(runtime.changes.errors)
 

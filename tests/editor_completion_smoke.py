@@ -21,7 +21,7 @@ def main():
             deadline = time.monotonic() + 15
             while time.monotonic() < deadline:
                 runtime.step(0)
-                state = code.components.get('autocomplete_state', {})
+                state = code.items.get_value('autocomplete_state', {})
                 if state.get('active'):
                     break
                 time.sleep(0.01)
@@ -33,7 +33,7 @@ def main():
                 code.buffer.anchor = 0
                 code.buffer.cursor = source.index('location.ex')
                 runtime.step(0)
-                assert any(c.components.get('part') == 'selection:1' and c.visible for c in code.children)
+                assert any(c.items.get_value('part') == 'selection:1' and c.visible for c in code.children)
             return runtime
         screenshot = next((a for a in sys.argv[1:] if a.endswith('.png')), None)
         launch(build, headless=True, frames=4, screenshot=screenshot)

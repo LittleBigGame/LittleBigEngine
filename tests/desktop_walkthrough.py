@@ -25,7 +25,7 @@ def main():
         def build(window, graphics, input_state):
             runtime = load_project(window, graphics, input_state, directory, template=template_path("editor"))
             runtime.step(0)
-            editor = runtime.entities[0].components["application_state"]
+            editor = runtime.entities[0].items.require_value("application_state")
             moving, still = editor.game.children
             initial = moving.x, moving.y
             stationary = still.x, still.y
@@ -35,12 +35,12 @@ def main():
                 return ("click", entity.x+entity.w/2, entity.y+entity.h/2, 1, 0)
 
             def enter(entity, text):
-                assert not entity.components.get("readonly", False), entity
+                assert not entity.items.get_value("readonly", False), entity
                 return [click(entity), ("key", "A", True, False), ("text", text)]
 
             def menu_item(text):
                 menu = editor.app.relations["context_menu"]
-                return next(child for child in menu.children if text in child.components.get("text", ""))
+                return next(child for child in menu.children if text in child.items.get_value("text", ""))
 
             def component(key):
                 return next(field for _, field in editor.component_rows

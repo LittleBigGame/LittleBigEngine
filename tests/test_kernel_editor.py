@@ -25,7 +25,7 @@ class KernelEditorTests(unittest.TestCase):
         self.graphics = RecordingGraphics()
         self.runtime = load_project(self.window, self.graphics, self.input, self.directory.name, template=template_path('editor'))
         self.addCleanup(lambda: self.runtime.close())
-        self.editor = self.runtime.entities[0].components['application_state']
+        self.editor = self.runtime.entities[0].items.require_value('application_state')
         self.runtime.step(0)
 
     def create_demo(self):
@@ -35,9 +35,9 @@ class KernelEditorTests(unittest.TestCase):
 
     def test_gui_demo_moves_shoots_expires_and_reopens_with_identity(self):
         player = self.create_demo()
-        uid = player.components.item('speed').id
+        uid = player.items.component('speed').id
         self.assertIsInstance(player[uid], InheritedComponent)
-        self.assertNotIn('x', next(e for e in self.editor.game.children if 'blueprint' in e.tags).components)
+        self.assertNotIn('x', next(e for e in self.editor.game.children if 'blueprint' in e.tags).items.value_dict())
         self.input.press('D')
         self.input.press('SPACE')
         self.runtime.step(0.1)
@@ -52,9 +52,9 @@ class KernelEditorTests(unittest.TestCase):
         self.editor.save_editor_project()
         self.runtime.close()
         self.runtime = load_project(self.window, self.graphics, self.input, self.directory.name)
-        self.editor = self.runtime.entities[0].components['application_state']
+        self.editor = self.runtime.entities[0].items.require_value('application_state')
         restored = self.runtime.resolve(player.id)
-        self.assertEqual(restored.components.item('speed').id, uid)
+        self.assertEqual(restored.items.component('speed').id, uid)
         self.assertTrue(self.editor.game.systems['walk_shoot'].running)
 
     def test_component_reference_menu_inheritance_edit_undo_and_reset(self):
@@ -66,9 +66,9 @@ class KernelEditorTests(unittest.TestCase):
         copy['run'](None)
         self.editor.select(target)
         self.editor.inherit_copied_component(target)
-        item = target.components.item('speed')
+        item = target.items.component('speed')
         self.assertIsInstance(item, InheritedComponent)
-        self.assertEqual(item.source, source.components.item('speed').id)
+        self.assertEqual(item.source, source.items.component('speed').id)
         self.runtime.step(0)
         field = next(f for _, f in self.editor.component_rows if f.visible and f.component_key == 'speed')
         self.assertEqual(field.provenance, 'inherited')
@@ -77,7 +77,7 @@ class KernelEditorTests(unittest.TestCase):
         self.assertEqual(target.speed, 9.0)
         self.assertEqual(source.speed, 6.0)
         self.editor.files.history.undo()
-        self.assertEqual(target.components.item('speed').patch, ())
+        self.assertEqual(target.items.component('speed').patch, ())
         source.speed = 7.0
         self.assertEqual(target.speed, 7.0)
         target.speed = 12.0
@@ -87,7 +87,7 @@ class KernelEditorTests(unittest.TestCase):
     def test_typed_pills_are_atomic_and_missing_references_are_visible(self):
         source = self.runtime.create(parent=self.editor.game, name='Referenced', x=2)
         code = self.editor.code
-        token = f'<|Component:{source.components.item("x").id}|>'
+        token = f'<|Component:{source.items.component("x").id}|>'
         code.buffer = TextBuffer('value = ' + token)
         self.editor.ui.focus(code)
         self.runtime.step(0)

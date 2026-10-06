@@ -15,7 +15,7 @@ class ItemStorageTests(unittest.TestCase):
         source = self.runtime.create(x=2, tags=["blueprint"])
         child = self.runtime.create(parent=source)
         child.relations["source"] = source
-        child.components.inherit("x", source.components.item("x"), [{"op": "add", "value": 3}])
+        child.items.inherit_value("x", source.items.component("x"), [{"op": "add", "value": 3}])
         child.systems.attach("idle", SystemDefinition("def update(dt): pass"))
         data = serialize_entities([child, source])
         restored = deserialize_entities(data, self.other)
@@ -23,7 +23,7 @@ class ItemStorageTests(unittest.TestCase):
             self.assertEqual(set(e.items), set(restored[e.id].items))
         c = restored[child.id]
         self.assertEqual(c.x, 5)
-        self.assertIsInstance(c.components.item("x"), InheritedComponent)
+        self.assertIsInstance(c.items.component("x"), InheritedComponent)
         restored[source.id].x = 10
         self.assertEqual(c.x, 13)
 

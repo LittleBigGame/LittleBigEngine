@@ -271,7 +271,7 @@ class SystemInstance:
 
                     if has_run:
                         if self.definition.components:
-                            if all(c in self.entity.components for c in self.definition.components):
+                            if all(self.entity.items.has_value(c) for c in self.definition.components):
                                 targets = [self.entity]
                             else:
                                 targets = list(self.entity.query(*self.definition.components, recursive=True))

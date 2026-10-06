@@ -749,7 +749,8 @@ def inspector_duplicate_entity():
     new_name = orig_name + "_copy"
     comps = deepcopy(dict(ent.items.value_dict()))
     comps['name'] = new_name
-    dup = state.runtime.create(parent=parent, tags=list(ent.tags), components=comps)
+    from lbe import Component
+    dup = state.runtime.create(parent=parent, tags=list(ent.tags), items=tuple(Component(k, v) for k, v in comps.items()))
     from lbe import InheritedComponent
     for item in ent.all(InheritedComponent):
         dup.items.remove_value(item.name)

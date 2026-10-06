@@ -16,9 +16,9 @@ def main():
         def build(window, graphics, input_state):
             runtime = load_project(window, graphics, input_state, directory, template=template_path('editor'))
             runtime.step(0)
-            editor = runtime.entities[0].components['application_state']
+            editor = runtime.entities[0].items.require_value('application_state')
             player = editor.app.systems['app'].namespace['create_walk_shoot_demo']()
-            speed = player.components.item('speed')
+            speed = player.items.component('speed')
             editor.code.buffer = TextBuffer(
                 '# Persistent references: friendly pills, UUID source on disk.\n'
                 f'player = <|Entity:{player.id}|>\n'

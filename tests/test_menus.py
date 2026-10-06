@@ -148,8 +148,8 @@ class MenuTests(unittest.TestCase):
         self.root.relations['active_drag'] = handle
         self.root.relations['text_drag'] = handle
         for name in ('entity', 'asset', 'dock'):
-            self.root.components[name+'_drag'] = {'value': name}
-            self.root.components['on_'+name+'_drop'] = lambda data,event: dropped.append(data)
+            self.root.items.set_value(name+'_drag', {'value': name})
+            self.root.items.set_value('on_'+name+'_drop', lambda data,event: dropped.append(data))
         menu = open_menu(self.ui, object(), 100,100, [dict(label='Run',run=lambda target:None)])
         self.ui.dispatch(('release',110,110,1,0))
         self.assertNotIn('active_drag', self.root.relations)
@@ -157,5 +157,5 @@ class MenuTests(unittest.TestCase):
         self.assertEqual(released, [handle])
         self.assertEqual(dropped, [])
         for name in ('entity_drag','asset_drag','dock_drag'):
-            self.assertNotIn(name, self.root.components)
+            self.assertNotIn(name, self.root.items.value_dict())
         self.assertTrue(menu.alive)

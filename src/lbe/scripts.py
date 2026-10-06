@@ -38,7 +38,7 @@ class ScriptInstance(SystemInstance):
             self.entity._check()
             if not self.running:
                 raise RuntimeError('Script attachment is stopped or failed')
-            missing=[k for k in self.definition.components if k not in self.entity.components]
+            missing=[k for k in self.definition.components if not self.entity.items.has_value(k)]
             if missing:
                 raise ValueError('Missing components: '+', '.join(missing))
             with self.entity.runtime.changes.context(self.entity,self.name,'run'):

@@ -131,7 +131,7 @@ class AssetContracts(TestCase):
         runtime = Runtime()
         target = runtime.create()
         owner = runtime.create(settings={'target': target, 'values': []})
-        with owner.components.edit('settings') as copy:
+        with owner.items.edit_value('settings') as copy:
             self.assertIs(copy['target'], target)
             copy['values'].append(1)
         self.assertEqual(owner.settings['values'], [1])
@@ -157,7 +157,7 @@ class EditorContracts(TestCase):
     def send(self, *events):
         self.input.pending.extend(events)
         self.runtime.step(0)
-        self.assertNotIn('ui_error', self.editor.app.components)
+        self.assertNotIn('ui_error', self.editor.app.items.value_dict())
         for entity in self.runtime.entities:
             for instance in entity.systems.values():
                 self.assertFalse(instance.errors, list(instance.errors))
@@ -167,7 +167,7 @@ class EditorContracts(TestCase):
         self.send(('click', control.x + control.w / 2, control.y + control.h / 2, 1, 0))
 
     def type(self, control, text, *, commit=False):
-        self.assertFalse(control.components.get('readonly', False))
+        self.assertFalse(control.items.get_value('readonly', False))
         self.click(control)
         self.send(('key', 'A', True, False), ('text', text))
         if commit:
@@ -175,7 +175,7 @@ class EditorContracts(TestCase):
 
     def menu_item(self, text):
         menu = self.editor.app.relations['context_menu']
-        return next(child for child in menu.children if text in child.components.get('text', ''))
+        return next(child for child in menu.children if text in child.items.get_value('text', ''))
 
     def test_visible_authoring_workflow_and_restart(self):
         from lbe.project import load_project
@@ -303,7 +303,7 @@ class EditorContracts(TestCase):
         label = next(label for label, field in ed.component_rows if field.visible and field.component_key == 'x')
         label.buffer = TextBuffer('position')
         label.renaming_key = 'x'
-        before = dict(target.components)
+        before = dict(target.items.value_dict())
         original = ed.save_editor_project
         def fail():
             raise OSError('injected write failure')
@@ -313,7 +313,7 @@ class EditorContracts(TestCase):
                 ed.commit_component_key(label)
         finally:
             ed.save_editor_project = original
-        self.assertEqual(dict(target.components), before)
+        self.assertEqual(dict(target.items.value_dict()), before)
 
 
 class FileOperationContracts(TestCase):
@@ -361,7 +361,7 @@ class ApplicationContracts(TestCase):
             runtime = load_project(SimpleNamespace(width=900, height=600), RecordingGraphics(), input_state,
                                    folder, template=template_path('demo'))
             self.addCleanup(runtime.close)
-            game = next(e for e in runtime.entities if e.components.get('name') == 'Game')
+            game = next(e for e in runtime.entities if e.items.get_value('name') == 'Game')
             player = game.children[0]
             x = player.x
             input_state.pending.extend([('key', 'RIGHT', False, False), ('key', 'F3', False, False)])

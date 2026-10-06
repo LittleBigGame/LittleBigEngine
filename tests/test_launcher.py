@@ -41,13 +41,13 @@ class LauncherTests(unittest.TestCase):
         # Step layout system
         runtime.step(0)
         
-        container = next((e for e in root.descendants if e.components.get("name") == "Container"), None)
+        container = next((e for e in root.descendants if e.items.get_value("name") == "Container"), None)
         self.assertIsNotNone(container)
         
-        items_container = next((e for e in root.descendants if e.components.get("name") == "ItemsContainer"), None)
+        items_container = next((e for e in root.descendants if e.items.get_value("name") == "ItemsContainer"), None)
         self.assertIsNotNone(items_container)
         
-        action_row = next((e for e in root.descendants if e.components.get("name") == "ActionRow"), None)
+        action_row = next((e for e in root.descendants if e.items.get_value("name") == "ActionRow"), None)
         self.assertIsNotNone(action_row)
 
     def test_lbe_project_folder_creation(self):
@@ -56,8 +56,8 @@ class LauncherTests(unittest.TestCase):
         runtime.step(0)
 
         root = runtime.entities[0]
-        btn_create = next(e for e in root.descendants if e.components.get("name") == "BtnCreate")
-        name_field = next(e for e in root.descendants if e.components.get("name") == "NameField")
+        btn_create = next(e for e in root.descendants if e.items.get_value("name") == "BtnCreate")
+        name_field = next(e for e in root.descendants if e.items.get_value("name") == "NameField")
         
         # Step 1: Set project name and click + New Project (.lbe)
         name_field.buffer.text = "test_game"
@@ -65,7 +65,7 @@ class LauncherTests(unittest.TestCase):
         runtime.step(0)
         
         # Step 2: Pick default LBE v1 Editor template
-        btn_default = next(e for e in root.descendants if e.components.get("name") == "BtnDefaultEditor")
+        btn_default = next(e for e in root.descendants if e.items.get_value("name") == "BtnDefaultEditor")
         btn_default.action()
         
         self.assertIsNotNone(self.selected_project)
@@ -82,10 +82,10 @@ class LauncherTests(unittest.TestCase):
         runtime_obj = create_launcher_runtime(self.window, self.graphics, self.input, self.on_select)
         self.addCleanup(runtime_obj.close)
         root = runtime_obj.entities[0]
-        root.components["browser_state"].current_dir = self.base_dir
+        root.items.require_value("browser_state").current_dir = self.base_dir
         runtime_obj.step(0)
 
-        open_btn = next((e for e in root.descendants if e.components.get("name") == "Btn_my_existing_game.lbe"), None)
+        open_btn = next((e for e in root.descendants if e.items.get_value("name") == "Btn_my_existing_game.lbe"), None)
         self.assertIsNotNone(open_btn)
         
         # Click the Open Project button
@@ -97,11 +97,11 @@ class LauncherTests(unittest.TestCase):
         runtime_obj = create_launcher_runtime(self.window, self.graphics, self.input, self.on_select)
         self.addCleanup(runtime_obj.close)
         root = runtime_obj.entities[0]
-        root.components["browser_state"].current_dir = self.base_dir
+        root.items.require_value("browser_state").current_dir = self.base_dir
         runtime_obj.step(0)
 
-        name_field = next(e for e in root.descendants if e.components.get("name") == "NameField")
-        btn_folder = next(e for e in root.descendants if e.components.get("name") == "BtnFolder")
+        name_field = next(e for e in root.descendants if e.items.get_value("name") == "NameField")
+        btn_folder = next(e for e in root.descendants if e.items.get_value("name") == "BtnFolder")
 
         # Create folder
         name_field.buffer.text = "sub_folder"
@@ -114,7 +114,7 @@ class LauncherTests(unittest.TestCase):
 
         # Rename folder
         name_field.buffer.text = "renamed_folder"
-        ren_btn = next(e for e in root.descendants if e.components.get("name") == "Ren_sub_folder")
+        ren_btn = next(e for e in root.descendants if e.items.get_value("name") == "Ren_sub_folder")
         ren_btn.action()
         runtime_obj.step(0)
 
@@ -123,7 +123,7 @@ class LauncherTests(unittest.TestCase):
         self.assertTrue(renamed_dir.exists())
 
         # Delete folder
-        del_btn = next(e for e in root.descendants if e.components.get("name") == "Del_renamed_folder")
+        del_btn = next(e for e in root.descendants if e.items.get_value("name") == "Del_renamed_folder")
         del_btn.action()
         runtime_obj.step(0)
 
@@ -141,18 +141,18 @@ class LauncherTests(unittest.TestCase):
         runtime_obj.step(0)
 
         # Step 1: Click New Project to enter Step 2 Template Picker View
-        name_field = next(e for e in root.descendants if e.components.get("name") == "NameField")
-        btn_create = next(e for e in root.descendants if e.components.get("name") == "BtnCreate")
+        name_field = next(e for e in root.descendants if e.items.get_value("name") == "NameField")
+        btn_create = next(e for e in root.descendants if e.items.get_value("name") == "BtnCreate")
         name_field.buffer.text = "game_from_custom_tpl"
         btn_create.action()
         
         # In Step 2, navigate browser state to base_dir containing custom_tpl
-        root.components["browser_state"].current_dir = self.base_dir
-        root.components["browser_state"].last_dir = None
+        root.items.require_value("browser_state").current_dir = self.base_dir
+        root.items.require_value("browser_state").last_dir = None
         runtime_obj.step(0)
 
         # Step 2: Select custom template row from browser
-        tpl_row_btn = next(e for e in root.descendants if e.components.get("name") == "Btn_my_custom_editor.lbe")
+        tpl_row_btn = next(e for e in root.descendants if e.items.get_value("name") == "Btn_my_custom_editor.lbe")
         tpl_row_btn.action()
 
         self.assertIsNotNone(self.selected_project)

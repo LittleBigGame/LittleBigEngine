@@ -1,8 +1,6 @@
 """Generic entity storage, hierarchy and live queries."""
 
 from collections.abc import MutableMapping, MutableSet
-from contextlib import contextmanager
-from copy import deepcopy
 from uuid import UUID, uuid4
 from math import isfinite
 
@@ -10,107 +8,6 @@ from .events import Changes, Events, ABSENT
 from .items import Component, InheritedComponent, Items, NamedValues, Tag, TagValues, Relation, Parent
 
 _MISSING = object()
-
-
-class Components(MutableMapping):
-    def __init__(self, entity):
-        self._entity = entity
-        self._values = NamedValues(entity, Component)
-
-    def item(self, key):
-        """Persistent declaration behind a named component value."""
-        self._entity._check()
-        return self._values.record(key)
-
-    def rename(self, key, new_name):
-        from dataclasses import replace
-        if not isinstance(new_name, str) or not new_name:
-            raise ValueError("Component names must be nonempty strings")
-        item = self.item(key)
-        if key == new_name:
-            return item
-        if new_name in self:
-            raise ValueError(f"Component {new_name!r} already exists")
-        self._entity.items._names.pop((Component, key))
-        renamed = replace(item, name=new_name)
-        self._entity.items._put(renamed)
-        self._entity._changed("component.rename", key, new=new_name)
-        return renamed
-
-    def inherit(self, key, source, patch=()):
-        """Attach a source UUID and local patch without copying authoritative data."""
-        source = source.id if isinstance(source, (Component, InheritedComponent)) else UUID(str(source))
-        candidate = InheritedComponent(key, source, tuple(deepcopy(patch)))
-        # Validate before altering the entity. Missing/cyclic sources are errors.
-        self._entity.runtime.linker.component_value(source)
-        if key in self:
-            raise ValueError(f"Component {key!r} already exists")
-        return self._entity.items.add(candidate)
-
-    def patch(self, key, operations):
-        from dataclasses import replace
-        from .items import compose
-        current = self.item(key)
-        if not isinstance(current, InheritedComponent):
-            raise TypeError("Only inherited components have patches")
-        operations = tuple(deepcopy(operations))
-        value = compose(self._entity.runtime.linker.component_value(current.source), operations)
-        previous = self[key]
-        self._entity.items._put(replace(current, patch=operations))
-        self._entity._changed("component.set", key, old=previous, new=value)
-        self._entity.runtime._composition_changed(current.id)
-
-    def __getitem__(self, key):
-        self._entity._check()
-        return self._values[key]
-
-    def __contains__(self, key):
-        self._entity._check()
-        return (Component, key) in self._entity.items._names
-
-    def __setitem__(self, key, value):
-        self._entity._check()
-        if not isinstance(key, str) or not key:
-            raise ValueError("Component names must be nonempty strings")
-        previous = self._values.get(key, ABSENT)
-        self._values[key] = value
-        self._entity._changed("component.set", key, old=previous, new=value)
-        self._entity.runtime._composition_changed(self.item(key).id)
-
-    def __delitem__(self, key):
-        self._entity._check()
-        identity = self.item(key).id
-        try:
-            previous = self._values[key]
-        except (KeyError, TypeError, ValueError):
-            previous = ABSENT
-        del self._values[key]
-        self._entity._changed("component.remove", key, old=previous)
-        self._entity.runtime._composition_changed(identity)
-
-    def clear(self):
-        for key in tuple(self):
-            del self[key]
-
-    def __iter__(self):
-        self._entity._check()
-        return iter(tuple(self._values))
-
-    def __len__(self):
-        self._entity._check()
-        return len(self._values)
-
-    def touch(self, key):
-        """Notify observers after externally mutating an arbitrary object."""
-        self._entity._changed("component.mutate", key, new=self[key])
-        self._entity.runtime._composition_changed(self.item(key).id)
-
-    @contextmanager
-    def edit(self, key):
-        """Edit a deep copy and commit once, only on successful exit."""
-        value = deepcopy(self[key])
-        yield value
-        self[key] = value
 
 
 class Tags(MutableSet):
@@ -197,7 +94,7 @@ class Relations(MutableMapping):
 class Entity:
     __slots__ = (
         "_runtime", "_id", "_alive", "_destroying", "_items",
-        "_components", "_tags", "_relations", "_systems", "_scripts",
+        "_tags", "_relations", "_systems", "_scripts",
     )
 
     def __init__(self, runtime, identity):
@@ -209,7 +106,6 @@ class Entity:
         object.__setattr__(self, "_alive", True)
         object.__setattr__(self, "_destroying", False)
         object.__setattr__(self, "_items", Items(self))
-        object.__setattr__(self, "_components", Components(self))
         object.__setattr__(self, "_tags", Tags(self))
         object.__setattr__(self, "_relations", Relations(self))
         object.__setattr__(self, "_systems", Systems(self))
@@ -218,7 +114,6 @@ class Entity:
     id = property(lambda self: self._id)
     alive = property(lambda self: self._alive)
     runtime = property(lambda self: self._runtime)
-    components = property(lambda self: self._components)
     tags = property(lambda self: self._tags)
     relations = property(lambda self: self._relations)
     systems = property(lambda self: self._systems)
@@ -270,9 +165,9 @@ class Entity:
 
     def __getattr__(self, name):
         try:
-            return self.components[name]
+            return self.items.require_value(name)
         except KeyError:
-            if name in self.components:
+            if self.items.has_value(name):
                 raise
             raise AttributeError(name) from None
 
@@ -280,15 +175,15 @@ class Entity:
         if name == "parent":
             type(self).parent.fset(self, value)
         elif name.startswith("_") or hasattr(type(self), name):
-            raise AttributeError(f"{name} is reserved; use components[{name!r}]")
+            raise AttributeError(f"{name} is reserved; use items.set_value({name!r}, value)")
         else:
-            self.components[name] = value
+            self.items.set_value(name, value)
 
     def __delattr__(self, name):
         if name.startswith("_") or hasattr(type(self), name):
             raise AttributeError(f"{name} is reserved")
         try:
-            del self.components[name]
+            self.items.remove_value(name)
         except KeyError:
             raise AttributeError(name) from None
 
@@ -369,8 +264,8 @@ class Entity:
 
     def inherit(self, key, default=_MISSING):
         for entity in (self,) + self.ancestors:
-            if key in entity.components:
-                return entity.components[key]
+            if entity.items.has_value(key):
+                return entity.items.require_value(key)
         if default is _MISSING:
             raise KeyError(key)
         return default
@@ -402,7 +297,7 @@ class Entity:
 
 def _matches_requirement(entity, requirement):
     if isinstance(requirement,str):
-        return requirement in entity.components
+        return entity.items.has_value(requirement)
     from .systems import SystemDefinition
     from .assets import AssetRef
     if isinstance(requirement,(tuple,list)):
@@ -426,7 +321,7 @@ def _matches_requirement(entity, requirement):
             except ValueError:
                 pass
         return False
-    return requirement in entity.components
+    return entity.items.has_value(requirement)
 
 
 def _matches(entity, components, tags):
@@ -508,13 +403,26 @@ class Runtime:
                 value = ABSENT
             self.changes.publish("component.mutate", owner, item.name, new=value)
 
-    def create(self, *, identity=None, parent=None, tags=(), components=None, **values):
+    def create(self, *, identity=None, parent=None, tags=(), items=(), **values):
+        if 'components' in values:
+            raise TypeError('create no longer accepts components; supply typed items')
         if parent is not None:
             self._validate(parent)
             if parent._destroying:
                 raise RuntimeError("Cannot create children during parent destruction")
-        data = dict(components or {})
-        data.update(values)
+        data = dict(values)
+        if hasattr(items, 'items'):
+            pairs = tuple(items.items())
+            if any(UUID(str(key)) != item.id for key, item in pairs):
+                raise ValueError('Item dictionary keys must match record UUIDs')
+            declarations = tuple(item for _, item in pairs)
+        else:
+            declarations = tuple(items)
+        ids = [item.id for item in declarations]
+        if any(not isinstance(uid, UUID) for uid in ids):
+            raise TypeError('Item identities must be UUIDs')
+        if len(set(ids)) != len(ids) or any(uid in self.linker.objects for uid in ids):
+            raise ValueError('Duplicate item UUID in entity creation')
         tags = (tags,) if isinstance(tags, str) else tuple(tags)
         if any(not isinstance(k, str) or not k for k in data):
             raise ValueError("Component names must be nonempty strings")
@@ -526,14 +434,29 @@ class Runtime:
                 raise ValueError(f"Entity with id {identity} already exists")
         else:
             identity = uuid4()
+        if identity in ids:
+            raise ValueError('An entity and its items must have distinct UUIDs')
         entity = Entity(self, identity)
         self.linker.register(entity)
-        entity._components._values.update(data)
+        for name, value in data.items():
+            entity.items._put(Component(name, value))
         entity._tags._values.update(tags)
         object.__setattr__(entity, "_parent", parent)
         if parent is not None:
             parent._children.append(entity)
         self._entities[entity.id] = entity
+        try:
+            # Sources are registered before inherited declarations are linked.
+            ordered = sorted(declarations, key=lambda item: isinstance(item, InheritedComponent))
+            for item in ordered:
+                entity.items.add(item)
+            if declarations:
+                prefix = [uid for uid in entity.items._records if uid not in ids]
+                entity.items._records = {uid: entity.items._records[uid] for uid in prefix + ids}
+                entity.items._reindex_order()
+        except Exception:
+            self.destroy(entity)
+            raise
         entity._changed("entity.create")
         return entity
 
@@ -545,7 +468,7 @@ class Runtime:
                 return self._entities[UUID(identity)]
             except ValueError:
                 for entity in self._entities.values():
-                    if entity.components.get("name") == identity:
+                    if entity.items.get_value("name") == identity:
                         return entity
                 raise KeyError(identity) from None
         return self._entities[UUID(str(identity))]
@@ -598,7 +521,7 @@ class Runtime:
                                 is_p = False
                                 curr = ent
                                 while curr is not None:
-                                    if "paused" in curr.tags or (curr.components.get("paused") is True):
+                                    if "paused" in curr.tags or (curr.items.get_value("paused") is True):
                                         is_p = True
                                         break
                                     if curr in pause_cache:
