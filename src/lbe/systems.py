@@ -56,7 +56,7 @@ class Assets:
     def resolve(self, key):
         """Resolve a path, UUID, or AssetRef to an asset object or resolved Path."""
         from uuid import UUID
-        from .assets import AssetRef
+        from .assets import AssetRef, TextureAsset, ASSET_EXTENSIONS
         if isinstance(key, AssetRef):
             key = key.id
         if isinstance(key, (UUID, str)):
@@ -75,6 +75,9 @@ class Assets:
                 if not p.exists():
                     raise FileNotFoundError(p)
                 if p.suffix.lower() != '.py':
+                    if ASSET_EXTENSIONS.get(p.suffix.lower()) == 'image':
+                        entry = self.registry.get(uid)
+                        return TextureAsset(uid, 'image', entry['name'], self.registry)
                     return p
                 definition=self.system(p)
                 if definition.asset_id != uid:

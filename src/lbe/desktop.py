@@ -3,6 +3,7 @@
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
+from math import isfinite
 import sys
 
 from .space import world_to_screen
@@ -58,6 +59,11 @@ class Graphics:
         self._used = set()
         self._counter = 0
         self._view = None
+        self._textures = {}
+        self._frame_images = {}
+        self._texture_used = set()
+        self._clip_groups = {}
+        self._retired_textures = []
 
     def _group(self, layer):
         return self._groups[int(layer)]
@@ -65,6 +71,117 @@ class Graphics:
     def begin(self):
         self._used.clear()
         self._counter = 0
+        self._frame_images.clear()
+        self._texture_used.clear()
+
+    def _image(self, reference):
+        import pyglet
+        from .assets import TextureAsset
+        token = (id(reference.registry), reference.id) if isinstance(reference, TextureAsset) else str(reference)
+        if token in self._frame_images:
+            result = self._frame_images[token]
+            if isinstance(result, Exception):
+                raise result
+            return result
+        try:
+            path = reference.path if isinstance(reference, TextureAsset) else Path(reference).resolve()
+            stat = path.stat()
+            signature = stat.st_mtime_ns, stat.st_size, stat.st_ctime_ns
+            previous = self._textures.get(path)
+            if previous is None or previous[0] != signature:
+                image = pyglet.image.load(str(path)).get_texture()
+                image.anchor_x, image.anchor_y = image.width / 2, image.height / 2
+                self._textures[path] = signature, image
+                if previous is not None:
+                    # SpriteGroup hashes include texture.id. Keep old IDs alive
+                    # until every sprite migrates and Batch prunes empty groups.
+                    self._retired_textures.append(previous[1])
+            image = self._textures[path][1]
+            self._texture_used.add(path)
+            self._frame_images[token] = image
+            return image
+        except Exception as error:
+            failure = ValueError(f'Cannot load texture {reference}: {error}')
+            self._frame_images[token] = failure
+            raise failure from error
+
+    def _sprite_group(self, layer):
+        if self._view is None:
+            return self._group(layer)
+        import pyglet
+        from pyglet import gl
+        viewport = self._view[1]
+        key = int(layer), id(viewport)
+        if key not in self._clip_groups:
+            window = self.window
+
+            class ViewportGroup(pyglet.graphics.Group):
+                def set_state(self):
+                    self.enabled = gl.glIsEnabled(gl.GL_SCISSOR_TEST)
+                    self.previous = (gl.GLint * 4)()
+                    gl.glGetIntegerv(gl.GL_SCISSOR_BOX, self.previous)
+                    # Logical window coordinates differ from framebuffer pixels on HiDPI.
+                    fw, fh = window.get_framebuffer_size()
+                    sx, sy = fw / window.width, fh / window.height
+                    x = int(max(0, viewport.x) * sx)
+                    y = int(max(0, window.height - viewport.y - viewport.h) * sy)
+                    right = int(min(window.width, viewport.x + viewport.w) * sx)
+                    top = int(min(window.height, window.height - viewport.y) * sy)
+                    if self.enabled:
+                        px, py, pw, ph = self.previous
+                        x, y, right, top = max(x, px), max(y, py), min(right, px + pw), min(top, py + ph)
+                    gl.glEnable(gl.GL_SCISSOR_TEST)
+                    gl.glScissor(x, y, max(0, right - x), max(0, top - y))
+
+                def unset_state(self):
+                    gl.glScissor(*self.previous)
+                    if not self.enabled:
+                        gl.glDisable(gl.GL_SCISSOR_TEST)
+
+                def __eq__(self, other):
+                    return self is other
+
+                def __hash__(self):
+                    return id(self)
+
+            self._clip_groups[key] = ViewportGroup(parent=self._group(layer))
+        return self._clip_groups[key]
+
+    def sprite(self, texture, x, y, w=None, h=None, *, color=(255, 255, 255, 255),
+               rotation=0, key=None, layer=1):
+        """Draw a UUID-resolved texture, sharing GPU images and pooled sprites.
+
+        Coordinates match rect(); rotation is clockwise about the sprite center.
+        Images refresh after edits/moves and are released when no longer drawn.
+        """
+        import pyglet
+        image = self._image(texture)
+        w, h = image.width if w is None else w, image.height if h is None else h
+        if any(not isinstance(v, (int, float)) or not isfinite(v) for v in (x, y, w, h, rotation)) or w < 0 or h < 0:
+            raise ValueError('Sprite geometry requires finite coordinates and nonnegative dimensions')
+        if not isinstance(color, (tuple, list)) or len(color) not in (3, 4) or any(type(c) is not int or not 0 <= c <= 255 for c in color):
+            raise ValueError('Sprite color requires RGB/RGBA integers from 0 to 255')
+        if not w or not h:
+            return
+        if self._view is not None:
+            camera, viewport = self._view
+            x, y = world_to_screen(camera, viewport, x, y + h)
+            w, h = w * camera.zoom, h * camera.zoom
+        identity = self._identity('sprite', key, layer)
+        obj = self._pool.get(identity)
+        group = self._sprite_group(layer)
+        if obj is None:
+            obj = pyglet.sprite.Sprite(image, batch=self.batch, group=group, subpixel=True)
+            self._pool[identity] = obj
+        else:
+            if obj.image is not image:
+                obj.image = image
+            if obj.group is not group:
+                obj.group = group
+        obj.update(x=x + w / 2, y=self.window.height - y - h / 2,
+                   scale_x=w / image.width, scale_y=h / image.height, rotation=rotation)
+        obj.color = color[:3]
+        obj.opacity = color[3] if len(color) == 4 else 255
 
     def _identity(self, kind, key, layer):
         self._counter += 1
@@ -148,11 +265,27 @@ class Graphics:
         for key in self._pool.keys() - self._used:
             self._pool.pop(key).delete()
         self.batch.draw()
+        for path in self._textures.keys() - self._texture_used:
+            self._textures.pop(path)[1].delete()
+        for image in self._retired_textures:
+            image.delete()
+        self._retired_textures.clear()
 
     def close(self):
+        import pyglet
         for obj in self._pool.values():
             obj.delete()
         self._pool.clear()
+        self.batch = pyglet.graphics.Batch()
+        for _, image in self._textures.values():
+            image.delete()
+        self._textures.clear()
+        self._frame_images.clear()
+        self._clip_groups.clear()
+        for image in self._retired_textures:
+            image.delete()
+        self._retired_textures.clear()
+
 
 
 def launch(build, *, headless=False, frames=None, screenshot=None):
@@ -315,6 +448,10 @@ def launch(build, *, headless=False, frames=None, screenshot=None):
         mods = (key.MOD_CTRL if ctrl else 0) | (key.MOD_SHIFT if shift else 0) | (key.MOD_ALT if alt else 0)
         input_state.x, input_state.y = x, window.height - y
         input_state.pending.append(("motion", x, window.height - y, mods))
+
+    @window.event
+    def on_file_drop(x, y, paths):
+        input_state.pending.append(('file_drop', tuple(paths)))
 
     @window.event
     def on_mouse_scroll(x, y, scroll_x, scroll_y):

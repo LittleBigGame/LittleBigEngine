@@ -3,6 +3,7 @@
 from lbe.space import world_bounds
 
 invalid_targets = set()
+invalid_textures = set()
 
 
 def draw():
@@ -67,9 +68,30 @@ def draw():
 
         # The system orchestrates; each target script call is backend-isolated.
         drawn_ids = set()
+        for target in query('x', 'y', 'w', 'h', 'sprite', recursive=True):
+            try:
+                box = world_bounds(target)
+                if box is None:
+                    raise ValueError('Invalid texture geometry')
+                x, y, right, top = box
+                if right < view_min_x or x > view_max_x or top < view_min_y or y > view_max_y:
+                    drawn_ids.add(target.id)
+                    continue
+                graphics.sprite(assets.resolve(target.sprite), x, y, right - x, top - y,
+                                color=target.components.get('tint', (255, 255, 255, 255)),
+                                rotation=target.components.get('rotation', 0),
+                                key=target.id, layer=target.components.get('layer', 1))
+                drawn_ids.add(target.id)
+                invalid_textures.discard(target.id)
+            except (OSError, KeyError, TypeError, ValueError) as error:
+                if target.id not in invalid_textures:
+                    events.emit('texture.error', target, str(error))
+                    invalid_textures.add(target.id)
         drawing = assets.get("f084e424-d2d9-5fd1-8624-63580396274c")
         if drawing:
             for target in query(drawing, *drawing.components, recursive=True):
+                if target.id in drawn_ids:
+                    continue
                 target.run(drawing)
                 drawn_ids.add(target.id)
 
@@ -96,6 +118,7 @@ def draw():
                     events.emit('render.error', target, str(error))
                     invalid_targets.add(target.id)
         invalid_targets.intersection_update(e.id for e in runtime.entities)
+        invalid_textures.intersection_update(e.id for e in runtime.entities)
 
         selected = entity.relations.get("selection")
         outline = assets.get("dbc0d180-5a28-56a1-bc9c-85d63174e431")

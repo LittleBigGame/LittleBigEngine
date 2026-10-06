@@ -1,6 +1,6 @@
 """Asset registry, stable UUID handles, and asset reference primitives."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import os
 import ast
 from functools import lru_cache
@@ -81,6 +81,23 @@ class AssetRef:
 
     def __repr__(self):
         return f"AssetRef(id={self.id!r}, type={self.type!r}, name={self.name!r})"
+
+
+@dataclass(frozen=True)
+class TextureAsset(AssetRef):
+    """Lazy texture handle: UUID is stable; its current project path is derived.
+
+    No decoder or graphics context is needed to resolve/serialize this handle.
+    Native image loading and GPU ownership belong to Graphics.
+    """
+    registry: object = field(default=None, repr=False, compare=False)
+
+    @property
+    def path(self):
+        path = self.registry.get_path(self.id) if self.registry is not None else None
+        if path is None or not path.is_file():
+            raise FileNotFoundError(f'Missing texture {self.id}')
+        return path
 
 
 class AssetRegistry:

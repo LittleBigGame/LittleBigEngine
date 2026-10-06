@@ -486,6 +486,12 @@ class UI:
     def dispatch(self, event):
         from .menus import dispatch_menu
         kind = event[0]
+        if kind == 'file_drop':
+            self.cancel_interaction()
+            callback = self.root.components.get('on_file_drop')
+            if callback:
+                callback(event[1])
+            return
         if kind == 'cancel':
             self.cancel_interaction()
             return
@@ -912,7 +918,7 @@ class UI:
                     if etype in ("system", "script"):
                         pill_label = f" {reg.icon(uid_str)} {entry['name']} "
                     elif etype == "image":
-                        pill_label = f" 🖼️ Image: {entry['name']} "
+                        pill_label = f" 🖼️ Texture: {entry['name']} "
                     elif etype == "audio":
                         pill_label = f" 🔊 Audio: {entry['name']} "
                     else:

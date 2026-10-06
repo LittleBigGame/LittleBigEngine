@@ -10,6 +10,7 @@ class RecordingGraphics:
     def __init__(self):
         self.rectangles = []
         self.texts = []
+        self.sprites = []
 
     @contextmanager
     def view(self, camera, viewport):
@@ -20,6 +21,9 @@ class RecordingGraphics:
 
     def text(self, *args, **kwargs):
         self.texts.append((args, kwargs))
+
+    def sprite(self, *args, **kwargs):
+        self.sprites.append((args, kwargs))
 
     def char_width(self, size=10):
         return 8.0
@@ -121,4 +125,3 @@ class SceneTests(unittest.TestCase):
         self.assertTrue(len(red_fills) >= 1)
         
         runtime.close()
-

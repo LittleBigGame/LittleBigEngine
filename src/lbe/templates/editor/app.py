@@ -1470,6 +1470,23 @@ def assign_entity_sprite(ent, item):
     message(f"Assigned sprite '{item['name']}' to {ent.components.get('name', ent.id)}")
 
 
+def import_textures(paths):
+    """Native file drops copy images into the project; source files stay untouched."""
+    from lbe.assets import ASSET_EXTENSIONS
+    for source in paths:
+        path = Path(source)
+        if ASSET_EXTENSIONS.get(path.suffix.lower()) != 'image':
+            message(f'Not a supported texture image: {path.name}')
+            continue
+        try:
+            ref = state.files.import_file(path, state.project / 'textures' / path.name,
+                                          save=save_editor_project)
+            locate_in_file_explorer(ref.id)
+            message(f'Imported texture {path.name}; drag it into code or onto an entity')
+        except (OSError, ValueError) as error:
+            message(f'Texture import failed: {error}')
+
+
 
 
 def refresh_project_files(*args, **kwargs):
@@ -1618,6 +1635,7 @@ def bind_actions():
     for button in state.system_detach_buttons:
         button.components.pop("system_key", None)
     state.app.components["on_asset_drop"] = on_asset_drop
+    state.app.components['on_file_drop'] = import_textures
     state.app.components["on_entity_drop"] = on_entity_drop
     if hasattr(state, "tab_hierarchy") and hasattr(state, "tab_files"):
         state.tab_hierarchy.action = lambda: switch_left_tab("hierarchy")
@@ -2092,7 +2110,8 @@ def frame_game():
     group = state.dock_tree.find_tab_group_with_panel('viewport')
     group.active = group.panels.index('viewport')
     layout()
-    boxes = [world_bounds(e) for e in state.game.descendants if e.components.get('color') is not None]
+    boxes = [world_bounds(e) for e in state.game.descendants
+             if e.components.get('color') is not None or e.components.get('sprite') is not None]
     boxes = [box for box in boxes if box is not None]
     if not boxes:
         message('No drawable game entities to frame')

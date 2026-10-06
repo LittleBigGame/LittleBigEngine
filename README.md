@@ -40,6 +40,8 @@ python -m lbe --template counter
 ```
 
 See [UI and application scripting](docs/ui.md) to build your own application.
+See [Project textures](docs/textures.md) to import images, use UUID texture pills,
+and draw camera-aware sprites.
 
 ## Test
 

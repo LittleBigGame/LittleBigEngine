@@ -17,11 +17,13 @@ def recover_file_operation(directory):
     if not journal.exists():
         return
     record = json.loads(journal.read_text(encoding='utf-8'))
-    if record.get('phase') not in ('prepared', 'committed') or record.get('operation') not in ('relocate', 'delete'):
+    if record.get('phase') not in ('prepared', 'committed') or record.get('operation') not in ('relocate', 'delete', 'import'):
         raise ValueError('Invalid file-operation recovery record')
     source, destination = (directory / record[key] for key in ('source', 'destination'))
     if any(not path.resolve().is_relative_to(directory) for path in (source, destination)):
         raise ValueError('Invalid file-operation recovery path')
+    if record['operation'] == 'import' and (source.relative_to(directory).parts[0] != '.lbe-import' or source == destination):
+        raise ValueError('Invalid import staging path')
     if record['phase'] == 'prepared':
         if destination.exists() and not source.exists():
             destination.rename(source)
@@ -32,6 +34,8 @@ def recover_file_operation(directory):
             write_json(project, record['project'])
     elif record['operation'] == 'delete' and not record.get('retain') and destination.exists():
         shutil.rmtree(destination) if destination.is_dir() else destination.unlink()
+    if record['operation'] == 'import':
+        source.unlink(missing_ok=True)
     journal.unlink()
 
 
@@ -114,6 +118,44 @@ class ProjectFiles:
             self.runtime.assets.invalidate(new_path)
         self._record(('relocate', source, destination), save)
         return destination
+
+    def import_file(self, source, destination, *, save):
+        """Copy an external file into the project without overwriting existing files.
+
+        Identity, bytes and project state commit together. Undo retains the imported
+        UUID and moves the copy to recoverable project trash, never the original.
+        """
+        from uuid import uuid4
+        source = Path(source).resolve()
+        destination = self._path(destination)
+        if not source.is_file():
+            raise FileNotFoundError(source)
+        if destination.exists():
+            raise FileExistsError(destination)
+        recover_file_operation(self.directory)
+        registry = self.runtime.assets.registry
+        before = registry.to_dict()
+        staging = self.directory / '.lbe-import' / str(uuid4()) / source.name
+        staging.parent.mkdir(parents=True)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            shutil.copy2(source, staging)
+            journal = self._prepare(staging, destination, 'import')
+            try:
+                if destination.exists():
+                    raise FileExistsError(destination)
+                staging.rename(destination)
+                registry.register(destination)
+                save()
+                self._commit(journal)
+            except Exception:
+                registry.from_dict(before)
+                recover_file_operation(self.directory)
+                raise
+        finally:
+            staging.unlink(missing_ok=True)
+        self.record_create(destination, save=save)
+        return registry.get_ref(destination)
 
     def delete(self, path, *, save):
         source = self._path(path)
