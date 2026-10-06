@@ -217,7 +217,7 @@ def serialize_entity(entity, *, project_dir=None, on_unsupported="error", known_
         if project_dir is not None and not definition.path.startswith("<"):
             try:
                 path = path.resolve().relative_to(Path(project_dir).resolve())
-                declaration = {"path": path.as_posix()}
+                declaration = {"path": path.as_posix(), "active_source": definition.source}
             except ValueError:
                 declaration = {"source": definition.source, "path": definition.path}
         else:
@@ -229,7 +229,7 @@ def serialize_entity(entity, *, project_dir=None, on_unsupported="error", known_
         path=Path(definition.path)
         try:
             relative=path.resolve().relative_to(Path(project_dir).resolve())
-            declaration={'path':relative.as_posix()}
+            declaration={'path':relative.as_posix(), 'active_source':definition.source}
         except (ValueError,TypeError):
             declaration={'source':definition.source,'path':definition.path}
         data['scripts'][name]=declaration
@@ -345,8 +345,8 @@ def activate_entities(entities, runtime, *, project_dir=None):
                     path = (Path(project_dir) / declaration["path"]).resolve()
                     if not path.is_relative_to(Path(project_dir).resolve()):
                         raise ValueError("System path must be inside the project")
-                    definition = runtime.assets.system(path)
-                instance = entity.systems.attach(name, definition)
+                    definition = restored_definition(path, declaration, runtime)
+                instance = attach_restored(entity.systems, name, definition, declaration, runtime)
                 pending.systems.get(entity.id, {}).pop(name, None)
                 if not instance.running:
                     pending.diagnostics.extend(instance.errors)
@@ -364,10 +364,10 @@ def activate_entities(entities, runtime, *, project_dir=None):
                     path=(Path(project_dir)/declaration['path']).resolve()
                     if not path.is_relative_to(Path(project_dir).resolve()):
                         raise ValueError('Script path must stay inside the project')
-                    definition=SystemDefinition.from_file(path)
+                    definition=restored_definition(path, declaration, runtime)
                     from dataclasses import replace
                     definition=replace(definition,asset_id=UUID(identity))
-                instance=entity.scripts.attach(definition)
+                instance=attach_restored(entity.scripts, identity, definition, declaration, runtime)
                 pending.scripts[entity.id].pop(identity,None)
                 if not instance.running:
                     pending.diagnostics.extend(instance.errors)
@@ -380,6 +380,42 @@ def activate_entities(entities, runtime, *, project_dir=None):
                 entity.systems.move(name, index)
         finally:
             pending.loading -= 1
+
+
+def restored_definition(path, declaration, runtime):
+    """Compile disk edits, recovering the saved revision if compilation fails."""
+    from .systems import SystemDefinition
+    path.read_text(encoding='utf-8')  # A deleted source must remain missing.
+    active = declaration.get('active_source')
+    try:
+        return runtime.assets.system(path)
+    except (SyntaxError, ValueError, TypeError) as error:
+        if active is None:
+            raise
+        restoration(runtime).diagnostics.append(Diagnostic(
+            'project.source', f'{path}: {error}; restored saved active revision; disk edit retained'))
+        return SystemDefinition(active, str(path))
+
+
+def attach_restored(collection, name, definition, declaration, runtime):
+    """Recover startup failures without leaving effects from the failed revision."""
+    from .checkpoint import RuntimeCheckpoint
+    from .scripts import Scripts
+    from dataclasses import replace
+    active = declaration.get('active_source')
+    checkpoint = RuntimeCheckpoint(runtime) if active is not None and active != definition.source else None
+    def attach(candidate):
+        return collection.attach(candidate) if isinstance(collection, Scripts) else collection.attach(name, candidate)
+    instance = attach(definition)
+    if checkpoint is not None and not instance.running:
+        diagnostics = tuple(instance.errors)
+        instance._unsubscribe()
+        checkpoint.restore()
+        instance = attach(replace(definition, source=active))
+        restoration(runtime).diagnostics.extend(diagnostics)
+        restoration(runtime).diagnostics.append(Diagnostic(
+            'project.source', f'{definition.path}: restored saved active revision after startup failure; disk edit retained'))
+    return instance
 
 
 def resolve_references(entity, runtime):
@@ -543,6 +579,8 @@ def load_project(window, graphics, input_state, directory, *, template=None, ent
     save_last_project(directory)
     from .project_files import recover_file_operation
     recover_file_operation(directory)
+    from .source import recover_source_operation
+    recover_source_operation(directory)
     from .project_templates import recover_template_upgrade
     recover_template_upgrade(directory)
     if template is not None:

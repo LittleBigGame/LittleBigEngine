@@ -309,3 +309,20 @@ references. Their symbols come from top-level functions in the current source:
 The badge describes capabilities; it does not automatically attach a file or
 change how an existing attachment is scheduled. Functions inside classes or
 other functions do not count as module entry points.
+
+## Source save recovery
+
+Save / reload validates source and activates all attachments of that file as one
+operation. A compile, startup, or project-write failure restores the previous
+managed runtime state, source file and project save. The attempted text remains
+in the editor and is retained under `.lbe-drafts/` at the original relative path;
+the error reports its location. Successful activation still uses the editable
+project source and preserves UUID attachment identity.
+
+Project saves retain the active revision of file-backed systems and scripts.
+On reopening, external disk edits are attempted as usual. If compilation or
+startup fails, the saved active revision is recovered, the failure is reported,
+and the external edit remains on disk for correction.
+Missing/deleted source files remain missing and are reported for recovery.
+An interrupted save is recovered before project loading. External Python effects
+and unbounded script execution are outside this recovery guarantee.

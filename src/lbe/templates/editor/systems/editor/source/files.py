@@ -2,6 +2,7 @@
 import os
 from pathlib import Path
 import tempfile
+from lbe.source import activate_source
 from lbe.ui import INK
 from lbe.text import TextBuffer
 from lbe.menus import open_menu
@@ -200,23 +201,9 @@ def confirm_discard(action):
 
 def save():
     path = source_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', newline='\n', dir=path.parent, delete=False, suffix='.tmp') as stream:
-        stream.write(state.code.buffer.text)
-        temporary = Path(stream.name)
-    temporary.replace(path)
+    count = activate_source(state.runtime, state.project, path, state.code.buffer.text,
+                            save=save_editor_project)
     state._saved_source = (state.path_field.buffer.text, state.code.buffer.text)
-    definition = state.runtime.assets.system(path)
-    count = 0
-    for entity in state.runtime.entities:
-        for collection in (entity.systems, entity.scripts):
-            for name, instance in tuple(collection.items()):
-                if Path(instance.definition.path) == path:
-                    updated = collection.reload(name, definition)
-                    if updated.definition is not definition or not updated.running:
-                        raise RuntimeError(f"{name}: {(updated.errors[-1].message if updated.errors else 'reload failed')}")
-                    count += 1
-    save_editor_project()
     message(f'Saved {path.name}; reloaded {count} attachment(s)')
 
 def attach():
