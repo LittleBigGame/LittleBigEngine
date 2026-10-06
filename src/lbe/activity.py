@@ -77,8 +77,8 @@ class ActivityLog:
         editor = 'ui' in entity.tags._values or 'editor' in entity.tags._values
         detail = change.key or ''
         if change.kind == 'entity.create':
-            detail = ('components: '+snapshot(entity.components._values)
-                      +'; tags: '+snapshot(entity.tags._values)
+            detail = ('components: '+snapshot(dict(entity.components._values))
+                      +'; tags: '+snapshot(set(entity.tags._values))
                       +'; parent: '+snapshot(entity._parent))
         if change.kind.startswith(('component.', 'relation.', 'tag.')) or change.kind == 'hierarchy.parent':
             old = 'unknown prior value' if change.kind == 'component.mutate' else change.old
