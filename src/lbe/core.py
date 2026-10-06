@@ -58,10 +58,15 @@ class Components(MutableMapping):
         previous = self[key]
         self._entity.items._put(replace(current, patch=operations))
         self._entity._changed("component.set", key, old=previous, new=value)
+        self._entity.runtime._composition_changed(current.id)
 
     def __getitem__(self, key):
         self._entity._check()
         return self._values[key]
+
+    def __contains__(self, key):
+        self._entity._check()
+        return (Component, key) in self._entity.items._names
 
     def __setitem__(self, key, value):
         self._entity._check()
@@ -70,11 +75,22 @@ class Components(MutableMapping):
         previous = self._values.get(key, ABSENT)
         self._values[key] = value
         self._entity._changed("component.set", key, old=previous, new=value)
+        self._entity.runtime._composition_changed(self.item(key).id)
 
     def __delitem__(self, key):
         self._entity._check()
-        previous = self._values.pop(key)
+        identity = self.item(key).id
+        try:
+            previous = self._values[key]
+        except (KeyError, TypeError, ValueError):
+            previous = ABSENT
+        del self._values[key]
         self._entity._changed("component.remove", key, old=previous)
+        self._entity.runtime._composition_changed(identity)
+
+    def clear(self):
+        for key in tuple(self):
+            del self[key]
 
     def __iter__(self):
         self._entity._check()
@@ -87,6 +103,7 @@ class Components(MutableMapping):
     def touch(self, key):
         """Notify observers after externally mutating an arbitrary object."""
         self._entity._changed("component.mutate", key, new=self[key])
+        self._entity.runtime._composition_changed(self.item(key).id)
 
     @contextmanager
     def edit(self, key):
@@ -253,6 +270,8 @@ class Entity:
         try:
             return self.components[name]
         except KeyError:
+            if name in self.components:
+                raise
             raise AttributeError(name) from None
 
     def __setattr__(self, name, value):
@@ -469,6 +488,23 @@ class Runtime:
         if not isinstance(entity, Entity) or entity.runtime is not self:
             raise ValueError("Entity must belong to this runtime")
         entity._check()
+
+    def _composition_changed(self, identity):
+        """Invalidate derived consumers through normal change observations."""
+        if identity not in self.linker._dependents:
+            return
+        for uid in self.linker.dependents(identity):
+            item = self.linker.objects.get(uid)
+            if not isinstance(item, InheritedComponent):
+                continue
+            owner = self._entities.get(self.linker.owners.get(uid))
+            if owner is None or not owner.alive or owner._destroying:
+                continue
+            try:
+                value = self.linker.component_value(uid)
+            except (KeyError, ValueError, TypeError):
+                value = ABSENT
+            self.changes.publish("component.mutate", owner, item.name, new=value)
 
     def create(self, *, identity=None, parent=None, tags=(), components=None, **values):
         if parent is not None:

@@ -160,7 +160,7 @@ def inspector_sync():
     ent_display = ent_name or "Entity"
     show_id = (ip.y + 74 <= max_bottom)
     put(state.identity_label, visible=show_id, x=ip.x + 12, y=ip.y + 56, w=max(30, ip.w - 24), h=18,
-        text=f'🔷 Entity: {ent_display} | {len(entity.items)} items')
+        text=f'🔷 Entity: {ent_display}')
     state.identity_label.on_click = lambda *args: open_identity_menu(entity)
 
     # Hide removed action buttons and chip bar
@@ -497,7 +497,7 @@ def inspector_sync():
         # Metadata
         show_meta = (cur_y + 18 <= max_bottom)
         put(state.metadata, visible=show_meta, x=ip.x + 12, y=cur_y, w=max(0, ip.w - 24), h=18,
-            text=f'{len(children)} children | {len(relations)} relations')
+            text=f'{len(entity.items)} items | {len(children)} children | {len(relations)} relations')
         if show_meta:
             cur_y += 22
 

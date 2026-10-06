@@ -432,8 +432,10 @@ class Systems(MutableMapping):
             raise ValueError(f"System {new_name!r} is already attached")
         definition = SystemDefinition(instance.definition.source, str(path), instance.definition.asset_id)
         self._entity.items._names.pop((SystemInstance, name))
+        self._entity.items._by_category.get(SystemInstance, {}).pop(name, None)
         instance.name = new_name
         self._entity.items._names[SystemInstance, new_name] = instance.id
+        self._entity.items._by_category.setdefault(SystemInstance, {})[new_name] = instance.id
         instance.definition = definition
         instance.namespace["__file__"] = str(path)
         self._entity._changed("system.relocate", new_name)

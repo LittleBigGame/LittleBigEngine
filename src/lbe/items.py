@@ -85,10 +85,11 @@ class Items(Mapping):
         self.entity = entity
         self._records = {}
         self._names = {}
+        self._by_category = {}
 
     def __getitem__(self, identity):
         self.entity._check()
-        return self._records[UUID(str(identity))]
+        return self._records[identity if isinstance(identity, UUID) else UUID(str(identity))]
 
     def __iter__(self):
         self.entity._check()
@@ -100,10 +101,12 @@ class Items(Mapping):
 
     @staticmethod
     def category(item):
-        from .scripts import ScriptInstance
-        from .systems import SystemInstance
         if isinstance(item, (Component, InheritedComponent)):
             return Component
+        if isinstance(item, (Tag, Relation, Parent)):
+            return type(item)
+        from .scripts import ScriptInstance
+        from .systems import SystemInstance
         if isinstance(item, ScriptInstance):
             return ScriptInstance
         if isinstance(item, SystemInstance):
@@ -114,6 +117,14 @@ class Items(Mapping):
         return self._records[self._names[category, name]]
 
     def _put(self, item):
+        old = self._records.get(item.id)
+        if (old is not None and type(old) is type(item) and old.name == item.name
+                and isinstance(item, (Component, InheritedComponent, Tag, Relation, Parent))
+                and (not isinstance(item, InheritedComponent) or old.source == item.source)):
+            # Value/patch edits do not need to rebuild unchanged identity indexes.
+            self._records[item.id] = item
+            self.entity.runtime.linker.objects[item.id] = item
+            return
         category = self.category(item)
         key = category, item.name
         previous_id = self._names.get(key)
@@ -122,13 +133,19 @@ class Items(Mapping):
             raise ValueError(f"Duplicate object UUID: {item.id}")
         if previous_id is not None and previous_id != item.id:
             self._drop(previous_id)
+        old = self._records.get(item.id)
+        if old is not None and old.name != item.name:
+            self._names.pop((category, old.name), None)
+            self._by_category.get(category, {}).pop(old.name, None)
         self.entity.runtime.linker.register(item, owner=self.entity.id)
         self._records[item.id] = item
         self._names[key] = item.id
+        self._by_category.setdefault(category, {})[item.name] = item.id
 
     def _drop(self, identity):
         item = self._records.pop(identity)
         self._names.pop((self.category(item), item.name), None)
+        self._by_category.get(self.category(item), {}).pop(item.name, None)
         self.entity.runtime.linker.unregister(identity)
         return item
 
@@ -201,6 +218,8 @@ class NamedValues(MutableMapping):
     def __getitem__(self, name):
         item = self.record(name)
         if self.category is Component:
+            if isinstance(item, Component):
+                return item.value
             return self.entity.runtime.linker.component_value(item.id)
         if self.category is Relation:
             return self.entity.runtime.resolve(item.target)
@@ -227,11 +246,13 @@ class NamedValues(MutableMapping):
         self.entity.items._drop(self.record(name).id)
 
     def __iter__(self):
-        return iter(tuple(item.name for item in self.entity.items._records.values()
-                          if Items.category(item) is self.category))
+        return iter(tuple(self.entity.items._by_category.get(self.category, {})))
 
     def __len__(self):
-        return sum(1 for _ in self)
+        return len(self.entity.items._by_category.get(self.category, {}))
+
+    def __contains__(self, name):
+        return (self.category, name) in self.entity.items._names
 
     def reorder(self, pairs):
         ids = [value.id for _, value in pairs]
@@ -239,6 +260,7 @@ class NamedValues(MutableMapping):
         slots = iter(ids)
         order = [next(slots) if identity in ids else identity for identity in records]
         self.entity.items._records = {identity: records[identity] for identity in order}
+        self.entity.items._by_category[self.category] = {records[uid].name: uid for uid in ids}
 
 
 class TagValues(MutableSet):

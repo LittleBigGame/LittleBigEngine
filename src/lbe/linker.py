@@ -17,6 +17,7 @@ class Linker:
         self.objects = {}
         self.owners = {}
         self.dependencies = {}
+        self._dependents = {}
         self._slots = []
         self._generations = []
         self._free = []
@@ -34,6 +35,7 @@ class Linker:
         self.objects[identity] = item
         if owner is not None:
             self.owners[identity] = owner
+        self._forget_dependencies(identity)
         from .items import InheritedComponent
         if isinstance(item, InheritedComponent):
             self.dependencies[identity] = {item.source}
@@ -41,11 +43,21 @@ class Linker:
             self.dependencies[identity] = {reference.id for reference in item.definition.references}
         else:
             self.dependencies.pop(identity, None)
+        for source in self.dependencies.get(identity, ()):
+            self._dependents.setdefault(source, set()).add(identity)
+
+    def _forget_dependencies(self, identity):
+        for source in self.dependencies.pop(identity, ()):
+            dependents = self._dependents.get(source)
+            if dependents is not None:
+                dependents.discard(identity)
+                if not dependents:
+                    self._dependents.pop(source, None)
 
     def unregister(self, identity):
         self.objects.pop(identity, None)
         self.owners.pop(identity, None)
-        self.dependencies.pop(identity, None)
+        self._forget_dependencies(identity)
         handle = self._handles.pop(identity, None)
         if handle is not None:
             self._slots[handle.slot] = None
@@ -53,7 +65,7 @@ class Linker:
             self._free.append(handle.slot)
 
     def resolve(self, identity, expected=None):
-        identity = UUID(str(identity))
+        identity = identity if isinstance(identity, UUID) else UUID(str(identity))
         item = self.objects[identity]
         if expected is not None and not isinstance(item, expected):
             label = '/'.join(t.__name__ for t in expected) if isinstance(expected, tuple) else expected.__name__
@@ -61,7 +73,7 @@ class Linker:
         return item
 
     def handle(self, identity):
-        return self._handles[UUID(str(identity))]
+        return self._handles[identity if isinstance(identity, UUID) else UUID(str(identity))]
 
     def resolve_handle(self, handle):
         if (not isinstance(handle, Handle) or handle.scope != self.scope or handle.slot < 0 or handle.slot >= len(self._slots)
@@ -72,22 +84,25 @@ class Linker:
 
     def component_value(self, identity, seen=None):
         from .items import Component, InheritedComponent, compose
+        item = self.resolve(identity)
+        if isinstance(item, Component):
+            return item.value
         seen = set() if seen is None else seen
         if identity in seen:
             raise ValueError(f"Composition cycle at {identity}")
         seen.add(identity)
-        item = self.resolve(identity)
-        if isinstance(item, Component):
-            return item.value
         if not isinstance(item, InheritedComponent):
             raise TypeError(f"Composition source {identity} is not a component")
         return compose(self.component_value(item.source, seen), item.patch)
 
     def dependents(self, identity):
         """Transitive derived dependency query; source records stay authoritative."""
-        found, frontier = set(), {UUID(str(identity))}
+        identity = identity if isinstance(identity, UUID) else UUID(str(identity))
+        if identity not in self._dependents:
+            return frozenset()
+        found, frontier = set(), {identity}
         while frontier:
-            next_items = {uid for uid, sources in self.dependencies.items() if sources & frontier} - found
+            next_items = set().union(*(self._dependents.get(uid, set()) for uid in frontier)) - found
             found.update(next_items)
             frontier = next_items
         return frozenset(found)
