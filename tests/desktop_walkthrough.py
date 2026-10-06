@@ -70,7 +70,8 @@ def main():
 
             def drive():
                 nonlocal frame
-                # Input is queued after this frame's UI update; give it a frame to dispatch.
+                # Draw runs after every panel update, so coordinates describe the
+                # completed layout a user sees. Dispatch on the following frame.
                 if frame % 2 == 0 and frame // 2 < len(steps):
                     input_state.pending.extend(steps[frame // 2]())
                 if frame == 55:
@@ -84,7 +85,7 @@ def main():
                 frame += 1
 
             runtime.services["walkthrough"] = drive
-            editor.app.systems.attach("walkthrough", SystemDefinition("def update(dt): walkthrough()"))
+            editor.app.systems.attach("walkthrough", SystemDefinition("def draw(): walkthrough()"))
             return runtime
 
         launch(build, headless=True, frames=60,
