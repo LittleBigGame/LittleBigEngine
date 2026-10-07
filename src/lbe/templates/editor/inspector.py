@@ -621,7 +621,12 @@ def commit_tags():
     ent = inspected()
     renaming_tag = state.tags_field.items.remove_value("renaming_tag", None)
     tags = {tag.strip() for tag in state.tags_field.buffer.text.split(',') if tag.strip()}
-    for tag in set(set(ent.items.tag_names())) - tags:
+    previous = set(ent.items.tag_names())
+    added = tags - previous
+    if renaming_tag in previous and renaming_tag not in tags and len(added) == 1:
+        from lbe import Tag
+        ent.items.rename(ent.items.named(Tag, renaming_tag).id, next(iter(added)))
+    for tag in set(ent.items.tag_names()) - tags:
         ent.items.remove_tag(tag)
     for tag in tags:
         ent.items.add_tag(tag)

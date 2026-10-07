@@ -4,7 +4,7 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-from lbe import InheritedComponent
+from lbe import InheritedComponent, Tag
 from lbe.desktop import Input
 from lbe.project import load_project, template_path
 from lbe.text import TextBuffer
@@ -132,3 +132,16 @@ class KernelEditorTests(unittest.TestCase):
         self.assertEqual(target.items.value(original.id), 9.0)
         self.assertEqual(source.items.require_value('speed'), 6.0)
         self.assertIs(self.runtime.linker.resolve_handle(handle), renamed)
+
+    def test_inspector_tag_rename_preserves_uuid(self):
+        target = self.runtime.create(parent=self.editor.game, tags=('player', 'visible'))
+        original = target.items.named(Tag, 'player')
+        handle = self.runtime.linker.handle(original.id)
+        self.editor.select(target)
+        self.editor.tags_field.items.set_value('renaming_tag', 'player')
+        self.editor.tags_field.buffer = TextBuffer('hero, visible')
+        self.editor.commit_tags()
+        renamed = target.items.named(Tag, 'hero')
+        self.assertEqual(renamed.id, original.id)
+        self.assertIs(self.runtime.linker.resolve_handle(handle), renamed)
+        self.assertEqual(set(target.items.tag_names()), {'hero', 'visible'})
