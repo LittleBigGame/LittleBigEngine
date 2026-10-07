@@ -34,6 +34,9 @@ Attachment/removal, reload, source relocation and file-history recovery use
 item UUIDs at the mutation boundary. Execution namespaces no longer inject a
 mutable `systems` collection. Source-asset identity is distinct from attachment
 identity; script name edits do not invalidate UUID or source-asset bindings.
+Runtime entity resolution accepts exact UUIDs only. Friendly-name search belongs
+to authoring/editor navigation, not identity resolution; names cannot shadow
+another object's UUID, and unresolved lookup never creates a blank entity.
 Components, inherited declarations, tags, relation/parent links and
 behavior attachments have persistent UUIDs; links store target UUIDs. Name/type
 indexes and ordered child adjacency are derived runtime state.

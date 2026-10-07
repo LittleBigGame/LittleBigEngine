@@ -306,3 +306,16 @@ class NativeItemTests(unittest.TestCase):
         self.assertNotEqual(record.id, asset_id)
         self.assertEqual(record.definition.asset_id, asset_id)
         self.assertEqual(owner.items.run_script(definition), 7)
+
+    def test_entity_lookup_is_uuid_only_and_display_names_cannot_shadow_identity(self):
+        first = self.runtime.create(name='Player')
+        second = self.runtime.create(name=str(first.id))
+        self.assertIs(self.runtime.resolve(str(first.id)), first)
+        first.items.set_value('name', 'Renamed')
+        self.assertIs(self.runtime.resolve(first.id), first)
+        self.assertIs(self.runtime.resolve(second.id), second)
+        before = self.runtime.entities
+        for missing in ('Player', 'Renamed', uuid4()):
+            with self.assertRaises(KeyError):
+                self.runtime.resolve(missing)
+        self.assertEqual(self.runtime.entities, before)

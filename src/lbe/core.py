@@ -355,17 +355,12 @@ class Runtime:
         return entity
 
     def resolve(self, identity):
-        if isinstance(identity, UUID):
-            return self._entities[identity]
-        if isinstance(identity, str):
-            try:
-                return self._entities[UUID(identity)]
-            except ValueError:
-                for entity in self._entities.values():
-                    if entity.items.get_value("name") == identity:
-                        return entity
-                raise KeyError(identity) from None
-        return self._entities[UUID(str(identity))]
+        """Resolve exact persistent identity, never an editable display name."""
+        try:
+            uid = identity if isinstance(identity, UUID) else UUID(str(identity))
+        except (ValueError, TypeError, AttributeError):
+            raise KeyError(f'Expected an entity UUID, not {identity!r}') from None
+        return self._entities[uid]
 
     def query(self, *components, tags=()):
         return Query(self, None, components, tags, True)

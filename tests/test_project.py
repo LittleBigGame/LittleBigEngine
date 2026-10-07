@@ -337,7 +337,7 @@ class ProjectPersistenceTests(unittest.TestCase):
         self.assertIn("Entity", app_pills[0].items.get_value("asset_name", ""))
         self.assertNotIn("Asset", app_pills[0].items.get_value("asset_name", ""))
 
-    def test_system_script_resolves_entity_by_name(self):
+    def test_system_script_rejects_display_name_as_identity(self):
         project_dir = Path(self.directory.name)
         script_path = project_dir / "name_resolve_sys.py"
         script_path.write_text(
@@ -353,14 +353,17 @@ class ProjectPersistenceTests(unittest.TestCase):
 
         game = next(e for e in runtime.entities if e.items.get_value("name") == "Game")
         sys_def = runtime.assets.system(script_path)
+        before = runtime.entities
         game.items.attach_system("name_resolve_sys", sys_def)
         runtime.step(0)
 
         sys_inst = game.items.behaviour("name_resolve_sys", kind='system')
-        self.assertTrue(sys_inst.running, list(sys_inst.errors))
-        self.assertEqual(len(sys_inst.errors), 0)
-        self.assertEqual(sys_inst.namespace["app"].items.get_value("name"), "Application")
-        self.assertEqual(sys_inst.namespace["game"].items.get_value("name"), "Game")
+        self.assertFalse(sys_inst.running)
+        self.assertIn('Expected an entity UUID', sys_inst.errors[-1].message)
+        self.assertEqual(runtime.entities, before)
+        with self.assertRaises(KeyError):
+            runtime.resolve('Game')
+        self.assertIs(runtime.resolve(str(game.id)), game)
 
         with self.assertRaises(KeyError):
             runtime.resolve("NonExistentEntityName12345")
