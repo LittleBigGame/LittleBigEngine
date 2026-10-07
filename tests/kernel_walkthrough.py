@@ -17,7 +17,7 @@ def main():
             runtime = load_project(window, graphics, input_state, directory, template=template_path('editor'))
             runtime.step(0)
             editor = runtime.entities[0].items.require_value('application_state')
-            player = editor.app.systems['app'].namespace['create_walk_shoot_demo']()
+            player = editor.app.items.behaviour('app', kind='system').namespace['create_walk_shoot_demo']()
             speed = player.items.component('speed')
             editor.code.buffer = TextBuffer(
                 '# Persistent references: friendly pills, UUID source on disk.\n'
@@ -41,13 +41,13 @@ def main():
                     assert player.x > initial
                     assert tuple(editor.game.query(tags=('bullet',)))
                     assert any(e.items.has_tag('asset_pill') and e.visible for e in editor.code.children)
-                    assert not editor.app.systems['app'].errors
-                    assert not editor.game.systems['walk_shoot'].errors
+                    assert not editor.app.items.behaviour('app', kind='system').errors
+                    assert not editor.game.items.behaviour('walk_shoot', kind='system').errors
                     complete.append(True)
                 frame += 1
 
             runtime.services['kernel_walkthrough'] = drive
-            editor.app.systems.attach('kernel_walkthrough', SystemDefinition('def update(dt): kernel_walkthrough()'))
+            editor.app.items.attach_system('kernel_walkthrough', SystemDefinition('def update(dt): kernel_walkthrough()'))
             return runtime
 
         launch(build, headless=True, frames=30, screenshot=sys.argv[1] if len(sys.argv) > 1 else None)

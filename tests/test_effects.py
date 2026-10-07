@@ -10,7 +10,7 @@ class EffectsTests(unittest.TestCase):
         effects = SystemEffects(runtime)
         owner = runtime.create()
         child = runtime.create(parent=owner, x=1)
-        owner.systems.attach('physics', SystemDefinition('def update(dt):\n    for target in query("x"):\n        target.x += dt'))
+        owner.items.attach_system('physics', SystemDefinition('def update(dt):\n    for target in query("x"):\n        target.x += dt'))
         runtime.step(1)
         record, = effects.affecting(child)
         self.assertEqual(record.queried, frozenset([child.id]))
@@ -18,7 +18,7 @@ class EffectsTests(unittest.TestCase):
         child.parent = None
         runtime.step(1)
         self.assertEqual(effects.affecting(child), ())
-        del owner.systems['physics']
+        owner.items.remove(owner.items.behaviour('physics', kind='system').id)
         self.assertEqual(effects.records(), ())
         self.assertFalse(runtime.events.errors)
 
@@ -28,7 +28,7 @@ class EffectsTests(unittest.TestCase):
         effects = SystemEffects(runtime)
         root = runtime.create()
         child = runtime.create(parent=root, x=1)
-        root.systems.attach('reader', SystemDefinition('def update(dt):\n    list(query("x"))'))
+        root.items.attach_system('reader', SystemDefinition('def update(dt):\n    list(query("x"))'))
         runtime.step(0)
         record, = effects.affecting(child)
         self.assertEqual(record.queried, frozenset([child.id]))

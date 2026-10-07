@@ -1,7 +1,6 @@
 """Shared script definitions and independent runtime attachments."""
 
 from collections import deque
-from collections.abc import MutableMapping
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from types import CodeType
@@ -159,7 +158,6 @@ class SystemInstance:
             "entity": self.entity,
             "runtime": runtime,
             "system": self,
-            "systems": self.entity.systems,
             "create": runtime.create,
             "resolve": runtime.resolve,
             "destroy": runtime.destroy,
@@ -329,114 +327,3 @@ class SystemInstance:
         if self._initialized:
             self.call("stop")
         self._unsubscribe()
-
-
-class Systems(MutableMapping):
-    def __init__(self, entity):
-        self._entity = entity
-        from .items import NamedValues
-        self._values = NamedValues(entity, SystemInstance)
-
-    def __getitem__(self, name):
-        self._entity._check()
-        return self._values[name]
-
-    def __iter__(self):
-        self._entity._check()
-        return iter(tuple(self._values))
-
-    def __len__(self):
-        self._entity._check()
-        return len(self._values)
-
-    def __setitem__(self, name, definition):
-        self.attach(name, definition)
-
-    def __delitem__(self, name):
-        self._entity._check()
-        instance = self._values.pop(name)
-        instance.stop()
-        self._entity._changed("system.detach", name)
-
-    def attach(self, name, definition=None, *, identity=None, activate=True):
-        if definition is None:
-            definition = self._entity.runtime.assets.resolve(name) if not isinstance(name,SystemDefinition) else name
-            identity = definition.asset_id
-            if identity is None and self._entity.runtime.assets.registry is not None:
-                identity = self._entity.runtime.assets.registry.get_id(definition.path)
-            if identity is None:
-                raise ValueError('UUID attachment requires a registered system asset')
-            name = str(identity)
-        self._entity._check()
-        if self._entity._destroying:
-            raise RuntimeError("Cannot attach systems during entity destruction")
-        if not isinstance(name, str) or not name:
-            raise ValueError("System names must be nonempty strings")
-        if name in self._values:
-            raise ValueError(f"System {name!r} already attached; use reload")
-        if not isinstance(definition, SystemDefinition):
-            raise TypeError("Expected a SystemDefinition")
-        instance = SystemInstance(self._entity, name, definition, identity=identity)
-        self._values[name] = instance
-        self._entity._changed("system.attach", name)
-        if activate and instance.initialize() and self._entity.alive and self._values.get(name) is instance:
-            instance.start()
-        return instance
-
-    def reload(self, name, definition):
-        """Compile first; syntax failures preserve the current attachment."""
-        current = self[name]
-        try:
-            if isinstance(definition, str):
-                definition = SystemDefinition(definition, current.definition.path)
-            if not isinstance(definition, SystemDefinition):
-                raise TypeError("Expected source text or a SystemDefinition")
-        except Exception as error:
-            current.errors.append(Diagnostic(f"{name}.compile", str(error), traceback.format_exc()))
-            self._entity._changed("system.error", name)
-            return current
-        candidate = SystemInstance(self._entity, name, definition, identity=current.id)
-        if not candidate.initialize():
-            current.errors.extend(candidate.errors)
-            return current
-        if not self._entity.alive or self._values.get(name) is not current:
-            candidate.stop()
-            return current
-        current.stop()
-        if not self._entity.alive or self._values.get(name) is not current:
-            candidate.stop()
-            return current
-        self._values[name] = candidate
-        candidate.start()
-        self._entity._changed("system.reload", name)
-        return candidate
-
-    def move(self, name, index):
-        self._entity._check()
-        if name not in self._values:
-            raise KeyError(name)
-        if not isinstance(index, int) or not 0 <= index < len(self._values):
-            raise IndexError(index)
-        items = list(self._values.items())
-        pair = next(item for item in items if item[0] == name)
-        items.remove(pair)
-        items.insert(index, pair)
-        self._values.reorder(items)
-        self._entity._changed("system.reorder", name)
-
-    def relocate(self, name, path, *, new_name=None):
-        """Change source identity without restarting behavior or reordering attachments."""
-        instance = self[name]
-        new_name = new_name or name
-        if new_name != name and new_name in self._values:
-            raise ValueError(f"System {new_name!r} is already attached")
-        definition = SystemDefinition(instance.definition.source, str(path), instance.definition.asset_id)
-        self._entity.items._names.pop((SystemInstance, name))
-        self._entity.items._by_category.get(SystemInstance, {}).pop(name, None)
-        instance.name = new_name
-        self._entity.items._names[SystemInstance, new_name] = instance.id
-        self._entity.items._by_category.setdefault(SystemInstance, {})[new_name] = instance.id
-        instance.definition = definition
-        instance.namespace["__file__"] = str(path)
-        self._entity._changed("system.relocate", new_name)
-        return instance

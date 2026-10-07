@@ -75,8 +75,8 @@ def main():
                     input_state.pending.extend(steps[frame // 2]())
                 if frame == 55:
                     assert moving.vx == 3.0 and moving.vy == 1.0
-                    assert "physics" in editor.game.systems
-                    assert editor.game.systems["physics"].running
+                    assert editor.game.items.has_behaviour("physics", kind='system')
+                    assert editor.game.items.behaviour("physics", kind='system').running
                     assert (moving.x, moving.y) != initial
                     assert (still.x, still.y) == stationary
                     assert (Path(directory)/"physics.py").read_text(encoding="utf-8") == SOURCE
@@ -84,7 +84,7 @@ def main():
                 frame += 1
 
             runtime.services["walkthrough"] = drive
-            editor.app.systems.attach("walkthrough", SystemDefinition("def update(dt): walkthrough()"))
+            editor.app.items.attach_system("walkthrough", SystemDefinition("def update(dt): walkthrough()"))
             return runtime
 
         launch(build, headless=True, frames=60,

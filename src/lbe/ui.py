@@ -310,7 +310,7 @@ class Layout:
 
     def install(self, name="layout"):
         from .systems import SystemDefinition
-        return self.entity.systems.attach(name, SystemDefinition(
+        return self.entity.items.attach_system(name, SystemDefinition(
             'from lbe.ui import apply_layout\ndef update(dt):\n    apply_layout(entity, recursive=True)\n',
             '<layout>'))
 
@@ -339,7 +339,7 @@ class UI:
     def install(self, name="ui", definition=None):
         self.root.items.set_value("ui", self)
         definition = definition or self.runtime.assets.system(Path(__file__).parent / "scripts" / "ui.py")
-        return self.root.systems.attach(name, definition)
+        return self.root.items.attach_system(name, definition)
 
     @property
     def focused(self):
@@ -403,8 +403,8 @@ class UI:
         values.setdefault("line_height", self.line_height)
         control = self.create(parent, name, "multiline", **values)
         bundled = Path(__file__).parent / "scripts" / "text_area.py"
-        if bundled.exists() and "text_area" not in control.systems:
-            control.systems.attach("text_area", self.runtime.assets.system(bundled))
+        if bundled.exists() and not control.items.has_behaviour("text_area", kind='system'):
+            control.items.attach_system("text_area", self.runtime.assets.system(bundled))
         return control
 
     def set_text(self, field, text):

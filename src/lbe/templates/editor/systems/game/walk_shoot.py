@@ -23,7 +23,7 @@ def update(dt):
                             vx=player.aim_x * 14, vy=player.aim_y * 14, life=1.2)
             drawing = assets.get("f084e424-d2d9-5fd1-8624-63580396274c")
             if drawing:
-                bullet.scripts.attach(drawing)
+                bullet.items.attach_script(drawing)
             cooldown = 0.18
     for bullet in query("x", "y", "vx", "vy", "life", tags=("bullet",), recursive=True):
         bullet.x += bullet.vx * dt

@@ -38,7 +38,7 @@ class SceneTests(unittest.TestCase):
         runtime.step(0)
         self.assertEqual(len(graphics.rectangles), 2)
         game = next(e for e in runtime.entities if e.items.get_value("name") == "Game")
-        instance = game.systems["render"]
+        instance = game.items.behaviour("render", kind='system')
         self.assertEqual(tuple(instance.errors), ())
         self.assertIn("def draw", instance.definition.source)
         self.assertEqual(len(game.children), 2)

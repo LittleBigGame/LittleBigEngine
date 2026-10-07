@@ -29,7 +29,7 @@ class KernelEditorTests(unittest.TestCase):
         self.runtime.step(0)
 
     def create_demo(self):
-        app = self.editor.app.systems['app'].namespace
+        app = self.editor.app.items.behaviour('app', kind='system').namespace
         action = next(a for a in app['context_actions'](self.editor.game) if a and a['label'] == 'Create walk-and-shoot demo')
         return action['run'](self.editor.game)
 
@@ -44,7 +44,7 @@ class KernelEditorTests(unittest.TestCase):
         self.assertAlmostEqual(player.x, 0.6)
         bullets = tuple(self.editor.game.query(tags=('bullet',)))
         self.assertEqual(len(bullets), 1)
-        self.assertTrue(bullets[0].scripts)
+        self.assertTrue(bullets[0].items.behaviour_dict('script'))
         self.input.release('D')
         self.input.release('SPACE')
         self.runtime.step(1.3)
@@ -55,10 +55,10 @@ class KernelEditorTests(unittest.TestCase):
         self.editor = self.runtime.entities[0].items.require_value('application_state')
         restored = self.runtime.resolve(player.id)
         self.assertEqual(restored.items.component('speed').id, uid)
-        self.assertTrue(self.editor.game.systems['walk_shoot'].running)
+        self.assertTrue(self.editor.game.items.behaviour('walk_shoot', kind='system').running)
 
     def test_component_reference_menu_inheritance_edit_undo_and_reset(self):
-        app = self.editor.app.systems['app'].namespace
+        app = self.editor.app.items.behaviour('app', kind='system').namespace
         source = self.runtime.create(parent=self.editor.game, name='Source', speed=6.0)
         target = self.runtime.create(parent=self.editor.game, name='Target')
         actions = app['context_actions']({'entity': source, 'component': 'speed'})

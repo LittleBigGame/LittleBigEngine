@@ -243,8 +243,8 @@ def initialize():
     state.inspector_sync = inspector_sync
     state.message = message
     state.save_editor_project = save_editor_project
-    entity.systems.attach("docking", assets["31c71ace-2c53-52f9-9164-56b175f5d969"])
-    entity.systems.attach("effects", assets["d6929c06-9cca-576e-b179-d577c2da8312"])
+    entity.items.attach_system("docking", assets["31c71ace-2c53-52f9-9164-56b175f5d969"])
+    entity.items.attach_system("effects", assets["d6929c06-9cca-576e-b179-d577c2da8312"])
     (state.project / "systems/game").mkdir(parents=True, exist_ok=True)
     state.files = ProjectFiles(state.runtime, state.project)
     state.ui = UI(entity, window, graphics, input)
@@ -261,7 +261,7 @@ def initialize():
         create(parent=state.game, name="Entity A", x=-3.0, y=-1.0, w=2.0, h=2.0, color=(75, 185, 210))
         create(parent=state.game, name="Entity B", x=1.0, y=0.0, w=1.5, h=1.5, color=(232, 165, 80))
         if (assets.registry.get_path("cd53cb27-f893-5a6b-a3d2-52f550f7d35d") is not None and assets.registry.get_path("cd53cb27-f893-5a6b-a3d2-52f550f7d35d").exists()):
-            state.game.systems.attach("render", assets["cd53cb27-f893-5a6b-a3d2-52f550f7d35d"])
+            state.game.items.attach_system("render", assets["cd53cb27-f893-5a6b-a3d2-52f550f7d35d"])
 
     state.camera = create(parent=entity, name="Camera", x=0.0, y=0.0, zoom=32.0)
     state.viewport_panel = state.ui.create(entity, "ViewportPanel", "panel", color=PANEL, layer=0)
@@ -272,19 +272,19 @@ def initialize():
     if project_data and project_data.get("entities"):
         activate_entities(restored.values(), state.runtime, project_dir=project)
 
-    if "render" not in state.game.systems:
+    if not state.game.items.has_behaviour("render", kind='system'):
         render_path = state.project / "render.py"
         if render_path.exists():
             render_id = assets.registry.register(render_path)
-            state.game.systems.attach("render", assets[render_id])
+            state.game.items.attach_system("render", assets[render_id])
 
     drawing = assets["f084e424-d2d9-5fd1-8624-63580396274c"]
     outline = assets["dbc0d180-5a28-56a1-bc9c-85d63174e431"]
     for target in state.game.descendants:
-        if target.items.has_value('color') and drawing not in target.scripts:
-            target.scripts.attach(drawing)
-        if target.items.has_value('color') and outline not in target.scripts:
-            target.scripts.attach(outline)
+        if target.items.has_value('color') and not target.items.has_behaviour(drawing, kind='script'):
+            target.items.attach_script(drawing)
+        if target.items.has_value('color') and not target.items.has_behaviour(outline, kind='script'):
+            target.items.attach_script(outline)
 
     state.hierarchy_rows = []
     state.component_rows = []
@@ -485,15 +485,15 @@ def initialize():
     state.code_panel.on_drag = lambda c, ev: start_panel_dock_drag("code_panel", ev) if len(ev) > 2 and ev[2] <= c.y + 30 else None
     state.zoom_label.on_drag = lambda c, ev: start_panel_dock_drag("viewport", ev)
     if (assets.registry.get_path("97c33cfb-4f26-5e7a-bd0b-d689a72be2f5") is not None and assets.registry.get_path("97c33cfb-4f26-5e7a-bd0b-d689a72be2f5").exists()):
-        if 'code_editor' not in state.code_panel.systems:
-            state.code_panel.systems.attach('code_editor', assets["97c33cfb-4f26-5e7a-bd0b-d689a72be2f5"])
-        if 'code_editor' not in state.code.systems:
-            state.code.systems.attach('code_editor', assets["97c33cfb-4f26-5e7a-bd0b-d689a72be2f5"])
+        if not state.code_panel.items.has_behaviour('code_editor', kind='system'):
+            state.code_panel.items.attach_system('code_editor', assets["97c33cfb-4f26-5e7a-bd0b-d689a72be2f5"])
+        if not state.code.items.has_behaviour('code_editor', kind='system'):
+            state.code.items.attach_system('code_editor', assets["97c33cfb-4f26-5e7a-bd0b-d689a72be2f5"])
     if (assets.registry.get_path("62f6264e-f862-5aa2-9561-5e782dedd755") is not None and assets.registry.get_path("62f6264e-f862-5aa2-9561-5e782dedd755").exists()):
-        if 'text_area' in state.code.systems:
-            state.code.systems.reload('text_area', assets["62f6264e-f862-5aa2-9561-5e782dedd755"])
+        if state.code.items.has_behaviour('text_area', kind='system'):
+            state.code.items.reload(state.code.items.behaviour('text_area', kind='system').id, assets["62f6264e-f862-5aa2-9561-5e782dedd755"])
         else:
-            state.code.systems.attach('text_area', assets["62f6264e-f862-5aa2-9561-5e782dedd755"])
+            state.code.items.attach_system('text_area', assets["62f6264e-f862-5aa2-9561-5e782dedd755"])
     state.selected = selected
     state.inspected = inspected
     state.select = select
@@ -510,18 +510,18 @@ def initialize():
     state.switch_left_tab = switch_left_tab
     state.locate_in_file_explorer = locate_in_file_explorer
     state.open_launcher_project = open_launcher_project
-    if (assets.registry.get_path("333b5454-9934-566b-90c6-19ddb72f2da1") is not None and assets.registry.get_path("333b5454-9934-566b-90c6-19ddb72f2da1").exists()) and 'hierarchy' not in state.hierarchy.systems:
-        state.hierarchy.systems.attach('hierarchy', assets["333b5454-9934-566b-90c6-19ddb72f2da1"])
-    if (assets.registry.get_path("ed74702d-a604-5ce0-ae65-6b79c63918ee") is not None and assets.registry.get_path("ed74702d-a604-5ce0-ae65-6b79c63918ee").exists()) and 'file_explorer' not in state.file_explorer.systems:
-        state.file_explorer.systems.attach('file_explorer', assets["ed74702d-a604-5ce0-ae65-6b79c63918ee"])
-    if (assets.registry.get_path("88190356-1ae0-55a2-af97-f45905e5910b") is not None and assets.registry.get_path("88190356-1ae0-55a2-af97-f45905e5910b").exists()) and 'inspector' not in state.inspector.systems:
-        state.inspector.systems.attach('inspector', assets["88190356-1ae0-55a2-af97-f45905e5910b"])
-    entity.systems.attach("source_files", assets["1e1ba739-27d5-552a-a816-91b1fa7081b3"])
+    if (assets.registry.get_path("333b5454-9934-566b-90c6-19ddb72f2da1") is not None and assets.registry.get_path("333b5454-9934-566b-90c6-19ddb72f2da1").exists()) and not state.hierarchy.items.has_behaviour('hierarchy', kind='system'):
+        state.hierarchy.items.attach_system('hierarchy', assets["333b5454-9934-566b-90c6-19ddb72f2da1"])
+    if (assets.registry.get_path("ed74702d-a604-5ce0-ae65-6b79c63918ee") is not None and assets.registry.get_path("ed74702d-a604-5ce0-ae65-6b79c63918ee").exists()) and not state.file_explorer.items.has_behaviour('file_explorer', kind='system'):
+        state.file_explorer.items.attach_system('file_explorer', assets["ed74702d-a604-5ce0-ae65-6b79c63918ee"])
+    if (assets.registry.get_path("88190356-1ae0-55a2-af97-f45905e5910b") is not None and assets.registry.get_path("88190356-1ae0-55a2-af97-f45905e5910b").exists()) and not state.inspector.items.has_behaviour('inspector', kind='system'):
+        state.inspector.items.attach_system('inspector', assets["88190356-1ae0-55a2-af97-f45905e5910b"])
+    entity.items.attach_system("source_files", assets["1e1ba739-27d5-552a-a816-91b1fa7081b3"])
     state.project_graph = PersistentGraph(state.runtime, tuple(restored.values()) + state.game.descendants if project_data and project_data.get("entities") else (state.game,) + state.game.descendants, application=state.app)
-    if "render" in state.game.systems:
+    if state.game.items.has_behaviour("render", kind='system'):
         open_system(state.game, "render")
-    elif state.game.systems:
-        open_system(state.game, next(iter(state.game.systems)))
+    elif state.game.items.behaviour_dict('system'):
+        open_system(state.game, next(iter(state.game.items.behaviour_dict('system'))))
     state.ready = True
 
 
@@ -1054,14 +1054,14 @@ def attach(*args, **kwargs):
 def inspect_system():
     owner = state.code.items.target('owner')
     name = state.code.items.get_value('system_name')
-    if owner is None or name not in owner.systems:
+    if owner is None or not owner.items.has_behaviour(name, kind='system'):
         raise ValueError('Open an attached system first')
     open_panel(name, owner)
 
 def detach_system():
     owner = state.code.items.target('owner')
     name = state.code.items.get_value('system_name')
-    if owner is None or (name not in owner.systems and name not in owner.scripts):
+    if owner is None or (not owner.items.has_behaviour(name, kind='system') and not owner.items.has_behaviour(name, kind='script')):
         message('Open an attached system first')
         return
     if owner is state.app and name in ('app', 'ui'):
@@ -1102,7 +1102,7 @@ def panels_sync():
         if target is None:
             lines = ['Target no longer exists']
         elif panel.view_type == 'system':
-            instance = target.systems.get(panel.system_name)
+            instance = target.items.get_behaviour(panel.system_name, kind='system')
             if instance is None:
                 lines = ['System detached']
             else:
@@ -1354,10 +1354,10 @@ def apply_asset_to_entity(tgt, asset_drag, target_area=None):
             path = (state.project / path_str).resolve()
             if path.exists():
                 definition = state.runtime.assets.system(path)
-                if path.stem in tgt.systems:
-                    tgt.systems.reload(path.stem, definition)
+                if tgt.items.has_behaviour(path.stem, kind='system'):
+                    tgt.items.reload(tgt.items.behaviour(path.stem, kind='system').id, definition)
                 else:
-                    tgt.systems.attach(path.stem, definition)
+                    tgt.items.attach_system(path.stem, definition)
                 save_editor_project()
                 inspector_sync()
                 message(f"Attached system '{path.stem}' to {tgt.items.get_value('name', tgt.id)}")
@@ -1637,7 +1637,7 @@ def start():
         initialize()
     bind_actions()
     entity.items.add_tag('editor')
-    if "ui" not in entity.systems:
+    if not entity.items.has_behaviour("ui", kind='system'):
         state.ui.install(definition=assets["20fe7e55-f05e-5d02-9ed0-a36a56f66c5d"])
 
 
@@ -1650,7 +1650,7 @@ def open_system_log():
                             x=max(0, state.window.width-840), y=80, w=820, h=360,
                             layer=20, modal=False, dock='float', movable=True, resizable=True)
     state.app.items.connect('system_log_panel', panel)
-    panel.systems.attach('system_log', assets["6df949df-402f-5552-bc5e-c4566531ee40"])
+    panel.items.attach_system('system_log', assets["6df949df-402f-5552-bc5e-c4566531ee40"])
 
 
 def update(dt):
@@ -1934,7 +1934,7 @@ def context_actions(target):
                 sel = selected()
                 if sel:
                     if item['type']=='script':
-                        actions.append(dict(label="Attach script to selected entity", run=lambda _: sel.scripts.attach(assets[identity])))
+                        actions.append(dict(label="Attach script to selected entity", run=lambda _: sel.items.attach_script(assets[identity])))
                     sel_name = str(sel.items.get_value('name', sel.id))
                     if item['type']=='system':
                         actions.append(dict(label=f"Attach to '{sel_name}'", run=lambda _: attach_system_to_entity(sel, item['path'])))
@@ -1992,8 +1992,8 @@ def context_actions(target):
     if isinstance(target, dict) and 'system' in target:
         ent = target['entity']
         name = target['system']
-        instance = ent.systems.get(name) or ent.scripts.get(name)
-        kind = 'System' if name in ent.systems else 'Script'
+        instance = ent.items.get_behaviour(name, kind='system') or ent.items.get_behaviour(name, kind='script')
+        kind = 'System' if ent.items.has_behaviour(name, kind='system') else 'Script'
         return [
             dict(label=f"Edit system '{name}'", run=lambda t: open_system(ent, name)),
             dict(label="Copy attachment reference", run=lambda _: state.window.set_clipboard_text(f"<|{kind}:{instance.id}|>")),
@@ -2128,10 +2128,10 @@ def create_walk_shoot_demo():
     player.items.inherit_value('speed', blueprint.items.component('speed'))
     drawing = assets.get('f084e424-d2d9-5fd1-8624-63580396274c')
     if drawing:
-        player.scripts.attach(drawing)
+        player.items.attach_script(drawing)
     state.game.items.connect('demo_player', player)
     definition = assets.system(state.project / 'systems/game/walk_shoot.py')
-    state.game.systems.attach('walk_shoot', definition)
+    state.game.items.attach_system('walk_shoot', definition)
     select(player)
     context_focus_camera(player)
     save_editor_project()

@@ -16,7 +16,7 @@ class ItemStorageTests(unittest.TestCase):
         child = self.runtime.create(parent=source)
         child.items.connect("source", source)
         child.items.inherit_value("x", source.items.component("x"), [{"op": "add", "value": 3}])
-        child.systems.attach("idle", SystemDefinition("def update(dt): pass"))
+        child.items.attach_system("idle", SystemDefinition("def update(dt): pass"))
         data = serialize_entities([child, source])
         restored = deserialize_entities(data, self.other)
         for e in (source, child):

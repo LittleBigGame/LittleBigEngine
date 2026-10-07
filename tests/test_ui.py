@@ -58,7 +58,7 @@ class UITests(unittest.TestCase):
             runtime.step(0)
             self.assertEqual(notes.buffer.text, "Independent app\nSecond line")
             self.assertTrue(any(e.items.get_value("part") == "cursor" for e in notes.children))
-            self.assertTrue(all(not instance.errors for e in runtime.entities for instance in e.systems.values()))
+            self.assertTrue(all(not instance.errors for e in runtime.entities for instance in e.items.behaviour_dict('system').values()))
             runtime.close()
 
     def test_ui_ownership_is_scoped_to_its_entity(self):

@@ -210,7 +210,7 @@ class CoreTests(unittest.TestCase):
         from lbe import SystemDefinition
         updated = []
         self.runtime.services["updated"] = updated
-        inst = child.systems.attach("worker", SystemDefinition("def update(dt): updated.append(dt)"))
+        inst = child.items.attach_system("worker", SystemDefinition("def update(dt): updated.append(dt)"))
         inst.start()
         self.runtime.step(0.1)
         self.assertEqual(len(updated), 1)

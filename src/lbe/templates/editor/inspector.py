@@ -130,13 +130,13 @@ def inspector_sync():
             value = f"Unresolved source: {error}"
             broken.add(declaration.name)
         items.append((declaration.name, value))
-    systems = [(entity, name, instance, None) for name, instance in tuple(entity.systems.items())+tuple(entity.scripts.items())]
+    systems = [(entity, name, instance, None) for name, instance in tuple(entity.items.behaviour_dict('system').items())+tuple(entity.items.behaviour_dict('script').items())]
     for effect in effects.affecting(entity):
         owner = next((e for e in runtime.entities if e.id == effect.owner), None)
-        if owner is None or (effect.system not in owner.systems and effect.system not in owner.scripts):
+        if owner is None or (not owner.items.has_behaviour(effect.system, kind='system') and not owner.items.has_behaviour(effect.system, kind='script')):
             continue
         colour = (90, 195, 125) if entity.id in effect.changed else (85, 155, 230)
-        instance = owner.systems.get(effect.system) or owner.scripts.get(effect.system)
+        instance = owner.items.get_behaviour(effect.system, kind='system') or owner.items.get_behaviour(effect.system, kind='script')
         row = (owner, effect.system, instance, colour)
         existing = next((i for i, r in enumerate(systems) if r[0] is owner and r[1] == effect.system), None)
         if existing is None:
@@ -528,7 +528,7 @@ def inspector_sync():
                 put(button, visible=False)
 
     for owner in state.runtime.entities:
-        for name, instance in owner.systems.items():
+        for name, instance in owner.items.behaviour_dict('system').items():
             if instance.errors:
                 error = instance.errors[-1]
                 message(f'{error.source}: {error.message}')
@@ -1060,7 +1060,7 @@ def open_attach_system_menu():
     actions = []
     for p in candidates:
         name = p.stem
-        already = name in ent.systems or name in ent.scripts
+        already = ent.items.has_behaviour(name, kind='system') or ent.items.has_behaviour(name, kind='script')
         if not already:
             rel_label = str(p.relative_to(state.project)).replace("\\", "/") if p.is_relative_to(state.project) else p.name
             actions.append(dict(label=f"+ {name} ({rel_label})", run=lambda e, path=p: attach_system_to_entity(ent, path)))
@@ -1104,10 +1104,10 @@ def attach_system_to_entity(ent, path):
     try:
         definition = state.runtime.assets.system(path)
         stem = path.stem
-        if stem in ent.systems:
-            instance = ent.systems.reload(stem, definition)
+        if ent.items.has_behaviour(stem, kind='system'):
+            instance = ent.items.reload(ent.items.behaviour(stem, kind='system').id, definition)
         else:
-            instance = ent.systems.attach(stem, definition)
+            instance = ent.items.attach_system(stem, definition)
         save_editor_project()
         inspector_sync()
         if instance.errors:
@@ -1126,8 +1126,8 @@ def detach_system_from_entity(ent, name):
         message('Cannot detach core render system from Game')
         return
     try:
-        collection = ent.systems if name in ent.systems else ent.scripts
-        del collection[name]
+        collection = ent.items.behaviour_dict('system') if ent.items.has_behaviour(name, kind='system') else ent.items.behaviour_dict('script')
+        ent.items.remove(collection[name].id)
         if state.code.items.target('owner') is ent and state.code.items.get_value('system_name') == name:
             state.code.items.disconnect('owner')
             state.code.items.remove_value('system_name', None)

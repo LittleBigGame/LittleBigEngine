@@ -251,7 +251,7 @@ class NativeItemTests(unittest.TestCase):
 
     def test_entity_has_no_legacy_data_collection_facades(self):
         owner = self.runtime.create(x=1)
-        for old_name in ('components', 'tags', 'relations'):
+        for old_name in ('components', 'tags', 'relations', 'systems', 'scripts'):
             self.assertNotIn(old_name, type(owner).__dict__)
             self.assertNotIn('_' + old_name, type(owner).__slots__)
             self.assertFalse(hasattr(owner, old_name))
@@ -280,3 +280,29 @@ class NativeItemTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.runtime.create(items={uuid4(): record})
         self.assertEqual(self.runtime.entities, before)
+
+    def test_behaviour_snapshots_are_not_mutable_attachment_collections(self):
+        owner = self.runtime.create()
+        record = owner.items.attach_system('worker', SystemDefinition('def update(dt): pass'))
+        snapshot = owner.items.behaviour_dict()
+        snapshot.clear()
+        self.assertIs(owner.items[record.id], record)
+        self.assertTrue(record.running)
+        self.assertNotIn('systems', record.namespace)
+        owner.items.remove(record.id)
+        self.assertFalse(record.running)
+
+    def test_script_name_edit_preserves_item_and_source_identities(self):
+        owner = self.runtime.create()
+        asset_id = uuid4()
+        definition = SystemDefinition('def run(): return 7', 'example.py', asset_id)
+        record = owner.items.attach_script(definition)
+        handle = self.runtime.linker.handle(record.id)
+        owner.items.rename(record.id, 'action')
+        self.assertIs(owner.items.behaviour('action', 'script'), record)
+        self.assertIs(owner.items.behaviour(record.id, 'script'), record)
+        self.assertIs(owner.items.behaviour(definition, 'script'), record)
+        self.assertIs(self.runtime.linker.resolve_handle(handle), record)
+        self.assertNotEqual(record.id, asset_id)
+        self.assertEqual(record.definition.asset_id, asset_id)
+        self.assertEqual(owner.items.run_script(definition), 7)

@@ -1,5 +1,5 @@
 """UUID-keyed typed records and their authoritative mutation boundary."""
-from collections.abc import Mapping, MutableMapping
+from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from copy import deepcopy
 from contextlib import contextmanager
@@ -285,6 +285,118 @@ class Items(Mapping):
     def link_dict(self):
         return {item.name: self.entity.runtime.resolve(item.target) for item in self.all(Relation)}
 
+    def behaviour_dict(self, kind='system'):
+        """Disposable named query snapshot over actual behaviour records."""
+        self.entity._check()
+        from .systems import SystemInstance
+        from .scripts import ScriptInstance
+        category = {'system': SystemInstance, 'script': ScriptInstance}[kind]
+        return {name: self._records[uid] for name, uid in self._by_category.get(category, {}).items()}
+
+    def behaviour(self, reference, kind='system'):
+        self.entity._check()
+        from .systems import SystemInstance
+        from .scripts import ScriptInstance, identity
+        category = {'system': SystemInstance, 'script': ScriptInstance}[kind]
+        if isinstance(reference, str) and (category, reference) in self._names:
+            return self.named(category, reference)
+        try:
+            uid = reference if isinstance(reference, UUID) else UUID(str(reference))
+        except (ValueError, TypeError):
+            uid = None
+        record = self._records.get(uid)
+        if record is not None and self.category(record) is category:
+            return record
+        if kind == 'system':
+            return self.named(category, reference)
+        source_id = identity(self.entity, reference)
+        matches = tuple(record for record in self.behaviour_dict('script').values()
+                        if record.definition.asset_id == source_id or record.name == str(source_id))
+        if len(matches) > 1:
+            raise ValueError('Multiple script items use this asset; select an item UUID')
+        if not matches:
+            raise KeyError(reference)
+        return matches[0]
+
+    def get_behaviour(self, reference, default=None, kind='system'):
+        try:
+            return self.behaviour(reference, kind)
+        except (KeyError, ValueError, TypeError):
+            return default
+
+    def has_behaviour(self, reference, kind='system'):
+        return self.get_behaviour(reference, kind=kind) is not None
+
+    def attach_system(self, name, definition=None, *, identity=None, activate=True):
+        from .systems import SystemDefinition, SystemInstance
+        if definition is None:
+            definition = name if isinstance(name, SystemDefinition) else self.entity.runtime.assets.resolve(name)
+            asset_id = definition.asset_id
+            if asset_id is None and self.entity.runtime.assets.registry is not None:
+                asset_id = self.entity.runtime.assets.registry.get_id(definition.path)
+            if asset_id is None:
+                raise ValueError('A source-only attachment requires a registered asset UUID')
+            name = str(asset_id)
+        if not isinstance(definition, SystemDefinition):
+            raise TypeError('Expected a SystemDefinition')
+        return self.add(SystemInstance(self.entity, name, definition, identity=identity), activate=activate)
+
+    def attach_script(self, reference, *, item_identity=None, activate=True):
+        from .systems import SystemDefinition
+        from .scripts import ScriptInstance, identity
+        definition = reference if isinstance(reference, SystemDefinition) else self.entity.runtime.assets.resolve(reference)
+        asset_id = identity(self.entity, definition)
+        if asset_id is None:
+            raise ValueError('Script must have a registered asset UUID')
+        return self.add(ScriptInstance(self.entity, str(asset_id), definition, identity=item_identity), activate=activate)
+
+    def clear_behaviours(self, kind='system'):
+        for record in tuple(self.behaviour_dict(kind).values()):
+            if record.id in self._records:
+                self.remove(record.id)
+
+    def run_script(self, reference, *args, **kwargs):
+        try:
+            return self.behaviour(reference, 'script').run(*args, **kwargs)
+        except Exception as error:
+            self.entity._changed('script.error', str(reference), new=str(error))
+            return None
+
+    def relocate(self, identity, path, *, new_name=None):
+        """Edit source location by item UUID without restarting execution."""
+        from .systems import SystemDefinition, SystemInstance
+        from .scripts import ScriptInstance
+        current = self[identity]
+        if not isinstance(current, SystemInstance):
+            raise TypeError('Only behaviour items have source locations')
+        definition = SystemDefinition(current.definition.source, str(path), current.definition.asset_id)
+        if new_name is not None and not isinstance(current, ScriptInstance):
+            current = self.rename(current.id, new_name)
+        current.definition = definition
+        current.namespace['__file__'] = str(path)
+        kind = 'script' if isinstance(current, ScriptInstance) else 'system'
+        self.entity._changed(kind + '.relocate', current.name)
+        return current
+
+    def move_behaviour(self, identity, index):
+        """Reorder typed behaviour slots within the canonical item dictionary."""
+        current = self[identity]
+        from .systems import SystemInstance
+        if not isinstance(current, SystemInstance):
+            raise TypeError('Expected a behaviour item')
+        category = self.category(current)
+        identities = list(self._by_category.get(category, {}).values())
+        if not isinstance(index, int) or not 0 <= index < len(identities):
+            raise IndexError(index)
+        identities.remove(current.id)
+        identities.insert(index, current.id)
+        slots = iter(identities)
+        order = [next(slots) if self.category(record) is category else uid
+                 for uid, record in self._records.items()]
+        self._records = {uid: self._records[uid] for uid in order}
+        self._reindex_order()
+        self.entity._changed('system.reorder', current.name)
+
     def _put(self, item):
         old = self._records.get(item.id)
         if (old is not None and type(old) is type(item) and old.name == item.name
@@ -493,11 +605,13 @@ class Items(Mapping):
     def reload(self, identity, definition):
         """Reload a behaviour selected by item UUID, preserving live references."""
         from .systems import SystemDefinition, SystemInstance
+        from .scripts import ScriptInstance
         from .events import Diagnostic
         import traceback
         current = self[identity]
         if not isinstance(current, SystemInstance):
             raise TypeError("Only behaviour items can be reloaded")
+        kind = "script" if isinstance(current, ScriptInstance) else "system"
         try:
             if isinstance(definition, str):
                 definition = SystemDefinition(definition, current.definition.path, current.definition.asset_id)
@@ -505,7 +619,7 @@ class Items(Mapping):
                 raise TypeError("Expected a definition or source text")
         except Exception as error:
             current.errors.append(Diagnostic(f"{current.name}.compile", str(error), traceback.format_exc()))
-            self.entity._changed("system.error", current.name)
+            self.entity._changed(kind + ".error", current.name)
             return current
         candidate = type(current)(self.entity, current.name, definition, identity=current.id)
         if not candidate.initialize():
@@ -520,8 +634,6 @@ class Items(Mapping):
             return current
         self._put(candidate)
         candidate.start()
-        from .scripts import ScriptInstance
-        kind = "script" if isinstance(candidate, ScriptInstance) else "system"
         self.entity._changed(kind + ".reload", candidate.name)
         return candidate
 
@@ -547,9 +659,10 @@ class Items(Mapping):
                 self._by_type.setdefault(item_type, {})[record.id] = record
 
     def _replace_identity(self, category, name, identity):
+        from .systems import SystemInstance
         item = self.named(category, name)
         self._drop(item.id)
-        if hasattr(item, "definition"):
+        if isinstance(item, SystemInstance):
             item.id = identity
         else:
             item = replace(item, id=identity)
@@ -562,40 +675,3 @@ class Items(Mapping):
         if isinstance(item_type, type) and not hasattr(item_type, '__abstractmethods__'):
             return tuple(self._by_type.get(item_type, {}).values())
         return tuple(item for item in self._records.values() if isinstance(item, item_type))
-
-
-class NamedValues(MutableMapping):
-    """Internal compatibility projection; no independent value dictionary."""
-    def __init__(self, entity, category):
-        self.entity, self.category = entity, category
-
-    def record(self, name):
-        return self.entity.items.named(self.category, name)
-
-    def __getitem__(self, name):
-        item = self.record(name)
-        return item
-
-    def __setitem__(self, name, value):
-        item = value
-        self.entity.items._put(item)
-
-    def __delitem__(self, name):
-        self.entity.items._drop(self.record(name).id)
-
-    def __iter__(self):
-        return iter(tuple(self.entity.items._by_category.get(self.category, {})))
-
-    def __len__(self):
-        return len(self.entity.items._by_category.get(self.category, {}))
-
-    def __contains__(self, name):
-        return (self.category, name) in self.entity.items._names
-
-    def reorder(self, pairs):
-        ids = [value.id for _, value in pairs]
-        records = self.entity.items._records
-        slots = iter(ids)
-        order = [next(slots) if identity in ids else identity for identity in records]
-        self.entity.items._records = {identity: records[identity] for identity in order}
-        self.entity.items._reindex_order()

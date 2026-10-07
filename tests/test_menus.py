@@ -81,7 +81,7 @@ class MenuTests(unittest.TestCase):
             viewport = state.viewport
             ui.dispatch(('click', viewport.x+viewport.w-5, viewport.y+viewport.h-5, 4, 0))
             self.assertIs(root.items.require_target('context_menu').context_target, state.game)
-            self.assertTrue(all(not s.errors for e in runtime.entities for s in e.systems.values()))
+            self.assertTrue(all(not s.errors for e in runtime.entities for s in e.items.behaviour_dict('system').values()))
 
     def test_menu_motion_scroll_and_empty_actions(self):
         # Empty actions return None

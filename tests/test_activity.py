@@ -24,14 +24,14 @@ class ActivityTests(unittest.TestCase):
         self.addCleanup(runtime.close)
         log = ActivityLog(runtime)
         owner = runtime.create(tags=['ui'])
-        owner.systems.attach('broken', SystemDefinition('def update(dt):\n    raise ValueError("editor failure")'))
+        owner.items.attach_system('broken', SystemDefinition('def update(dt):\n    raise ValueError("editor failure")'))
         runtime.step(0)
         self.assertTrue(any(r.kind == 'system.error' for r in log.view()))
         self.assertFalse(any(r.kind == 'system.call' for r in log.view()))
         log.clear()
         excluded = runtime.create(tags=['ui'])
         log.exclude(excluded)
-        excluded.systems.attach('panel_error', SystemDefinition('def update(dt):\n    raise ValueError("log panel failure")'))
+        excluded.items.attach_system('panel_error', SystemDefinition('def update(dt):\n    raise ValueError("log panel failure")'))
         runtime.step(0)
         self.assertTrue(any(r.kind == 'system.error' and 'log panel failure' in r.detail for r in log.view()))
 
@@ -40,7 +40,7 @@ class ActivityTests(unittest.TestCase):
         log = ActivityLog(runtime)
         runtime.services['log'] = log
         owner = runtime.create(name='Mover', x=1)
-        owner.systems.attach('move', SystemDefinition('def update(dt):\n    entity.x += 2\n    events.emit("moved", entity.x)'))
+        owner.items.attach_system('move', SystemDefinition('def update(dt):\n    entity.x += 2\n    events.emit("moved", entity.x)'))
         runtime.step(1)
         record = next(r for r in log.records if r.kind == 'component.set' and 'x:' in r.detail)
         self.assertIn('1 -> 3', record.detail)
@@ -57,7 +57,7 @@ class ActivityTests(unittest.TestCase):
         runtime = Runtime()
         log = ActivityLog(runtime, capacity=8)
         root = runtime.create(name='Owner')
-        root.systems.attach('broken', SystemDefinition('def update(dt):\n    raise ValueError("broken action")'))
+        root.items.attach_system('broken', SystemDefinition('def update(dt):\n    raise ValueError("broken action")'))
         runtime.step(0)
         errors = [r for r in log.records if r.kind == 'system.error']
         self.assertTrue(errors)
@@ -85,7 +85,7 @@ class ActivityTests(unittest.TestCase):
         child = runtime.create(parent=editor)
         child.x = 3
         self.assertEqual(len(log.records), 1)
-        game.systems.attach('tick', SystemDefinition('def update(dt): pass\ndef draw(): pass'))
+        game.items.attach_system('tick', SystemDefinition('def update(dt): pass\ndef draw(): pass'))
         log.clear()
         runtime.step(0)
         self.assertFalse(log.records)
@@ -138,7 +138,7 @@ class ActivityTests(unittest.TestCase):
             runtime.step(0)
             panel = app.items.require_target('system_log_panel')
             self.assertIn('ui', set(panel.items.tag_names()))
-            self.assertIn('system_log', panel.systems)
+            self.assertIn('system_log', panel.items.behaviour_dict('system'))
             state.game.test_value = 12
             runtime.step(0)
             self.assertTrue(any(r.kind == 'component.set' and 'test_value' in r.detail for r in runtime.services['log'].view()))
@@ -162,7 +162,7 @@ class ActivityTests(unittest.TestCase):
             state.save_editor_project()
             self.assertFalse(runtime.changes.errors)
             self.assertFalse(runtime.events.errors)
-            self.assertTrue(all(not s.errors for e in runtime.entities for s in e.systems.values()))
+            self.assertTrue(all(not s.errors for e in runtime.entities for s in e.items.behaviour_dict('system').values()))
 
     def test_component_named_entity_class_does_not_confuse_snapshot(self):
         runtime = Runtime()
@@ -178,8 +178,8 @@ class ActivityTests(unittest.TestCase):
         log.frame_calls = True
         a = runtime.create(name='A', value=0)
         b = runtime.create(name='B', value=0)
-        b.systems.attach('listener', SystemDefinition('def start():\n    system.listen("ping", receive)\ndef receive():\n    entity.value = 2\ndef draw(): pass'))
-        a.systems.attach('caller', SystemDefinition('def update(dt):\n    events.emit("ping")\n    entity.value = 3\ndef draw(): pass'))
+        b.items.attach_system('listener', SystemDefinition('def start():\n    system.listen("ping", receive)\ndef receive():\n    entity.value = 2\ndef draw(): pass'))
+        a.items.attach_system('caller', SystemDefinition('def update(dt):\n    events.emit("ping")\n    entity.value = 3\ndef draw(): pass'))
         log.clear()
         runtime.step(0)
         mutations = [r for r in log.records if r.kind == 'component.set']
@@ -239,7 +239,7 @@ class ActivityTests(unittest.TestCase):
             self.assertLessEqual(panel.x+panel.w,window.width)
             self.assertLessEqual(panel.y+panel.h,window.height)
             self.assertFalse(runtime.changes.errors)
-            self.assertTrue(all(not s.errors for e in runtime.entities for s in e.systems.values()))
+            self.assertTrue(all(not s.errors for e in runtime.entities for s in e.items.behaviour_dict('system').values()))
 
     def test_log_panel_reload_and_detach_release_owned_controls(self):
         import tempfile
@@ -256,14 +256,14 @@ class ActivityTests(unittest.TestCase):
             app.application_state.ui.dispatch(('key','L',True,False))
             panel = app.items.require_target('system_log_panel')
             original = tuple(panel.children)
-            definition = panel.systems['system_log'].definition
-            panel.systems.reload('system_log', definition)
+            definition = panel.items.behaviour('system_log', kind='system').definition
+            panel.items.reload(panel.items.behaviour('system_log', kind='system').id, definition)
             self.assertEqual(len(panel.children), len(original))
             self.assertTrue(all(not child.alive for child in original))
             custom = runtime.create(parent=panel, name='Custom')
             replacement = lambda control,event: False
             panel.on_click = replacement
-            del panel.systems['system_log']
+            panel.items.remove(panel.items.behaviour('system_log', kind='system').id)
             self.assertEqual(panel.children, (custom,))
             self.assertIs(panel.on_click, replacement)
             self.assertNotIn('on_drag', panel.items.value_dict())
@@ -288,7 +288,7 @@ class ActivityTests(unittest.TestCase):
             for cycle in range(12):
                 app.application_state.ui.dispatch(('key','L',True,False))
                 panel = app.items.require_target('system_log_panel')
-                panel.systems.reload('system_log', panel.systems['system_log'].definition)
+                panel.items.reload(panel.items.behaviour('system_log', kind='system').id, panel.items.behaviour('system_log', kind='system').definition)
                 runtime.step(0)
                 runtime.destroy(panel)
                 self.assertNotIn('system_log_panel', app.items.link_dict())
@@ -296,4 +296,4 @@ class ActivityTests(unittest.TestCase):
                 self.assertEqual((len(runtime.entities),len(runtime.events._observers)), baseline)
             self.assertFalse(runtime.changes.errors)
             self.assertFalse(runtime.events.errors)
-            self.assertTrue(all(not s.errors for e in runtime.entities for s in e.systems.values()))
+            self.assertTrue(all(not s.errors for e in runtime.entities for s in e.items.behaviour_dict('system').values()))

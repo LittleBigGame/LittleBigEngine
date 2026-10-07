@@ -63,7 +63,7 @@ class AssetSystemTests(unittest.TestCase):
         self.assert_healthy()
 
     def assert_healthy(self):
-        instance = self.editor.app.systems["app"]
+        instance = self.editor.app.items.behaviour("app", kind='system')
         self.assertTrue(instance.running, list(instance.errors))
         self.assertEqual(list(instance.errors), [])
 
@@ -367,7 +367,7 @@ class AssetSystemTests(unittest.TestCase):
 
     def test_folder_creation_and_file_moving_with_stable_uuid(self):
         """Folders can be created and files moved between folders while preserving asset UUID."""
-        app_ns = self.editor.app.systems["app"].namespace
+        app_ns = self.editor.app.items.behaviour("app", kind='system').namespace
         create_new_folder = app_ns["create_new_folder"]
         move_file_or_folder = app_ns["move_file_or_folder"]
         ed = self.editor
@@ -477,14 +477,14 @@ class AssetSystemTests(unittest.TestCase):
         # Should be added as component, NOT attached as a system
         self.assertIn("enemy", hero.items.value_dict())
         self.assertIsInstance(hero.items.require_value("enemy"), AssetRef)
-        self.assertNotIn("enemy", hero.systems)
+        self.assertNotIn("enemy", hero.items.behaviour_dict('system'))
 
         # Drop 2: Dropped onto Systems area (below system_label)
         sys_area_y = ed.system_label.y + 15
         ed.app.items.require_value("on_asset_drop")(drag_data, ("release", ed.inspector.x + 30, sys_area_y, 0, 0))
 
         # Should now be attached as a system
-        self.assertIn("enemy", hero.systems)
+        self.assertIn("enemy", hero.items.behaviour_dict('system'))
 
     def test_drag_entity_from_hierarchy(self):
         """Dragging entity from hierarchy allows dropping into code editor, inspector, or reparenting."""

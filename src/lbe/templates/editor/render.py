@@ -83,5 +83,5 @@ def draw():
 
         selected = entity.items.target("selection")
         outline = assets.get("dbc0d180-5a28-56a1-bc9c-85d63174e431")
-        if selected is not None and selected.alive and outline and outline in selected.scripts:
+        if selected is not None and selected.alive and outline and selected.items.has_behaviour(outline, kind='script'):
             selected.run(outline, entity, zoom)

@@ -48,7 +48,7 @@ def open_path():
     state.code.source_path = str(path)
     state.code.items.set_value('system_name', path.stem)
     sel = selected()
-    if sel and path.stem in sel.systems:
+    if sel and sel.items.has_behaviour(path.stem, kind='system'):
         state.code.items.connect('owner', sel)
     else:
         state.code.items.disconnect('owner', None)
@@ -69,7 +69,7 @@ def open_specific_file(path):
     state.code.source_path = str(path)
     state.code.items.set_value('system_name', path.stem)
     sel = selected()
-    if sel and path.stem in sel.systems:
+    if sel and sel.items.has_behaviour(path.stem, kind='system'):
         state.code.items.connect('owner', sel)
     else:
         state.code.items.disconnect('owner', None)
@@ -175,7 +175,7 @@ def update_open_source_location(source, destination):
 def open_system(owner, name):
     if not confirm_discard((owner.id, name)):
         return
-    instance = owner.systems.get(name) or owner.scripts[name]
+    instance = owner.items.get_behaviour(name, kind='system') or owner.items.behaviour(name, kind='script')
     path = Path(instance.definition.path)
     if path.is_relative_to(state.project):
         state.path_field.buffer = TextBuffer(str(path.relative_to(state.project)))
@@ -209,10 +209,10 @@ def save():
     definition = state.runtime.assets.system(path)
     count = 0
     for entity in state.runtime.entities:
-        for collection in (entity.systems, entity.scripts):
+        for collection in (entity.items.behaviour_dict('system'), entity.items.behaviour_dict('script')):
             for name, instance in tuple(collection.items()):
                 if Path(instance.definition.path) == path:
-                    updated = collection.reload(name, definition)
+                    updated = entity.items.reload(instance.id, definition)
                     if updated.definition is not definition or not updated.running:
                         raise RuntimeError(f"{name}: {(updated.errors[-1].message if updated.errors else 'reload failed')}")
                     count += 1
@@ -226,12 +226,12 @@ def attach():
     owner = state.code.items.target('owner') or selected()
     if owner is None:
         owner = state.game
-    if path.stem in owner.systems:
-        instance = owner.systems.reload(path.stem, definition)
-    elif path.stem in owner.scripts:
-        instance = owner.scripts.reload(path.stem, definition)
+    if owner.items.has_behaviour(path.stem, kind='system'):
+        instance = owner.items.reload(owner.items.behaviour(path.stem, kind='system').id, definition)
+    elif owner.items.has_behaviour(path.stem, kind='script'):
+        instance = owner.items.reload(owner.items.behaviour(path.stem, kind='script').id, definition)
     else:
-        instance = owner.systems.attach(path.stem, definition)
+        instance = owner.items.attach_system(path.stem, definition)
     if not instance.running:
         err = instance.errors[-1].message if instance.errors else "Attachment failed"
         raise RuntimeError(err)
@@ -307,7 +307,7 @@ def delete_file_item(item):
     for owner in state.runtime.entities:
         if owner is state.game or state.game in owner.ancestors:
             continue
-        for instance in tuple(owner.systems.values())+tuple(owner.scripts.values()):
+        for instance in tuple(owner.items.behaviour_dict('system').values())+tuple(owner.items.behaviour_dict('script').values()):
             required = Path(instance.definition.path).resolve() if instance.definition.path else None
             if required is not None and (required == path or required.is_relative_to(path)):
                 raise ValueError(f"Required editor source cannot be deleted: {required.name}")

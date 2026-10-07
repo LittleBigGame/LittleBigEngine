@@ -46,7 +46,7 @@ def build_prelude(context=()):
         "from lbe.space import SpatialIndex as _Space\n"
         "from pathlib import Path as _Path\n"
         "from uuid import UUID as _UUID\n"
-        "from lbe.systems import Assets as _Assets, Systems as _Systems\n\n"
+        "from lbe.systems import Assets as _Assets\n\n"
         "from typing import Iterable as _Iterable\n\n"
     )
 
@@ -65,7 +65,6 @@ def build_prelude(context=()):
             "entity: _Owner\n"
             "query = self.query\n"
             "runtime = self.runtime\n"
-            "systems = self.systems\n"
             "create = runtime.create\n"
             "resolve = runtime.resolve\n"
             "destroy = runtime.destroy\n"
@@ -108,7 +107,6 @@ def build_prelude(context=()):
     )
     prelude += (
         "runtime: _Runtime\n"
-        "systems: _Systems\n"
         "create = runtime.create\n"
         "destroy = runtime.destroy\n"
         "events = runtime.events\n"

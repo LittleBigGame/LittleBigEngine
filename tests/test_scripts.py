@@ -31,10 +31,10 @@ class ScriptTests(unittest.TestCase):
         good=self.runtime.create(parent=owner,x=0,vx=2)
         absent=self.runtime.create(parent=owner,x=0)
         for target in (bad,good,absent):
-            target.scripts.attach(script)
+            target.items.attach_script(script)
         source=f'def update(dt):\n    pill=assets["{script.asset_id}"]\n    for target in query(pill,*pill.components):\n        target.run(pill,dt)'
         system=self.definition('movement.py',source)
-        attachment=owner.systems.attach(system)
+        attachment=owner.items.attach_system(system)
         self.runtime.step(1)
         self.assertEqual(good.x,2)
         self.assertTrue(attachment.running)
@@ -56,7 +56,7 @@ class ScriptTests(unittest.TestCase):
     def test_script_roundtrip_move_delete_undo_and_identity(self):
         script=self.definition('move.py','components=("x",)\ndef run(entity):\n    entity.x += 1')
         target=self.runtime.create(x=0)
-        target.scripts.attach(script)
+        target.items.attach_script(script)
         files=ProjectFiles(self.runtime,self.path)
         save=lambda:save_project(self.path,entities=self.runtime.entities,assets=self.runtime.assets.registry)
         renamed=self.path/'renamed.py'

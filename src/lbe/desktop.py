@@ -260,7 +260,7 @@ def launch(build, *, headless=False, frames=None, screenshot=None):
             cur.step(min(elapsed, 0.1))
             if cur is not None:
                 for entity in cur.entities:
-                    for instance in tuple(entity.systems.values()) + tuple(entity.scripts.values()):
+                    for instance in tuple(entity.items.behaviour_dict('system').values()) + tuple(entity.items.behaviour_dict('script').values()):
                         if instance.errors:
                             failures.update((error.source, error.message) for error in instance.errors)
                             app_st = cur.services.get("application_state")

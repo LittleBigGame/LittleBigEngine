@@ -28,7 +28,7 @@ class EditorTests(unittest.TestCase):
         self.assertIsNotNone(panel)
         self.assertTrue(panel.visible)
         self.assertFalse(panel.modal)
-        self.assertTrue(ed.game.systems['render'].running)
+        self.assertTrue(ed.game.items.behaviour('render', kind='system').running)
         records=[r for r in self.runtime.services['log'].records if r.kind=='script.error']
         self.assertTrue(any(str(target.id) in r.target and 'draw_rectangle.py' in r.source for r in records))
         self.graphics.rectangles.clear()
@@ -42,16 +42,16 @@ class EditorTests(unittest.TestCase):
 
     def test_deleting_renderer_stops_draw_and_undo_restores_it(self):
         ed=self.editor
-        path=Path(ed.game.systems['render'].definition.path)
+        path=Path(ed.game.items.behaviour('render', kind='system').definition.path)
         target=ed.game.children[0]
         ed.delete_file_item(dict(path=path))
-        self.assertFalse(ed.game.systems['render'].running)
+        self.assertFalse(ed.game.items.behaviour('render', kind='system').running)
         self.graphics.rectangles.clear()
         self.runtime.step(0)
         self.assertFalse(any(kwargs.get('key')==target.id for args,kwargs in self.graphics.rectangles))
         ed.ui.focus(None)
         self.send(('key','Z',True,False))
-        self.assertTrue(ed.game.systems['render'].running)
+        self.assertTrue(ed.game.items.behaviour('render', kind='system').running)
         self.graphics.rectangles.clear()
         self.runtime.step(0)
         self.assertTrue(any(kwargs.get('key')==target.id for args,kwargs in self.graphics.rectangles))
@@ -59,7 +59,7 @@ class EditorTests(unittest.TestCase):
     def test_frame_game_recovers_distant_camera_and_nested_focus(self):
         ed = self.editor
         ed.camera.x,ed.camera.y = 9999,9999
-        namespace=ed.app.systems['app'].namespace
+        namespace=ed.app.items.behaviour('app', kind='system').namespace
         namespace['frame_game']()
         for target in ed.game.children:
             if target.items.get_value('color') is not None:
@@ -78,13 +78,13 @@ class EditorTests(unittest.TestCase):
         ed = self.editor
         target = ed.game.children[0]
         path = str(Path(self.directory.name).parent/'external-lbe-system.py')
-        target.systems.attach('external',SystemDefinition('def update(dt):\n    entity.x += dt',path))
+        target.items.attach_system('external', SystemDefinition('def update(dt):\n    entity.x += dt',path))
         self.runtime.step(1)
         ed.select(target)
         ed.inspector_sync()
         self.assertTrue(any(r.visible and r.items.get_value('system_key')==(target.id,'external') for r in ed.system_rows))
         self.assertTrue(any(r.asset is None and r.system=='external' for r in self.runtime.services['effects'].affecting(target)))
-        self.assertFalse([list(i.errors) for e in self.runtime.entities for i in e.systems.values() if i.errors])
+        self.assertFalse([list(i.errors) for e in self.runtime.entities for i in e.items.behaviour_dict('system').values() if i.errors])
 
     def test_component_commit_undo_is_one_enter_transaction(self):
         ed = self.editor
@@ -123,7 +123,7 @@ class EditorTests(unittest.TestCase):
         folder = ed.project / 'systems/game'
         ed.switch_left_tab('files')
         ed.set_file_root(folder)
-        actions = ed.app.systems['app'].namespace['context_actions']({'file_explorer':True})
+        actions = ed.app.items.behaviour('app', kind='system').namespace['context_actions']({'file_explorer':True})
         next(a for a in actions if a['label']=='+ New folder...')['run'](None)
         created = folder / 'New Folder'
         self.assertTrue(created.is_dir())
@@ -172,7 +172,7 @@ class EditorTests(unittest.TestCase):
         ed.hierarchy_sync()
         self.assertIs(ed.hierarchy.items.require_target('view_root'),ed.app)
         self.assertTrue(any(r.visible and r.items.target('target') is ed.camera for r in ed.hierarchy_rows))
-        actions = ed.app.systems['app'].namespace['context_actions'](ed.app)
+        actions = ed.app.items.behaviour('app', kind='system').namespace['context_actions'](ed.app)
         self.assertNotIn('Set parent as root entity',[a['label'] for a in actions if a])
         ed.set_hierarchy_root(target)
         reopened.destroy(target)
@@ -186,7 +186,7 @@ class EditorTests(unittest.TestCase):
         self.assertTrue(any(r.visible and r.file_item['path'] == ed.project/'inspector.py' for r in ed.file_explorer_rows))
         ed.set_file_root(ed.project/'systems/game')
         item=ed.file_explorer.visible_items[0]
-        actions=ed.app.systems['app'].namespace['context_actions']({'file_item':item})
+        actions=ed.app.items.behaviour('app', kind='system').namespace['context_actions']({'file_item':item})
         next(a for a in actions if a and a['label']=='Set parent as root folder')['run'](None)
         self.assertEqual(ed.file_explorer.view_root,'systems')
 
@@ -202,10 +202,10 @@ class EditorTests(unittest.TestCase):
         reopened.step(0)
         app = reopened.entities[0]
         self.assertEqual(reopened.assets.registry.get_id(destination), identity)
-        self.assertEqual(Path(app.systems['ui'].definition.path), destination)
+        self.assertEqual(Path(app.items.behaviour('ui', kind='system').definition.path), destination)
         self.assertFalse([(name, list(instance.errors)) for e in reopened.entities
-                          for name, instance in e.systems.items() if instance.errors])
-        actions = app.systems['app'].namespace['context_actions'](app.application_state.game)
+                          for name, instance in e.items.behaviour_dict('system').items() if instance.errors])
+        actions = app.items.behaviour('app', kind='system').namespace['context_actions'](app.application_state.game)
         self.assertIn('View affecting systems', [a['label'] for a in actions if a])
 
     def test_system_effect_file_menu_and_inspector_use_asset_identity(self):
@@ -214,10 +214,10 @@ class EditorTests(unittest.TestCase):
         path = ed.project / 'observed.py'
         path.write_text('def update(dt):\n    for target in query("effect_target"):\n        target.x += 1', encoding='utf-8')
         identity = self.runtime.assets.registry.register(path)
-        ed.game.systems.attach('observed', self.runtime.assets[identity])
+        ed.game.items.attach_system('observed', self.runtime.assets[identity])
         target = self.runtime.create(parent=ed.game, effect_target=True, x=0, y=0, w=1, h=1)
         self.runtime.step(0)
-        actions = ed.app.systems["app"].namespace["context_actions"]({'file_item':dict(path=path,name=path.name,is_dir=False,type='system',asset_id=identity,rel_path=path.name)})
+        actions = ed.app.items.behaviour("app", kind='system').namespace["context_actions"]({'file_item':dict(path=path,name=path.name,is_dir=False,type='system',asset_id=identity,rel_path=path.name)})
         next(a for a in actions if a and a['label'] == 'Highlight affected entities')['run'](None)
         self.assertEqual(ed.app.highlight_system_asset, identity)
         self.assertEqual(ed.affected_entities()[target.id], (90,195,125))
@@ -227,20 +227,20 @@ class EditorTests(unittest.TestCase):
         self.assertEqual(row.ink,(90,195,125))
         self.assertEqual(row.asset_id,identity)
         path.write_text('def update(dt):\n    list(query("effect_target"))', encoding='utf-8')
-        ed.game.systems.reload('observed', SystemDefinition(path.read_text(encoding='utf-8'), str(path)))
+        ed.game.items.reload(ed.game.items.behaviour('observed', kind='system').id, SystemDefinition(path.read_text(encoding='utf-8'), str(path)))
         self.runtime.step(0)
         self.assertEqual(ed.affected_entities()[target.id], (85,155,230))
         self.assert_healthy()
 
     def test_docking_attachment_can_detach_and_recompose(self):
         app = self.editor.app
-        instance = app.systems['docking']
+        instance = app.items.behaviour('docking', kind='system')
         definition = instance.definition
         self.assertTrue(definition.path.endswith('systems\\editor\\layout\\docking.py') or definition.path.endswith('systems/editor/layout/docking.py'))
-        del app.systems['docking']
+        app.items.remove(app.items.behaviour('docking', kind='system').id)
         self.runtime.step(0)
         self.assert_healthy()
-        app.systems.attach('docking',definition)
+        app.items.attach_system('docking', definition)
         self.runtime.step(0)
         self.assert_healthy()
 
@@ -276,7 +276,7 @@ class EditorTests(unittest.TestCase):
         self.assertGreaterEqual(ed.viewport.y, group.tab_bar_rect[1]+group.tab_bar_rect[3])
         self.assertLessEqual(ed.viewport.y+ed.viewport.h, ed.zoom_label.y)
         self.assertTrue(ed.viewport.visible)
-        render = ed.game.systems['render']
+        render = ed.game.items.behaviour('render', kind='system')
         ed.dock_tree.remove_panel('viewport')
         self.runtime.step(0)
         self.assertFalse(ed.viewport_panel.visible)
@@ -300,7 +300,7 @@ class EditorTests(unittest.TestCase):
         code.buffer.text = 'enti'
         code.buffer.cursor = code.buffer.anchor = 4
         state = {'snapshot': ('enti',4,4), 'matches': [('entity','statement')], 'prefix': 'enti'}
-        code.systems['code_editor'].namespace['accept_completion'](code,state,0)
+        code.items.behaviour('code_editor', kind='system').namespace['accept_completion'](code,state,0)
         self.assertEqual(code.buffer.text, 'entity')
         self.send(('key','Z',True,False))
         self.assertEqual((code.buffer.text,code.buffer.cursor,code.buffer.anchor), ('enti',4,4))
@@ -323,7 +323,7 @@ class EditorTests(unittest.TestCase):
         self.assert_healthy()
 
     def assert_healthy(self):
-        instance = self.editor.app.systems["app"]
+        instance = self.editor.app.items.behaviour("app", kind='system')
         self.assertTrue(instance.running, list(instance.errors))
         self.assertEqual(list(instance.errors), [])
 
@@ -419,7 +419,7 @@ class EditorTests(unittest.TestCase):
         self.runtime.step(0.5)
         self.assertEqual((moving.x, moving.y), (original[0]+1, original[1]-0.5))
         self.assertEqual((still.x, still.y), stationary)
-        instance = self.editor.game.systems["physics"]
+        instance = self.editor.game.items.behaviour("physics", kind='system')
         self.assertTrue(instance.running)
         self.assertEqual(tuple(instance.errors), ())
         self.click(self.editor.system_panel_button)
@@ -427,10 +427,10 @@ class EditorTests(unittest.TestCase):
         self.assertIs(self.editor.extra_panels[-1].items.require_target("target"), self.editor.game)
 
     def test_syntax_error_preserves_editor_and_previous_renderer(self):
-        old = self.editor.game.systems["render"]
+        old = self.editor.game.items.behaviour("render", kind='system')
         self.type(self.editor.code, "def broken(")
         self.click(self.editor.save_button)
-        self.assertIs(self.editor.game.systems["render"], old)
+        self.assertIs(self.editor.game.items.behaviour("render", kind='system'), old)
         self.assertTrue(old.running)
         self.assertIn("SyntaxError", self.editor.app.status)
         self.assert_healthy()
@@ -510,7 +510,7 @@ class EditorTests(unittest.TestCase):
         self.select(self.editor.game)
         self.click(self.editor.attach_button)
         self.runtime.step(1)
-        self.assertFalse(self.editor.game.systems["broken"].running)
+        self.assertFalse(self.editor.game.items.behaviour("broken", kind='system').running)
         self.assert_healthy()
         self.click(self.editor.panel_button)
         self.assertEqual(len(self.editor.extra_panels), 1)
@@ -518,17 +518,17 @@ class EditorTests(unittest.TestCase):
     def test_project_source_reload_rebinds_actions_without_rebuilding_controls(self):
         from lbe import SystemDefinition
         root = self.editor.app
-        old = root.systems["app"]
+        old = root.items.behaviour("app", kind='system')
         source = old.definition.source
         before = set(self.runtime.entities)
-        replacement = root.systems.reload("app", SystemDefinition(source, old.definition.path))
+        replacement = root.items.reload(root.items.behaviour("app", kind='system').id, SystemDefinition(source, old.definition.path))
         self.assertIsNot(replacement, old)
         self.assertEqual(set(self.runtime.entities), before)
         self.click(self.editor.new_button)
         self.assertIn("New source:", root.status)
-        provider = root.systems["source_files"]
+        provider = root.items.behaviour("source_files", kind='system')
         updated = provider.definition.source.replace("New source:", "Revised source:")
-        root.systems.reload("source_files", SystemDefinition(updated, provider.definition.path))
+        root.items.reload(root.items.behaviour("source_files", kind='system').id, SystemDefinition(updated, provider.definition.path))
         self.click(self.editor.new_button)
         self.assertIn("Revised source:", root.status)
         self.assertEqual(set(self.runtime.entities), before)
@@ -855,7 +855,7 @@ class EditorTests(unittest.TestCase):
         self.click(ed.save_button)
         self.select(ed.game)
         self.click(ed.attach_button)
-        self.assertIn("physics", ed.game.systems)
+        self.assertIn("physics", ed.game.items.behaviour_dict('system'))
 
         # 4. Modify panel layout
         ed.app.left_column_w = 420
@@ -893,8 +893,8 @@ class EditorTests(unittest.TestCase):
         self.assertIs(moving2.items.require_target("partner"), still2)
 
         # 10. Verify system attachment is reconstructed and running
-        self.assertIn("physics", game2.systems)
-        self.assertTrue(game2.systems["physics"].running)
+        self.assertIn("physics", game2.items.behaviour_dict('system'))
+        self.assertTrue(game2.items.behaviour("physics", kind='system').running)
 
         # 11. Verify movement execution
         runtime2.step(0.5)
@@ -1142,8 +1142,8 @@ class EditorTests(unittest.TestCase):
         self.assertTrue(popup.visible)
 
         # All editor panels and UI systems remain running and visible
-        self.assertTrue(self.editor.app.systems["ui"].running)
-        self.assertEqual(tuple(self.editor.app.systems["ui"].errors), ())
+        self.assertTrue(self.editor.app.items.behaviour("ui", kind='system').running)
+        self.assertEqual(tuple(self.editor.app.items.behaviour("ui", kind='system').errors), ())
         self.assertNotIn("ui_error", self.editor.app.items.value_dict())
 
         self.assertTrue(self.editor.hierarchy.visible)
@@ -1160,7 +1160,7 @@ class EditorTests(unittest.TestCase):
         self.assertFalse(popup.visible)
 
         # UI system remains active and panels remain visible
-        self.assertTrue(self.editor.app.systems["ui"].running)
+        self.assertTrue(self.editor.app.items.behaviour("ui", kind='system').running)
         self.assertTrue(self.editor.hierarchy.visible)
         self.assertTrue(self.editor.inspector.visible)
 
@@ -1882,7 +1882,7 @@ class EditorTests(unittest.TestCase):
         self.assertTrue(len(line1.text) > 0)
 
         # Calling stop() cleans up hover child parts
-        code.systems["code_editor"].stop()
+        code.items.behaviour("code_editor", kind='system').stop()
         self.assertFalse(tip.visible)
         self.assertFalse(line0.visible)
         self.assertFalse(line1.visible)
@@ -1990,7 +1990,7 @@ class EditorTests(unittest.TestCase):
         self.runtime.step(0)
         popup = next((c for c in code.children if c.items.get_value("part") == "autocomplete_popup"), None)
         if popup is not None:
-            code.systems["code_editor"].stop()
+            code.items.behaviour("code_editor", kind='system').stop()
             self.assertFalse(popup.visible)
     def test_quote_auto_pairing_on_indented_empty_line(self):
         """Issue #48: Typing quote on an indented line must auto-close with cursor between."""
@@ -2190,7 +2190,7 @@ class EditorTests(unittest.TestCase):
 
         # Click to attach render system to ActorEntity
         self.click(render_item)
-        self.assertIn("render", ent.systems)
+        self.assertIn("render", ent.items.behaviour_dict('system'))
         self.assertFalse(ed.no_systems_label.visible)
 
         # 3. System appears in inspector row with Edit button
@@ -2212,7 +2212,7 @@ class EditorTests(unittest.TestCase):
         self.click(detach_item)
 
         # Verify system is cleanly detached
-        self.assertNotIn("render", ent.systems)
+        self.assertNotIn("render", ent.items.behaviour_dict('system'))
         self.assertTrue(ed.no_systems_label.visible)
 
     def test_clean_float_formatting_in_inspector(self):
@@ -2332,7 +2332,7 @@ class EditorTests(unittest.TestCase):
         self.runtime.step(0)
         # Attach a system
         from lbe.systems import SystemDefinition
-        ent.systems.attach("sample", SystemDefinition('def update(dt): pass'))
+        ent.items.attach_system("sample", SystemDefinition('def update(dt): pass'))
         self.runtime.step(0)
         edit_btn = next(b for b in ed.system_edit_buttons if b.visible)
         self.assertEqual(edit_btn.text, "Edit")
@@ -2612,7 +2612,7 @@ class EditorTests(unittest.TestCase):
         ed = self.editor
         self.runtime.step(0)
         # Ensure render.py is open and attached to Game
-        self.assertIn("render", ed.game.systems)
+        self.assertIn("render", ed.game.items.behaviour_dict('system'))
         self.assertEqual(ed.path_field.buffer.text, "render.py")
         old_file = ed.project / "render.py"
         self.assertTrue(old_file.exists())
@@ -2627,9 +2627,9 @@ class EditorTests(unittest.TestCase):
         self.assertEqual(new_path.name, "custom_render.py")
 
         # 2. System attachments on entities updated
-        self.assertNotIn("render", ed.game.systems)
-        self.assertIn("custom_render", ed.game.systems)
-        self.assertTrue(ed.game.systems["custom_render"].running)
+        self.assertNotIn("render", ed.game.items.behaviour_dict('system'))
+        self.assertIn("custom_render", ed.game.items.behaviour_dict('system'))
+        self.assertTrue(ed.game.items.behaviour("custom_render", kind='system').running)
 
         # 3. Code editor state updated
         self.assertEqual(ed.path_field.buffer.text, "custom_render.py")
@@ -2752,7 +2752,7 @@ class EditorTests(unittest.TestCase):
         # Tab Inspector into Viewport
         success = ed.dock_tree.dock_panel("inspector", "viewport", "center")
         self.assertTrue(success)
-        ed.app.systems["app"].namespace["layout"]()
+        ed.app.items.behaviour("app", kind='system').namespace["layout"]()
 
         # Check tab buttons rendered for the group
         visible_tabs = [b for b in ed.dock_tab_buttons if b.items.get_value("visible", False)]
@@ -2822,7 +2822,7 @@ class EditorTests(unittest.TestCase):
         self.assertFalse(ed.hierarchy_splitter.items.get_value("visible", False))
 
         # Restore Inspector from View menu
-        ed.app.systems["app"].namespace["toggle_panel_view"]("inspector")
+        ed.app.items.behaviour("app", kind='system').namespace["toggle_panel_view"]("inspector")
 
         # Inspector is restored and visible
         self.assertTrue(ed.inspector.items.get_value("visible", False))

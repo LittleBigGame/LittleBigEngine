@@ -54,7 +54,7 @@ def restoration(runtime):
                 if change.kind == "system.detach":
                     state.system_order[eid] = [name for name in state.system_order.get(eid, ()) if name != change.key]
             elif change.kind == "system.reorder":
-                state.system_order[eid] = list(change.entity.systems) + list(state.systems.get(eid, {}))
+                state.system_order[eid] = list(change.entity.items.behaviour_dict('system')) + list(state.systems.get(eid, {}))
         runtime.changes.subscribe(changed)
     return runtime.services["restoration"]
 
@@ -214,7 +214,7 @@ def serialize_entity(entity, *, project_dir=None, on_unsupported="error", known_
         if known_ids is not None and target.id not in known_ids:
             raise ValueError(f"Relation {key!r} on {entity.id} targets an entity outside the saved project")
         data["relations"][key] = str(target.id)
-    for name, instance in entity.systems.items():
+    for name, instance in entity.items.behaviour_dict('system').items():
         definition = instance.definition
         path = Path(definition.path)
         if project_dir is not None and not definition.path.startswith("<"):
@@ -227,7 +227,7 @@ def serialize_entity(entity, *, project_dir=None, on_unsupported="error", known_
             declaration = {"source": definition.source, "path": definition.path}
         data["systems"][name] = declaration
     data['scripts'] = {}
-    for name,instance in entity.scripts.items():
+    for name,instance in entity.items.behaviour_dict('script').items():
         definition=instance.definition
         path=Path(definition.path)
         try:
@@ -359,7 +359,7 @@ def activate_entities(entities, runtime, *, project_dir=None):
             continue
         resolve_references(entity, runtime)
         for name, declaration in tuple(pending.systems.get(entity.id, {}).items()):
-            if name in entity.systems:
+            if entity.items.has_behaviour(name, kind='system'):
                 pending.systems.get(entity.id, {}).pop(name, None)
                 continue
             try:
@@ -372,13 +372,13 @@ def activate_entities(entities, runtime, *, project_dir=None):
                     if not path.is_relative_to(Path(project_dir).resolve()):
                         raise ValueError("System path must be inside the project")
                     definition = runtime.assets.system(path)
-                instance = entity.systems.attach(name, definition, identity=declaration.get("item_id"), activate=False)
+                instance = entity.items.attach_system(name, definition, identity=declaration.get("item_id"), activate=False)
                 ready.append(instance)
                 pending.systems.get(entity.id, {}).pop(name, None)
             except (OSError, ValueError, TypeError, SyntaxError) as error:
                 pending.diagnostics.append(Diagnostic("project.system", f"{entity.id}.{name}: {error}"))
         for identity,declaration in tuple(pending.scripts.get(entity.id,{}).items()):
-            if identity in entity.scripts:
+            if entity.items.has_behaviour(identity, kind='script'):
                 pending.scripts[entity.id].pop(identity,None)
                 continue
             try:
@@ -392,16 +392,16 @@ def activate_entities(entities, runtime, *, project_dir=None):
                     definition=SystemDefinition.from_file(path)
                     from dataclasses import replace
                     definition=replace(definition,asset_id=UUID(identity))
-                instance=entity.scripts.attach(definition, item_identity=declaration.get("item_id"), activate=False)
+                instance=entity.items.attach_script(definition, item_identity=declaration.get("item_id"), activate=False)
                 ready.append(instance)
                 pending.scripts[entity.id].pop(identity,None)
             except (OSError,ValueError,TypeError,SyntaxError) as error:
                 pending.diagnostics.append(Diagnostic('project.script',f'{entity.id}.{identity}: {error}'))
         pending.loading += 1
         try:
-            names = [name for name in pending.system_order.get(entity.id, ()) if name in entity.systems]
+            names = [name for name in pending.system_order.get(entity.id, ()) if entity.items.has_behaviour(name, kind='system')]
             for index, name in enumerate(names):
-                entity.systems.move(name, index)
+                entity.items.move_behaviour(entity.items.behaviour(name, kind='system').id, index)
         finally:
             pending.loading -= 1
     # All attachments have identities before source linking/initialization.
@@ -631,7 +631,7 @@ def load_project(window, graphics, input_state, directory, *, template=None, ent
         app_id = _uuid.uuid5(_uuid.NAMESPACE_URL, f"lbe://{directory.resolve().as_posix()}/application")
     root = runtime.create(identity=app_id, name="Application", tags=["root"])
     try:
-        instance = root.systems.attach(path.stem, runtime.assets.system(path))
+        instance = root.items.attach_system(path.stem, runtime.assets.system(path))
         if not instance.running:
             raise RuntimeError(instance.errors[-1].traceback)
     except Exception:

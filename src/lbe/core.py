@@ -12,26 +12,18 @@ _MISSING = object()
 class Entity:
     __slots__ = (
         "_runtime", "_id", "_alive", "_destroying", "_items",
-        "_systems", "_scripts",
     )
 
     def __init__(self, runtime, identity):
-        from .systems import Systems
-        from .scripts import Scripts
-
         object.__setattr__(self, "_runtime", runtime)
         object.__setattr__(self, "_id", identity)
         object.__setattr__(self, "_alive", True)
         object.__setattr__(self, "_destroying", False)
         object.__setattr__(self, "_items", Items(self))
-        object.__setattr__(self, "_systems", Systems(self))
-        object.__setattr__(self, "_scripts", Scripts(self))
 
     id = property(lambda self: self._id)
     alive = property(lambda self: self._alive)
     runtime = property(lambda self: self._runtime)
-    systems = property(lambda self: self._systems)
-    scripts = property(lambda self: self._scripts)
     items = property(lambda self: self._items)
     handle = property(lambda self: self.runtime.linker.handle(self.id))
 
@@ -68,7 +60,7 @@ class Entity:
         return self.runtime._children.setdefault(self.id, [])
 
     def run(self, reference, *args, **kwargs):
-        return self.scripts.run(reference,*args,**kwargs)
+        return self.items.run_script(reference, *args, **kwargs)
 
     def _check(self):
         if not self._alive:
@@ -223,10 +215,10 @@ def _matches_requirement(entity, requirement):
         uid=identity(entity,requirement)
         if uid is None:
             return False
-        if str(uid) in entity.scripts or str(uid) in entity.systems:
+        if entity.items.has_behaviour(str(uid), kind='script') or entity.items.has_behaviour(str(uid), kind='system'):
             return True
         registry=entity.runtime.assets.registry
-        for instance in entity.systems.values():
+        for instance in entity.items.behaviour_dict('system').values():
             if instance.definition.asset_id == uid:
                 return True
             try:
@@ -388,8 +380,8 @@ class Runtime:
         for node in reversed(subtree):
             if not node.alive:
                 continue
-            node.systems.clear()
-            node.scripts.clear()
+            node.items.clear_behaviours('system')
+            node.items.clear_behaviours('script')
             for other, key in tuple(self._incoming.pop(node, ())):
                 if other.alive and other.items.target(key) is node:
                     other.items.disconnect(key)
@@ -412,7 +404,7 @@ class Runtime:
             raise ValueError("dt must be a nonnegative number of seconds")
         self._stepping = True
         try:
-            instances = tuple(instance for entity in self.entities for instance in entity.systems.values())
+            instances = tuple(instance for entity in self.entities for instance in entity.items.behaviour_dict('system').values())
             pause_cache = {}
             for phase in ("update", "draw"):
                 for instance in instances:

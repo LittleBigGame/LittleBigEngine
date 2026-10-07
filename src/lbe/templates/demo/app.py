@@ -22,7 +22,7 @@ player.items.ensure_value("score", 0)
 target = create(parent=game, name="Entity B", x=1.0, y=0.0, w=1.5, h=1.5,
                 color=(232, 165, 80), tags=["pickup"])
 
-game.systems.attach("render", assets.system(project / "render.py"))
+game.items.attach_system("render", assets.system(project / "render.py"))
 
 
 def on_key(event):

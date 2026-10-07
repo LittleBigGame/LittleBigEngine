@@ -72,7 +72,7 @@ class ProjectFiles:
         candidate.relocate(source, destination)
         changes = []
         for entity in self.runtime.entities:
-            for collection in (entity.systems,entity.scripts):
+            for collection in (entity.items.behaviour_dict('system'),entity.items.behaviour_dict('script')):
               for name, instance in collection.items():
                 path = Path(instance.definition.path).resolve()
                 if path == source or path.is_relative_to(source):
@@ -80,7 +80,7 @@ class ProjectFiles:
                     new_name = new_path.stem if name == path.stem else name
                     if new_name != name and new_name in collection:
                         raise ValueError(f'System name collision: {new_name}')
-                    changes.append((entity, collection, name, new_name, path, new_path))
+                    changes.append((entity, instance.id, name, new_name, path, new_path))
         pending = restoration(self.runtime)
         script_declarations = {eid: {name: dict(data) for name,data in scripts.items()} for eid,scripts in pending.scripts.items()}
         declarations = {eid: {name: dict(data) for name, data in systems.items()}
@@ -89,8 +89,8 @@ class ProjectFiles:
         try:
             source.rename(destination)
             registry.from_dict(candidate.to_dict())
-            for entity, collection, name, new_name, _, path in changes:
-                collection.relocate(name, path, new_name=new_name)
+            for entity, item_id, name, new_name, _, path in changes:
+                entity.items.relocate(item_id, path, new_name=new_name)
             for systems in tuple(pending.systems.values())+tuple(pending.scripts.values()):
                 for declaration in systems.values():
                     if 'source' not in declaration and declaration.get('path'):
@@ -101,9 +101,9 @@ class ProjectFiles:
             save()
             self._commit(journal)
         except Exception:
-            for entity, collection, name, new_name, path, _ in reversed(changes):
-                if entity.alive and new_name in collection:
-                    collection.relocate(new_name, path, new_name=name)
+            for entity, item_id, name, new_name, path, _ in reversed(changes):
+                if entity.alive and item_id in entity.items:
+                    entity.items.relocate(item_id, path, new_name=name)
             registry.from_dict(before)
             pending.systems = declarations
             pending.scripts = script_declarations
@@ -139,22 +139,25 @@ class ProjectFiles:
     def _sync_sources(self, path, *, restore):
         if not restore:
             for entity in self.runtime.entities:
-              for collection in (entity.systems,entity.scripts):
+              for collection in (entity.items.behaviour_dict('system'),entity.items.behaviour_dict('script')):
                 for name, instance in tuple(collection.items()):
                     source = Path(instance.definition.path).resolve() if instance.definition.path else None
                     if source is not None and (source == path or source.is_relative_to(path)) and instance.running:
-                        self._suspended[(entity.id,name,id(collection))] = (collection,instance)
+                        self._suspended[(entity.id,instance.id)] = instance
                         instance.stop()
                         self.runtime.assets.invalidate(source)
         else:
-            for (identity,name,role), (collection,instance) in tuple(self._suspended.items()):
+            for (identity,item_id), instance in tuple(self._suspended.items()):
                 source = Path(instance.definition.path).resolve()
                 if source != path and not source.is_relative_to(path):
                     continue
-                entity = self.runtime.resolve(identity)
-                if entity is not None and collection.get(name) is instance and source.is_file():
-                    collection.reload(name,self.runtime.assets.system(source))
-                self._suspended.pop((identity,name,role),None)
+                try:
+                    entity = self.runtime.resolve(identity)
+                except KeyError:
+                    entity = None
+                if entity is not None and entity.items._records.get(item_id) is instance and source.is_file():
+                    entity.items.reload(item_id,self.runtime.assets.system(source))
+                self._suspended.pop((identity,item_id),None)
 
     def _record(self, command, save):
         if not self._replaying:

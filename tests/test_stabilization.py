@@ -25,7 +25,7 @@ class PersistenceContracts(TestCase):
             root.move_child(b, 0)
             a.link = b
             a.items.connect('peer', b)
-            root.systems.attach('inspect', runtime.assets.system(folder / 'inspect.py'))
+            root.items.attach_system('inspect', runtime.assets.system(folder / 'inspect.py'))
             identities = root.id, a.id, b.id
             for _ in range(3):
                 save_project(folder, entities=runtime.entities)
@@ -78,7 +78,7 @@ class PersistenceContracts(TestCase):
     def test_deferred_activation_sees_application_links_and_inline_source_survives(self):
         runtime = Runtime()
         entity = runtime.create()
-        entity.systems.attach('inline', SystemDefinition('def start():\n    entity.ready = entity.items.has_link("camera")\n'))
+        entity.items.attach_system('inline', SystemDefinition('def start():\n    entity.ready = entity.items.has_link("camera")\n'))
         data = serialize_entities([entity])
         other = Runtime()
         restored = deserialize_entities(data, other, activate=False)[entity.id]
@@ -159,7 +159,7 @@ class EditorContracts(TestCase):
         self.runtime.step(0)
         self.assertNotIn('ui_error', self.editor.app.items.value_dict())
         for entity in self.runtime.entities:
-            for instance in entity.systems.values():
+            for instance in entity.items.behaviour_dict('system').values():
                 self.assertFalse(instance.errors, list(instance.errors))
 
     def click(self, control):
@@ -196,7 +196,7 @@ class EditorContracts(TestCase):
         self.send(('click', row.x + row.w / 2, row.y + row.h / 2, 1, 0, 2))
         self.click(ed.add_system_button)
         self.click(self.menu_item('physics'))
-        self.assertIn('physics', ed.game.systems)
+        self.assertIn('physics', ed.game.items.behaviour_dict('system'))
         before = moving.x
         self.runtime.step(0.5)
         self.assertEqual(moving.x, before + 1)
@@ -213,17 +213,17 @@ class EditorContracts(TestCase):
     def test_panel_detach_stops_retained_behavior_and_reload_rebinds_once(self):
         ed = self.editor
         original = ed.identity_label.text
-        definition = ed.inspector.systems['inspector'].definition
-        del ed.inspector.systems['inspector']
+        definition = ed.inspector.items.behaviour('inspector', kind='system').definition
+        ed.inspector.items.remove(ed.inspector.items.behaviour('inspector', kind='system').id)
         ed.game.children[0].name = 'ChangedWhileDetached'
         self.runtime.step(0)
         self.assertEqual(ed.identity_label.text, original)
         self.assertFalse(hasattr(ed, 'inspector_sync'))
-        ed.inspector.systems.attach('inspector', definition)
+        ed.inspector.items.attach_system('inspector', definition)
         self.runtime.step(0)
         self.assertIn('ChangedWhileDetached', ed.identity_label.text)
         before = ed.inspector_sync
-        ed.inspector.systems.reload('inspector', definition)
+        ed.inspector.items.reload(ed.inspector.items.behaviour('inspector', kind='system').id, definition)
         self.assertIsNot(before, ed.inspector_sync)
         self.send()
 
@@ -243,21 +243,21 @@ class EditorContracts(TestCase):
         other = ed.project / 'other.py'
         other.write_text('def update(dt):\n    entity.marker = "other"\n')
         entity = self.runtime.create(parent=ed.game, label='render')
-        instance = entity.systems.attach('render', self.runtime.assets.system(other))
+        instance = entity.items.attach_system('render', self.runtime.assets.system(other))
         ed.code.buffer.insert('# dirty\n')
         dirty = ed.code.buffer.text
         original = (ed.project / 'render.py').read_text()
-        game_instance = ed.game.systems['render']
+        game_instance = ed.game.items.behaviour('render', kind='system')
         destination = ed.rename_file('renamed.py')
-        self.assertIs(entity.systems['render'], instance)
+        self.assertIs(entity.items.behaviour('render', kind='system'), instance)
         self.assertEqual(entity.label, 'render')
-        self.assertIs(ed.game.systems['renamed'], game_instance)
+        self.assertIs(ed.game.items.behaviour('renamed', kind='system'), game_instance)
         self.assertEqual(destination.read_text(), original)
         self.assertEqual(ed.code.buffer.text, dirty)
         self.assertNotEqual(ed._saved_source[1], dirty)
         folder = ed.project / 'folder'
         folder.mkdir()
-        ed.app.systems['app'].namespace['move_file_or_folder'](destination, folder)
+        ed.app.items.behaviour('app', kind='system').namespace['move_file_or_folder'](destination, folder)
         self.assertEqual(ed.path_field.buffer.text, 'folder/renamed.py')
         self.assertNotEqual(ed._saved_source[1], dirty)
 
@@ -288,7 +288,7 @@ class EditorContracts(TestCase):
         registry = self.runtime.assets.registry
         identity = registry.register(path)
         original = self.editor.code.buffer.text
-        self.editor.app.systems['app'].globals['prompt_rename_file_item'](
+        self.editor.app.items.behaviour('app', kind='system').globals['prompt_rename_file_item'](
             {'type': 'image', 'name': path.name, 'path': path})
         self.type(self.editor.path_field, 'renamed.png', commit=True)
         self.assertEqual(registry.get_id('renamed.png'), identity)
@@ -328,7 +328,7 @@ class FileOperationContracts(TestCase):
             registry = runtime.assets.registry = AssetRegistry(folder)
             identity = registry.register(script)
             entity = runtime.create()
-            instance = entity.systems.attach('custom', runtime.assets.system(script))
+            instance = entity.items.attach_system('custom', runtime.assets.system(script))
             files = ProjectFiles(runtime, folder)
             save = lambda: save_project(folder, entities=runtime.entities, assets=registry)
             save()
@@ -344,7 +344,7 @@ class FileOperationContracts(TestCase):
             self.assertTrue(Path(instance.definition.path).samefile(script))
             files.relocate(folder / 'src', folder / 'lib', save=save)
             self.assertEqual(registry.get_id(folder / 'lib/a.py'), identity)
-            self.assertIs(entity.systems['custom'], instance)
+            self.assertIs(entity.items.behaviour('custom', kind='system'), instance)
             files.delete(folder / 'lib', save=save)
             self.assertEqual(registry.get_id(folder / 'lib/a.py'), identity)
             self.assertFalse((folder / 'lib').exists())
@@ -411,7 +411,7 @@ class ApplicationContracts(TestCase):
         self.assertNotIn('entities:', prelude)
         runtime = Runtime()
         entity = runtime.create()
-        instance = entity.systems.attach('api', SystemDefinition('assert runtime is entity.runtime\nassert callable(asset)\n'))
+        instance = entity.items.attach_system('api', SystemDefinition('assert runtime is entity.runtime\nassert callable(asset)\n'))
         self.assertFalse(instance.errors)
         runtime.close()
 
@@ -446,7 +446,7 @@ class RecoveryContracts(TestCase):
             self.assertEqual(list(saved[0]['systems']), ['first', 'second'])
             (folder / 'first.py').write_text('def update(dt):\n    pass\n')
             activate_entities([entity], runtime, project_dir=folder)
-            self.assertEqual(list(entity.systems), ['first', 'second'])
+            self.assertEqual(list(entity.items.behaviour_dict('system')), ['first', 'second'])
 
     def test_inline_references_are_code_only_and_layout_is_attachable(self):
         from lbe.ui import Layout, reference_matches

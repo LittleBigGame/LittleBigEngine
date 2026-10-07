@@ -20,16 +20,20 @@ rebuilt from the UUID dictionary; they retain canonical record order after edits
 Named value/link helpers operate on those records, and `value_dict()` returns a
 disposable snapshot, not writable authoritative state. Engine UI, editor template
 and backend component consumers now use these native item operations. The older
-behaviour properties and dynamic data attributes still exist at this
-intermediate checkpoint; their removal, native persistence and unified item
-inspector are outstanding cutover work. `Entity.components`, `Entity.tags` and
-`Entity.relations`, their storage slots and their projection classes have been
-removed. Tags and links are actual UUID records; named helpers mutate those
+dynamic data attributes still exist at this intermediate checkpoint; their
+removal, native persistence and unified item inspector are outstanding cutover
+work. `Entity.components`, `Entity.tags`, `Entity.relations`, `Entity.systems`
+and `Entity.scripts`, their storage slots and their projection classes have been
+removed. Tags, links and behaviours are actual UUID records; named helpers mutate those
 records and maintain the disposable incoming-link index. `Runtime.create(items=...)`
 accepts actual typed UUID records; the old `components=` argument is rejected.
 
 On `codex/uuid-kernel-gui`, entity data is owned by one UUID-keyed `Items` store.
-Remaining named system/script collections are interim projections.
+Named behaviour queries return disposable snapshots, not mutable collections.
+Attachment/removal, reload, source relocation and file-history recovery use
+item UUIDs at the mutation boundary. Execution namespaces no longer inject a
+mutable `systems` collection. Source-asset identity is distinct from attachment
+identity; script name edits do not invalidate UUID or source-asset bindings.
 Components, inherited declarations, tags, relation/parent links and
 behavior attachments have persistent UUIDs; links store target UUIDs. Name/type
 indexes and ordered child adjacency are derived runtime state.

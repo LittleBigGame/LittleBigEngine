@@ -450,7 +450,7 @@ def create_launcher_runtime(window, graphics, input_state, on_select_project):
 def update(dt):
     pass
 """)
-    system = root.systems.attach("launcher_layout", sys_def)
+    system = root.items.attach_system("launcher_layout", sys_def)
     system.namespace["update"] = update
 
     # Perform initial layout pass synchronously before first render frame

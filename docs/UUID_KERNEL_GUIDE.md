@@ -2,7 +2,7 @@
 
 This describes an intermediate migration checkpoint, not the completed
 no-compatibility architecture. The inspector still has split sections;
-behaviour access and project persistence still need their native-only cutover.
+project persistence and dynamic data attributes still need their native-only cutover.
 
 ## Start through the project launcher
 
@@ -84,7 +84,8 @@ typed records in that collection. `entity[uuid]` retrieves a declaration;
 other type queries retrieve matching typed records. `System` and `Script` are
 aliases of the existing instance classes, not another execution model.
 
-`Entity.components`, `Entity.tags` and `Entity.relations` have been removed,
+`Entity.components`, `Entity.tags`, `Entity.relations`, `Entity.systems` and
+`Entity.scripts` have been removed,
 including their backing slots and projection classes. Named convenience
 operations now read or mutate the actual UUID records:
 
@@ -98,8 +99,11 @@ target = player.items.require_target('aim_target')
 
 Names identify records within a type category; UUIDs remain the dictionary keys.
 `value_dict()` and `link_dict()` return disposable snapshots, not live collections.
-Dynamic `entity.x` and the `entity.systems` / `entity.scripts` projections still
-exist at this checkpoint and are outstanding removal work. Ordinary
+Behaviour attachment uses `items.attach_system(...)` or `items.attach_script(...)`;
+the returned record is an actual UUID item. Reload, relocation and removal
+select its item UUID. `items.behaviour_dict(kind)` is a disposable query snapshot.
+Dynamic `entity.x` still exists at this checkpoint and is outstanding removal
+work. Ordinary
 component edits, renames and successful attachment reloads preserve item UUIDs.
 Deletion/recreation is a new identity. Systems retain the existing lifecycle,
 per-attachment namespaces, subscription cleanup and update-before-draw order.

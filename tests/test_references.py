@@ -39,7 +39,7 @@ actual = {token}
         component = source.items.component("x")
         owner = self.runtime.create()
         definition = SystemDefinition(f"target = <|Entity:{source.id}|>\nvalue = <|Component:{component.id}|>\ndef update(dt):\n    target.x = value.value + 1\n")
-        attachment = owner.systems.attach("worker", definition)
+        attachment = owner.items.attach_system("worker", definition)
         self.assertTrue(attachment.running)
         self.runtime.step(0)
         self.runtime.step(0)
@@ -51,7 +51,7 @@ actual = {token}
         e = self.runtime.create(x=1)
         before = len(self.runtime.entities)
         for token in (f"<|Entity:{uuid4()}|>", f"<|Component:{e.id}|>"):
-            attachment = e.systems.attach(str(uuid4()), SystemDefinition(f"target = {token}"))
+            attachment = e.items.attach_system(str(uuid4()), SystemDefinition(f"target = {token}"))
             self.assertFalse(attachment.running)
             self.assertTrue(attachment.errors)
         self.assertEqual(len(self.runtime.entities), before)
@@ -62,13 +62,13 @@ actual = {token}
 
     def test_restore_links_forward_behavior_references_before_initializing(self):
         a, b = self.runtime.create(), self.runtime.create()
-        behavior = b.systems.attach("later", SystemDefinition("def update(dt): pass"))
-        a.systems.attach("earlier", SystemDefinition(f"target = <|System:{behavior.id}|>\ndef update(dt):\n    self.other = target.id"))
+        behavior = b.items.attach_system("later", SystemDefinition("def update(dt): pass"))
+        a.items.attach_system("earlier", SystemDefinition(f"target = <|System:{behavior.id}|>\ndef update(dt):\n    self.other = target.id"))
         data = serialize_entities([a, b])
         other = Runtime()
         self.addCleanup(other.close)
         restored = deserialize_entities(data, other)
-        self.assertTrue(restored[a.id].systems["earlier"].running)
+        self.assertTrue(restored[a.id].items.behaviour("earlier", kind='system').running)
         other.step(0)
         self.assertEqual(restored[a.id].other, behavior.id)
 

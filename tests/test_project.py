@@ -134,7 +134,7 @@ class ProjectPersistenceTests(unittest.TestCase):
 
         entity = self.runtime.create(x=0.0)
         definition = self.runtime.assets.system(script_path)
-        entity.systems.attach("movement", definition)
+        entity.items.attach_system("movement", definition)
 
         serialized = serialize_entities([entity], project_dir=project_dir)
         self.assertIn("movement", serialized[0]["systems"])
@@ -146,8 +146,8 @@ class ProjectPersistenceTests(unittest.TestCase):
         restored = deserialize_entities(serialized, runtime2, project_dir=project_dir)
         r_entity = restored[entity.id]
 
-        self.assertIn("movement", r_entity.systems)
-        self.assertTrue(r_entity.systems["movement"].running)
+        self.assertIn("movement", r_entity.items.behaviour_dict('system'))
+        self.assertTrue(r_entity.items.behaviour("movement", kind='system').running)
         runtime2.step(1.0)
         self.assertEqual(r_entity.x, 1.0)
 
@@ -265,10 +265,10 @@ class ProjectPersistenceTests(unittest.TestCase):
         app_entity = runtime.create(identity=app_id, name="Application", tags=["root"])
         game_entity = runtime.create(name="Game", tags=["game"], parent=app_entity)
         sys_def = runtime.assets.system(script_path)
-        game_entity.systems.attach("app_resolver", sys_def)
+        game_entity.items.attach_system("app_resolver", sys_def)
         runtime.step(0)
 
-        sys_inst = game_entity.systems["app_resolver"]
+        sys_inst = game_entity.items.behaviour("app_resolver", kind='system')
         self.assertTrue(sys_inst.running, list(sys_inst.errors))
         self.assertEqual(len(sys_inst.errors), 0)
         self.assertEqual(sys_inst.namespace["app"].id, app_id)
@@ -287,7 +287,7 @@ class ProjectPersistenceTests(unittest.TestCase):
         runtime2.step(0)
 
         game2 = next(e for e in restored.values() if e.items.get_value("name") == "Game")
-        sys_inst2 = game2.systems["app_resolver"]
+        sys_inst2 = game2.items.behaviour("app_resolver", kind='system')
         self.assertTrue(sys_inst2.running, list(sys_inst2.errors))
         self.assertEqual(len(sys_inst2.errors), 0)
         self.assertEqual(sys_inst2.namespace["app"].id, app_id)
@@ -313,7 +313,7 @@ class ProjectPersistenceTests(unittest.TestCase):
         old_content = render_path.read_text(encoding="utf-8")
         render_path.write_text(f'app = resolve("{app_id}")\n' + old_content, encoding="utf-8")
 
-        editor.app.systems["app"].namespace["save_editor_project"]()
+        editor.app.items.behaviour("app", kind='system').namespace["save_editor_project"]()
         runtime.close()
 
         runtime2 = load_project(window, graphics, input_state, project_dir, template=template_path("editor"))
@@ -323,7 +323,7 @@ class ProjectPersistenceTests(unittest.TestCase):
 
         self.assertEqual(editor2.app.id, app_id)
 
-        render_sys = editor2.game.systems["render"]
+        render_sys = editor2.game.items.behaviour("render", kind='system')
         self.assertTrue(render_sys.running, list(render_sys.errors))
         self.assertEqual(len(render_sys.errors), 0)
         self.assertEqual(render_sys.namespace["app"].id, app_id)
@@ -353,10 +353,10 @@ class ProjectPersistenceTests(unittest.TestCase):
 
         game = next(e for e in runtime.entities if e.items.get_value("name") == "Game")
         sys_def = runtime.assets.system(script_path)
-        game.systems.attach("name_resolve_sys", sys_def)
+        game.items.attach_system("name_resolve_sys", sys_def)
         runtime.step(0)
 
-        sys_inst = game.systems["name_resolve_sys"]
+        sys_inst = game.items.behaviour("name_resolve_sys", kind='system')
         self.assertTrue(sys_inst.running, list(sys_inst.errors))
         self.assertEqual(len(sys_inst.errors), 0)
         self.assertEqual(sys_inst.namespace["app"].items.get_value("name"), "Application")
