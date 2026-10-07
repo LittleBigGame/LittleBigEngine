@@ -2638,8 +2638,10 @@ class EditorTests(unittest.TestCase):
         # 4. Project data saved with new system name
         import json
         data = json.loads((ed.project / "project.json").read_text(encoding="utf-8"))
-        game_entry = next(e for e in data["entities"] if e.get("components", {}).get("name") == "Game")
-        self.assertIn("custom_render", game_entry.get("systems", {}))
+        game_entry = next(e for e in data['entities'] if e['id'] == str(ed.game.id))
+        attachment = ed.game.items.behaviour('custom_render')
+        self.assertEqual(game_entry['items'][str(attachment.id)]['name'], 'custom_render')
+        self.assertEqual(game_entry['items'][str(attachment.id)]['definition']['path'], 'custom_render.py')
 
     def test_code_editor_rename_prompt_and_escape_cancel(self):
         ed = self.editor

@@ -2,7 +2,7 @@
 
 This describes an intermediate migration checkpoint, not the completed
 no-compatibility architecture. The inspector still has split sections;
-project persistence and dynamic data attributes still need their native-only cutover.
+dynamic data attributes still need their native-only cutover.
 
 ## Start through the project launcher
 
@@ -12,8 +12,8 @@ copy the updated editor and sample sources automatically. No PowerShell project
 creation is necessary.
 
 Existing project directories and their customized scripts have not been replaced.
-The engine changes apply immediately, but an existing project's copied editor
-scripts remain its own files. Test with a new project first. The existing explicit
+Project versions 0–3 are now rejected, not converted. Create a new project for
+this migration test; older project directories stay untouched. The existing explicit
 `--upgrade-template --project <directory>` mechanism upgrades only unchanged,
 managed template files and retains backups; unmanaged/customized files need a
 deliberate manual update. Do not copy an entire template over your game.
@@ -122,13 +122,20 @@ consumers through the existing change stream. Nested edits use
 a resolved inherited copy alone does not persist an edit. The old nearest-ancestor
 `entity.inherit("name")` helper keeps its existing meaning.
 
-Project format v3 stores canonical typed item records. Legacy fields emitted by
-the public serializer are compatibility projections; loading prefers `items`
-when present, so edited redundant fields cannot override canonical data. v0–v2
-projects migrate, with deterministic UUIDs for legacy items. Missing sources are
-retained rather than synthesized. Restore creates all entities/data, registers
-all behavior attachments, links their source references, initializes them, then
-starts them. Forward attachment references are therefore available during linking.
+Project format v4 stores Entity documents containing only `id` and `items`.
+Item dictionary keys are UUIDs; each record stores its type, editable name and
+payload. Parent items also encode sibling position. No duplicate named component,
+tag, relation, parent, system or script fields are emitted or accepted. Older
+formats are rejected before any project, template or user-state writes.
+Missing links and source declarations remain identified items, not parallel
+pending collections or synthesized targets. Restore registers all entities and
+items, compiles available sources, links/initializes all behaviours, then starts
+them. Forward references are therefore available during linking.
+
+Application dataclasses with `id` and `name` fields can opt in to persistence
+through `register_item_type(MyType)` before loading their documents. Codecs
+preserve their concrete type and payload; unknown types fail explicitly rather
+than importing arbitrary Python modules or silently becoming plain components.
 
 `runtime.linker` owns disposable UUID-to-object and dependency indexes. UUIDs are
 the persistent identity; `Handle(slot, generation, scope)` is runtime-only.
@@ -175,7 +182,7 @@ avoiding needless index rebuilds reduced it. The next optimization should focus
 on these costs, not introduce gameplay-specific kernel types or duplicate state.
 
 Automated coverage includes item identity, stale handles, flat links, composition,
-canonical persistence, legacy migration, forward references, reference lexing,
+native persistence, legacy rejection, forward references, reference lexing,
 GUI inheritance edits/undo, movement/shooting/reopen and reference pills. The
 graphics walkthrough uses real desktop rendering with synthetic input; it does
 not substitute for your interactive acceptance test.

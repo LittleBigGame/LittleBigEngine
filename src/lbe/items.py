@@ -260,7 +260,7 @@ class Items(Mapping):
         if not self.has(Relation, name):
             return self.add(Relation(name, target.id))
         current = self.named(Relation, name)
-        previous = self.entity.runtime.resolve(current.target)
+        previous = self.entity.runtime._entities.get(current.target)
         incoming = self.entity.runtime._incoming.get(previous)
         if incoming is not None:
             incoming.discard((self.entity, name))
@@ -369,7 +369,9 @@ class Items(Mapping):
         current = self[identity]
         if not isinstance(current, SystemInstance):
             raise TypeError('Only behaviour items have source locations')
-        definition = SystemDefinition(current.definition.source, str(path), current.definition.asset_id)
+        from .item_storage import StoredSource
+        definition = (replace(current.definition, path=str(path)) if isinstance(current.definition, StoredSource)
+                      else SystemDefinition(current.definition.source, str(path), current.definition.asset_id))
         if new_name is not None and not isinstance(current, ScriptInstance):
             current = self.rename(current.id, new_name)
         current.definition = definition
@@ -519,7 +521,7 @@ class Items(Mapping):
             self._drop(item.id)
             self.entity._changed("tag.remove", item.name, old=True, new=False)
         elif category is Relation:
-            target = self.entity.runtime.resolve(item.target)
+            target = self.entity.runtime._entities.get(item.target)
             incoming = self.entity.runtime._incoming.get(target)
             if incoming is not None:
                 incoming.discard((self.entity, item.name))
@@ -528,7 +530,11 @@ class Items(Mapping):
             self._drop(item.id)
             self.entity._changed("relation.remove", item.name, old=target)
         elif category is Parent:
-            self.entity.parent = None
+            if self.entity.parent is None:
+                self._drop(item.id)
+                self.entity._changed('hierarchy.parent', old=None, new=None)
+            else:
+                self.entity.parent = None
         else:
             from .systems import SystemInstance
             from .scripts import ScriptInstance
@@ -594,10 +600,11 @@ class Items(Mapping):
         self._put(renamed)
         self._reindex_order()
         if isinstance(item, Relation):
-            target = self.entity.runtime.resolve(item.target)
-            incoming = self.entity.runtime._incoming[target]
-            incoming.discard((self.entity, old_name))
-            incoming.add((self.entity, name))
+            target = self.entity.runtime._entities.get(item.target)
+            incoming = self.entity.runtime._incoming.get(target)
+            if incoming is not None:
+                incoming.discard((self.entity, old_name))
+                incoming.add((self.entity, name))
         kind = "component.rename" if category is Component else "item.rename"
         self.entity._changed(kind, old_name, new=name)
         return renamed

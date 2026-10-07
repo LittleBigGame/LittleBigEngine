@@ -21,7 +21,7 @@ Named value/link helpers operate on those records, and `value_dict()` returns a
 disposable snapshot, not writable authoritative state. Engine UI, editor template
 and backend component consumers now use these native item operations. The older
 dynamic data attributes still exist at this intermediate checkpoint; their
-removal, native persistence and unified item inspector are outstanding cutover
+removal and unified item inspector are outstanding cutover
 work. `Entity.components`, `Entity.tags`, `Entity.relations`, `Entity.systems`
 and `Entity.scripts`, their storage slots and their projection classes have been
 removed. Tags, links and behaviours are actual UUID records; named helpers mutate those
@@ -44,8 +44,16 @@ indexes and ordered child adjacency are derived runtime state.
 Inherited declarations retain a source UUID plus explicit operations; resolved
 values are derived private copies. The linker maintains object/dependency indexes
 and runtime-scoped slot/generation handles, not another authoritative model.
-Project v3 prefers canonical item records and migrates legacy named declarations.
-Restore registers all behavior attachments before linking/initializing/starting.
+Project v4 contains only Entity UUIDs and UUID-keyed typed item dictionaries.
+There are no named collection projections, migration functions, or separate
+pending parent/relation/system/script dictionaries. Unresolved links remain
+actual identified items; unresolved behaviours contain a `StoredSource`
+authoring declaration until compilation can succeed. Restoration retains
+diagnostics only. Registered application dataclasses can use native item codecs
+without extending Entity or Core. Restore registers all objects before linking,
+compiles all available sources, initializes all behaviours, then starts them.
+Older project formats are explicitly rejected before template installation,
+recovery, user-state changes or saves; existing project files are not converted.
 `<|Type:uuid|>` source references are lexically lowered outside strings/comments.
 The editor displays typed reference pills, identity menus and inheritance controls.
 See [UUID kernel guide](docs/UUID_KERNEL_GUIDE.md) for APIs, GUI usage and limits.

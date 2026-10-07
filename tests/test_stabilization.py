@@ -45,14 +45,16 @@ class PersistenceContracts(TestCase):
         with TemporaryDirectory() as folder:
             folder = Path(folder)
             identity, absent = uuid4(), uuid4()
-            data = [dict(id=str(identity), components={'target': {'__type__': 'entity', 'id': str(absent)}},
-                         relations={'target': str(absent)}, systems={'late': {'path': 'late.py'}})]
+            data = [dict(id=str(identity), items={
+                str(uuid4()): {'type': 'Component', 'name': 'target', 'value': {'__type__': 'entity', 'id': str(absent)}},
+                str(uuid4()): {'type': 'Relation', 'name': 'target', 'target': str(absent)},
+                str(uuid4()): {'type': 'System', 'name': 'late', 'definition': {'path': 'late.py', 'asset_id': None}},
+            })]
             runtime = Runtime()
             entity = deserialize_entities(data, runtime, project_dir=folder)[identity]
             self.assertIsInstance(entity.target, EntityRef)
             saved = serialize_entities(runtime.entities, project_dir=folder)
-            self.assertEqual(saved[0]['systems'], data[0]['systems'])
-            self.assertEqual(saved[0]['relations'], data[0]['relations'])
+            self.assertEqual(saved[0]['items'], data[0]['items'])
             (folder / 'late.py').write_text('def start():\n    entity.started = True\n')
             activate_entities([entity], runtime, project_dir=folder)
             self.assertTrue(entity.started)
@@ -94,7 +96,7 @@ class PersistenceContracts(TestCase):
         self.assertEqual(deserialize_value(serialize_value(value)), value)
         runtime = Runtime()
         entity = runtime.create(nullable=None, unsupported=object())
-        self.assertEqual(serialize_entities([entity], on_unsupported='skip')[0]['components'], {'nullable': None})
+        self.assertEqual([item['name'] for item in serialize_entities([entity], on_unsupported='skip')[0]['items'].values()], ['nullable'])
         runtime.close()
 
 
@@ -438,12 +440,13 @@ class RecoveryContracts(TestCase):
             folder = Path(directory)
             (folder / 'second.py').write_text('def update(dt):\n    pass\n')
             identity = uuid4()
-            data = [dict(id=str(identity), systems={'first': {'path': 'first.py'}, 'second': {'path': 'second.py'}})]
+            data = [dict(id=str(identity), items={str(uuid4()): {'type': 'System', 'name': name,
+                        'definition': {'path': name + '.py', 'asset_id': None}} for name in ('first', 'second')})]
             runtime = Runtime()
             self.addCleanup(runtime.close)
             entity = deserialize_entities(data, runtime, project_dir=folder)[identity]
             saved = serialize_entities([entity], project_dir=folder)
-            self.assertEqual(list(saved[0]['systems']), ['first', 'second'])
+            self.assertEqual([item['name'] for item in saved[0]['items'].values()], ['first', 'second'])
             (folder / 'first.py').write_text('def update(dt):\n    pass\n')
             activate_entities([entity], runtime, project_dir=folder)
             self.assertEqual(list(entity.items.behaviour_dict('system')), ['first', 'second'])

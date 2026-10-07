@@ -74,30 +74,19 @@ class ProjectFiles:
         for entity in self.runtime.entities:
             for collection in (entity.items.behaviour_dict('system'),entity.items.behaviour_dict('script')):
               for name, instance in collection.items():
-                path = Path(instance.definition.path).resolve()
+                path = (self.directory / instance.definition.path).resolve()
                 if path == source or path.is_relative_to(source):
                     new_path = destination / path.relative_to(source) if path != source else destination
                     new_name = new_path.stem if name == path.stem else name
                     if new_name != name and new_name in collection:
                         raise ValueError(f'System name collision: {new_name}')
                     changes.append((entity, instance.id, name, new_name, path, new_path))
-        pending = restoration(self.runtime)
-        script_declarations = {eid: {name: dict(data) for name,data in scripts.items()} for eid,scripts in pending.scripts.items()}
-        declarations = {eid: {name: dict(data) for name, data in systems.items()}
-                        for eid, systems in pending.systems.items()}
         journal = self._prepare(source, destination, 'relocate')
         try:
             source.rename(destination)
             registry.from_dict(candidate.to_dict())
             for entity, item_id, name, new_name, _, path in changes:
                 entity.items.relocate(item_id, path, new_name=new_name)
-            for systems in tuple(pending.systems.values())+tuple(pending.scripts.values()):
-                for declaration in systems.values():
-                    if 'source' not in declaration and declaration.get('path'):
-                        path = (self.directory / declaration['path']).resolve()
-                        if path == source or path.is_relative_to(source):
-                            path = destination / path.relative_to(source) if path != source else destination
-                            declaration['path'] = path.relative_to(self.directory).as_posix()
             save()
             self._commit(journal)
         except Exception:
@@ -105,8 +94,6 @@ class ProjectFiles:
                 if entity.alive and item_id in entity.items:
                     entity.items.relocate(item_id, path, new_name=name)
             registry.from_dict(before)
-            pending.systems = declarations
-            pending.scripts = script_declarations
             recover_file_operation(self.directory)
             raise
         for _, _, _, _, old_path, new_path in changes:

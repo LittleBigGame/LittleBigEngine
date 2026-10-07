@@ -14,7 +14,7 @@ from lbe.project import (
     serialize_entity,
     serialize_entities,
     deserialize_entities,
-    migrate_project_data,
+    validate_project_data,
     save_project,
     load_project_data,
     load_project,
@@ -137,8 +137,9 @@ class ProjectPersistenceTests(unittest.TestCase):
         entity.items.attach_system("movement", definition)
 
         serialized = serialize_entities([entity], project_dir=project_dir)
-        self.assertIn("movement", serialized[0]["systems"])
-        self.assertEqual(serialized[0]["systems"]["movement"]["path"], "movement.py")
+        movement = next(item for item in serialized[0]['items'].values() if item['name'] == 'movement')
+        self.assertEqual(movement['type'], 'System')
+        self.assertEqual(movement['definition']['path'], 'movement.py')
 
         # Restore into runtime2
         runtime2 = Runtime()
@@ -155,11 +156,8 @@ class ProjectPersistenceTests(unittest.TestCase):
         project_dir = Path(self.directory.name)
         data = [{
             "id": str(uuid4()),
-            "parent": None,
-            "tags": [],
-            "components": {},
-            "relations": {},
-            "systems": {"nonexistent": {"path": "missing_script.py"}},
+            "items": {str(uuid4()): {'type': 'System', 'name': 'nonexistent',
+                                    'definition': {'path': 'missing_script.py'}}},
         }]
 
         runtime2 = Runtime()
@@ -179,11 +177,12 @@ class ProjectPersistenceTests(unittest.TestCase):
         self.assertIsNotNone(loaded_data)
         self.assertEqual(loaded_data["version"], CURRENT_VERSION)
         self.assertEqual(len(loaded_data["entities"]), 1)
-        self.assertEqual(loaded_data["entities"][0]["components"]["name"], "TestEntity")
+        name_item = next(item for item in loaded_data['entities'][0]['items'].values() if item['name'] == 'name')
+        self.assertEqual(name_item['value'], 'TestEntity')
         self.assertEqual(loaded_data["layout"]["left_column_w"], 400)
         self.assertEqual(loaded_data["layout"]["camera"]["zoom"], 64.0)
 
-    def test_migration_pipeline_v0_to_v1(self):
+    def test_unversioned_legacy_project_is_rejected(self):
         # v0 format without version, with list components and comma-separated tags string
         v0_data = {
             "entities": [
@@ -199,12 +198,9 @@ class ProjectPersistenceTests(unittest.TestCase):
             # layout missing
         }
 
-        migrated = migrate_project_data(v0_data)
-        self.assertEqual(migrated["version"], CURRENT_VERSION)
-        self.assertIn("layout", migrated)
-        e = migrated["entities"][0]
-        self.assertEqual(e["tags"], ["root", "game"])
-        self.assertEqual(e["components"], {"x": 10, "name": "LegacyGame"})
+        with self.assertRaises(ValueError):
+            validate_project_data(v0_data)
+        self.assertNotIn('version', v0_data)
 
     def test_migration_rejects_newer_version(self):
         future_data = {
@@ -212,8 +208,8 @@ class ProjectPersistenceTests(unittest.TestCase):
             "entities": [],
         }
         with self.assertRaises(ValueError) as ctx:
-            migrate_project_data(future_data)
-        self.assertIn("newer than supported version", str(ctx.exception))
+            validate_project_data(future_data)
+        self.assertIn("Unsupported project format", str(ctx.exception))
 
     def test_serialization_error_and_skip_modes(self):
         class Dummy:
@@ -447,7 +443,7 @@ class ProjectPersistenceTests(unittest.TestCase):
         self.assertEqual(app1_id, expected_id)
         self.assertEqual(app2_id, expected_id)
 
-    def test_load_project_recovers_app_id_from_layout_selection_legacy(self):
+    def test_load_project_rejects_legacy_before_any_external_writes(self):
         project_dir = Path(self.directory.name)
         legacy_app_id = uuid4()
         data = {
@@ -471,12 +467,17 @@ class ProjectPersistenceTests(unittest.TestCase):
         window = SimpleNamespace(width=800, height=600)
         graphics = RecordingGraphics()
         input_state = Input()
-        runtime = load_project(window, graphics, input_state, project_dir)
-        self.addCleanup(runtime.close)
-
-        app_entity = runtime.resolve(legacy_app_id)
-        self.assertEqual(app_entity.id, legacy_app_id)
-        self.assertEqual(app_entity.items.get_value("name"), "Application")
+        before = {path.name: path.read_bytes() for path in project_dir.iterdir()}
+        from unittest.mock import patch
+        with patch('lbe.user_state.save_last_project') as remember, patch('lbe.project_templates.initialize_template') as initialize:
+            with self.assertRaises(ValueError):
+                load_project(window, graphics, input_state, project_dir, template=template_path('editor'))
+            remember.assert_not_called()
+            initialize.assert_not_called()
+        self.assertEqual({path.name: path.read_bytes() for path in project_dir.iterdir()}, before)
+        with self.assertRaises(ValueError):
+            save_project(project_dir, entities=[])
+        self.assertEqual({path.name: path.read_bytes() for path in project_dir.iterdir()}, before)
 
     def test_unresolved_entity_token_in_editor_displays_as_entity_not_asset(self):
         from lbe.ui import UI, TextBuffer
