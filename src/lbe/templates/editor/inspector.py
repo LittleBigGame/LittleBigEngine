@@ -144,7 +144,7 @@ def inspector_sync():
         else:
             systems[existing] = row
     children = tuple(entity.children)
-    relations = tuple(entity.relations.items())
+    relations = tuple(entity.items.link_dict().items())
     i_pad = parse_box(ip.items.get_value("padding", (8, 12, 8, 12)))
     max_bottom = ip.y + ip.h - 6
 
@@ -219,7 +219,7 @@ def inspector_sync():
         capacity = max(1, int(avail_comp_h // 25))
         focused=state.ui.focused
         geometry=(ip.w,ip.h)
-        if (focused is not None and focused.relations.get('target') is entity
+        if (focused is not None and focused.items.target('target') is entity
                 and entity.items.has_value(focused.items.get_value('component_key'))
                 and ip.items.get_value('edit_geometry')==geometry):
             capacity=ip.items.get_value('capacity', capacity)
@@ -275,17 +275,17 @@ def inspector_sync():
             else:
                 put(field, x=ip.x + 12 + lbl_w + 6, y=y, w=field_w, h=23, readonly=not editable,
                     color=FIELD, normal_color=FIELD, ink=INK)
-            if field.items.get_value('component_key') != key or field.relations.get('target') is not entity:
+            if field.items.get_value('component_key') != key or field.items.target('target') is not entity:
                 if state.ui.focused in (field, label):
-                    del state.app.relations['focus']
+                    state.app.items.disconnect('focus')
             field.component_key = key
             field.item_id = declaration.id
             field.provenance = "inherited" if inherited else "local"
             field.source_id = declaration.source if inherited else None
             label.ink = (170, 145, 225) if inherited else MUTED
-            field.relations['target'] = entity
+            field.items.connect('target', entity)
             label.component_key = key
-            label.relations['target'] = entity
+            label.items.connect('target', entity)
             field.on_commit = lambda f=field: commit_component(f)
             field.on_click = component_click
             label.on_commit = lambda lbl=label: commit_component_key(lbl)
@@ -433,7 +433,7 @@ def inspector_sync():
         put(state.tags_label, visible=show_tags, x=ip.x + 12, y=cur_y + 4, w=60, h=22)
         put(state.tags_field, visible=show_tags, x=ip.x + 76, y=cur_y, w=max(30, ip.w - 88), h=26)
         if show_tags:
-            state.ui.set_text(state.tags_field, ', '.join(entity.tags))
+            state.ui.set_text(state.tags_field, ', '.join(set(entity.items.tag_names())))
             cur_y += 30
 
         # Parent row
@@ -482,9 +482,9 @@ def inspector_sync():
                 r_btn.action = lambda t=r_target: select(t)
                 edit_btn.action = lambda n=r_name, tn=tgt_name: start_edit_link(n, tn)
                 r_btn.relation_key = r_name
-                r_btn.relations['target'] = entity
+                r_btn.items.connect('target', entity)
                 edit_btn.relation_key = r_name
-                edit_btn.relations['target'] = entity
+                edit_btn.items.connect('target', entity)
                 cur_y += 24
         for r_btn, u_btn in state.relation_rows[num_rel_rows:]:
             put(r_btn, visible=False)
@@ -534,7 +534,7 @@ def inspector_sync():
                 message(f'{error.source}: {error.message}')
 
 def commit_component(field):
-    target, key = (field.relations['target'], field.component_key)
+    target, key = (field.items.require_target('target'), field.component_key)
     if field.buffer.text == safe_repr(target.items.require_value(key)):
         return
     from dataclasses import replace
@@ -548,11 +548,9 @@ def commit_component(field):
         current = state.runtime.resolve(identity)
         if current is None or not current.alive:
             raise ValueError('Edited entity no longer exists')
-        old = current.items.require_value(key)
-        current.items._put(declaration)
-        current._changed("component.set", key, old=old, new=current.items.require_value(key))
+        current.items.replace(declaration.id, declaration)
         for _, control in state.component_rows:
-            if control.relations.get('target') is current and control.items.get_value('component_key') == key:
+            if control.items.target('target') is current and control.items.get_value('component_key') == key:
                 control.buffer = TextBuffer(safe_repr(current.items.require_value(key)))
                 control.committed_text = control.buffer.text
         inspector_sync()
@@ -567,14 +565,29 @@ def save_component_changes(target, before):
     try:
         save_editor_project()
     except Exception:
-        target.items.clear_values()
-        target.items.update_values(before)
+        from lbe import Component, InheritedComponent
+        identities = {record.id for record in before}
+        for record in tuple(target.items.values()):
+            if isinstance(record, (Component, InheritedComponent)) and record.id not in identities:
+                target.items.remove(record.id)
+        for record in before:
+            if record.id in target.items:
+                target.items.rename(record.id, record.name)
+                target.items.replace(record.id, record)
+            else:
+                target.items.add(record)
         raise
+
+
+def component_snapshot(target):
+    from lbe import Component, InheritedComponent
+    return tuple(record for record in target.items.values()
+                 if isinstance(record, (Component, InheritedComponent)))
 
 
 def add_component():
     ent = inspected()
-    before = dict(ent.items.value_dict())
+    before = component_snapshot(ent)
     renaming_key = state.add_name.items.remove_value("renaming_key", None)
     saving_preset = state.add_name.items.remove_value("saving_preset", False)
     name = state.add_name.buffer.text.strip()
@@ -593,7 +606,7 @@ def add_component():
         if renaming_key != name and ent.items.has_value(name):
             raise ValueError(f"Component '{name}' already exists")
         if renaming_key != name:
-            ent.items.remove_value(renaming_key, None)
+            ent.items.rename(ent.items.component(renaming_key).id, name)
         ent.items.set_value(name, val)
         message(f"Renamed component '{renaming_key}' -> '{name}'")
     else:
@@ -608,10 +621,10 @@ def commit_tags():
     ent = inspected()
     renaming_tag = state.tags_field.items.remove_value("renaming_tag", None)
     tags = {tag.strip() for tag in state.tags_field.buffer.text.split(',') if tag.strip()}
-    for tag in set(ent.tags) - tags:
-        ent.tags.discard(tag)
+    for tag in set(set(ent.items.tag_names())) - tags:
+        ent.items.remove_tag(tag)
     for tag in tags:
-        ent.tags.add(tag)
+        ent.items.add_tag(tag)
     save_editor_project()
     message('Tags updated')
     inspector_sync()
@@ -641,7 +654,7 @@ def resolve_name(text):
         if len(uuid_matches) > 1:
             raise ValueError(f"Ambiguous UUID prefix '{text}'. Use full UUID.")
 
-        tag_matches = [e for e in state.runtime.entities if text in e.tags]
+        tag_matches = [e for e in state.runtime.entities if e.items.has_tag(text)]
         if len(tag_matches) == 1:
             return tag_matches[0]
         if len(tag_matches) > 1:
@@ -670,19 +683,19 @@ def commit_relation():
         if text:
             target = resolve_name(text)
             if editing_rel and editing_rel != name:
-                inspected().relations.pop(editing_rel, None)
-            inspected().relations[name] = target
+                inspected().items.disconnect(editing_rel, None)
+            inspected().items.connect(name, target)
             tgt_name = str(target.items.get_value('name', str(target.id)[:8]))
             message(f"Linked '{name}' -> '{tgt_name}'")
         else:
             rel_to_remove = editing_rel or name
-            inspected().relations.pop(rel_to_remove, None)
+            inspected().items.disconnect(rel_to_remove, None)
             message(f"Unlinked relation '{rel_to_remove}'")
     else:
         target = resolve_name(raw)
         tgt_name = str(target.items.get_value('name', str(target.id)[:8]))
         name = editing_rel or tgt_name.lower().replace(" ", "_")
-        inspected().relations[name] = target
+        inspected().items.connect(name, target)
         message(f"Linked '{name}' -> '{tgt_name}'")
     state.relation_field.buffer = TextBuffer()
     inspector_sync()
@@ -690,7 +703,7 @@ def commit_relation():
 def start_edit_link(name, tgt_name=None):
     ent = inspected()
     if tgt_name is None:
-        tgt = ent.relations.get(name)
+        tgt = ent.items.target(name)
         tgt_name = str(tgt.items.get_value('name', str(tgt.id)[:8])) if tgt else ''
     state.relation_field.buffer = TextBuffer(f"{name}={tgt_name}")
     state.relation_field.buffer.anchor = 0
@@ -708,10 +721,10 @@ def quick_link_to(target):
     base_name = tgt_name.lower().replace(" ", "_")
     name = base_name
     count = 1
-    while name in source.relations and source.relations[name] is not target:
+    while source.items.has_link(name) and source.items.require_target(name) is not target:
         count += 1
         name = f"{base_name}_{count}"
-    source.relations[name] = target
+    source.items.connect(name, target)
     message(f"Linked '{name}' -> '{tgt_name}'")
     inspector_sync()
 
@@ -750,7 +763,7 @@ def inspector_duplicate_entity():
     comps = deepcopy(dict(ent.items.value_dict()))
     comps['name'] = new_name
     from lbe import Component
-    dup = state.runtime.create(parent=parent, tags=list(ent.tags), items=tuple(Component(k, v) for k, v in comps.items()))
+    dup = state.runtime.create(parent=parent, tags=list(set(ent.items.tag_names())), items=tuple(Component(k, v) for k, v in comps.items()))
     from lbe import InheritedComponent
     for item in ent.all(InheritedComponent):
         dup.items.remove_value(item.name)
@@ -780,15 +793,15 @@ def delete_component(key):
     if ent.items.has_value(key):
         ent.items.remove_value(key)
         if state.ui.focused and getattr(state.ui.focused, "component_key", None) == key:
-            del state.app.relations['focus']
+            state.app.items.disconnect('focus')
         message(f"Deleted component '{key}'")
         inspector_sync()
 
 
 def unlink_relation(name):
     ent = inspected()
-    if name in ent.relations:
-        del ent.relations[name]
+    if ent.items.has_link(name):
+        ent.items.disconnect(name)
         if state.relation_field.items.get_value("editing_relation") == name:
             state.relation_field.items.remove_value("editing_relation", None)
             state.relation_field.buffer = TextBuffer()
@@ -882,7 +895,7 @@ def context_add_component(target):
 
 
 def commit_component_key(lbl):
-    target = lbl.relations.get('target', inspected())
+    target = lbl.items.target('target', inspected())
     old_key = lbl.items.remove_value("renaming_key", getattr(lbl, "component_key", None))
     new_key = lbl.buffer.text.strip()
     if not new_key:
@@ -976,7 +989,7 @@ def change_component_type(ent, comp, target_type):
     except (TypeError, ValueError) as error:
         raise ValueError(f"Cannot convert '{comp}' to {target_type}: {error}") from None
 
-    before = dict(ent.items.value_dict())
+    before = component_snapshot(ent)
     ent.items.set_value(comp, new_val)
     message(f"Changed '{comp}' type to {target_type}")
     save_component_changes(ent, before)
@@ -1078,7 +1091,7 @@ def prompt_new_system(ent):
         state._saved_source = (rel_name, initial_text)
         state.code.source_path = str(script_path)
         state.code.items.set_value("system_name", script_path.stem)
-    state.code.relations['owner'] = ent
+    state.code.items.connect('owner', ent)
     message(f"Created and attached {script_path.name} to {ent.items.get_value('name', ent.id)}")
 
 
@@ -1110,8 +1123,8 @@ def detach_system_from_entity(ent, name):
     try:
         collection = ent.systems if name in ent.systems else ent.scripts
         del collection[name]
-        if state.code.relations.get('owner') is ent and state.code.items.get_value('system_name') == name:
-            del state.code.relations['owner']
+        if state.code.items.target('owner') is ent and state.code.items.get_value('system_name') == name:
+            state.code.items.disconnect('owner')
             state.code.items.remove_value('system_name', None)
         save_editor_project()
         inspector_sync()
@@ -1197,7 +1210,7 @@ def start_rename_tag(ent, old_tag):
 
 
 def remove_tag(ent, tag):
-    ent.tags.discard(tag)
+    ent.items.remove_tag(tag)
     save_editor_project()
     inspector_sync()
     message(f"Removed tag '{tag}'")
@@ -1244,7 +1257,7 @@ def inspector_track_click(track, event):
 def component_click(control, event):
     if len(event) > 3 and event[3] in (2, 4):
         return False
-    target = control.relations.get("target")
+    target = control.items.target("target")
     key = getattr(control, "component_key", None)
     if target and key:
         from lbe.assets import AssetRef

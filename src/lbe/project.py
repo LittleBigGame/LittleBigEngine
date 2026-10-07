@@ -86,7 +86,7 @@ class PersistentGraph:
 
     def _change(self, change):
         entity = change.entity
-        if change.kind == "entity.create" and "ui" not in entity.tags:
+        if change.kind == "entity.create" and not entity.items.has_tag("ui"):
             parent = entity.parent
             if parent is None or parent is self.application or parent.id in self._entities:
                 self.include(entity)
@@ -194,7 +194,7 @@ def serialize_entity(entity, *, project_dir=None, on_unsupported="error", known_
         parent = parent.parent
     parent_id = pending.parents.get(entity.id) or (str(parent.id) if parent is not None else None)
     data = {
-        "id": str(entity.id), "tags": list(entity.tags), "parent": parent_id,
+        "id": str(entity.id), "tags": list(set(entity.items.tag_names())), "parent": parent_id,
         "parent_scope": "entity" if parent_id else "detached",
         "position": entity.parent.children.index(entity) if entity.parent else 0,
         "components": {}, "relations": dict(pending.relations.get(entity.id, {})), "systems": {},
@@ -208,7 +208,7 @@ def serialize_entity(entity, *, project_dir=None, on_unsupported="error", known_
                 data["components"][key] = encoded
         except (TypeError, ValueError) as error:
             raise type(error)(f"Component {key!r} on entity {entity.id} cannot be serialized: {error}") from None
-    for key, target in entity.relations.items():
+    for key, target in entity.items.link_dict().items():
         if key in transient_relations:
             continue
         if known_ids is not None and target.id not in known_ids:
@@ -304,7 +304,7 @@ def deserialize_entities(entity_data_list, runtime, *, default_parent=None, proj
                 target.items.set_value(key, deserialize_value(value, runtime=runtime, id_map=created))
             for key, identity in record.get("relations", {}).items():
                 try:
-                    target.relations[key] = runtime.resolve(UUID(identity))
+                    target.items.connect(key, runtime.resolve(UUID(identity)))
                 except KeyError:
                     pending.relations.setdefault(eid, {})[key] = identity
                     pending.diagnostics.append(Diagnostic("project.relation", f"Missing target {identity} for {eid}.{key}"))
@@ -430,7 +430,7 @@ def resolve_references(entity, runtime):
             pass
     for key, identity in tuple(pending.relations.get(entity.id, {}).items()):
         try:
-            entity.relations[key] = runtime.resolve(UUID(identity))
+            entity.items.connect(key, runtime.resolve(UUID(identity)))
         except KeyError:
             pass
 

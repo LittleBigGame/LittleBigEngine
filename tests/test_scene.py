@@ -46,7 +46,7 @@ class SceneTests(unittest.TestCase):
         self.assertIn(game.children[0], runtime.services["space"].query(10, 0))
         window.width = 1000
         runtime.step(0)
-        self.assertEqual(game.relations["viewport"].w, 1000)
+        self.assertEqual(game.items.require_target("viewport").w, 1000)
         runtime.close()
 
     def test_render_draws_child_entities_recursively(self):

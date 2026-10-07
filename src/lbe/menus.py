@@ -5,7 +5,7 @@ from .core import Entity
 
 
 def close_menu(ui):
-    menu = ui.root.relations.pop("context_menu", None)
+    menu = ui.root.items.disconnect("context_menu", None)
     if menu is not None:
         ui.runtime.destroy(menu)
 
@@ -36,7 +36,7 @@ def open_menu(ui, target, x, y, actions=None):
                      y=max(0, min(y, ui.window.height-height)), layer=layer,
                      context_target=target, active=-1, padding=4, gap=0,
                      ignore_layout=True, modal=True, offset=0)
-    ui.root.relations["context_menu"] = menu
+    ui.root.items.connect("context_menu", menu)
     for action in actions:
         if action is None:
             ui.create(menu, "Separator", "rect", h=8, w=width-8, layer=layer+1)
@@ -72,7 +72,7 @@ def _activate(ui, menu, item):
 
 def dispatch_menu(ui, event):
     """Capture popup input before application callbacks and normal controls."""
-    menu = ui.root.relations.get("context_menu")
+    menu = ui.root.items.target("context_menu")
     kind = event[0]
     if menu is not None:
         if isinstance(menu.context_target, Entity) and not menu.context_target.alive:

@@ -1,5 +1,5 @@
 """UUID-keyed typed records and their authoritative mutation boundary."""
-from collections.abc import Mapping, MutableMapping, MutableSet
+from collections.abc import Mapping, MutableMapping
 from dataclasses import dataclass, field, replace
 from copy import deepcopy
 from contextlib import contextmanager
@@ -208,7 +208,20 @@ class Items(Mapping):
     def tag_names(self):
         return tuple(item.name for item in self.all(Tag))
 
+    def has_tag(self, name):
+        return self.has(Tag, name)
+
+    def add_tags(self, names):
+        for name in names:
+            self.add_tag(name)
+
+    def clear_tags(self):
+        for item in self.all(Tag):
+            self.remove(item.id)
+
     def add_tag(self, name):
+        if not isinstance(name, str) or not name:
+            raise ValueError("Item names must be non-empty strings")
         if self.has(Tag, name):
             return self.named(Tag, name)
         return self.add(Tag(name))
@@ -224,7 +237,23 @@ class Items(Mapping):
             return default
         return self.entity.runtime.resolve(item.target)
 
+    def require_target(self, name):
+        return self.entity.runtime.resolve(self.named(Relation, name).target)
+
+    def has_link(self, name):
+        return self.has(Relation, name)
+
+    def clear_links(self):
+        for item in self.all(Relation):
+            self.remove(item.id)
+
+    def update_links(self, values):
+        for name, target in dict(values).items():
+            self.connect(name, target)
+
     def connect(self, name, target):
+        if not isinstance(name, str) or not name:
+            raise ValueError("Item names must be non-empty strings")
         self.entity.runtime._validate(target)
         if target._destroying:
             raise RuntimeError("Cannot link to an entity during destruction")
@@ -545,20 +574,10 @@ class NamedValues(MutableMapping):
 
     def __getitem__(self, name):
         item = self.record(name)
-        if self.category is Relation:
-            return self.entity.runtime.resolve(item.target)
         return item
 
     def __setitem__(self, name, value):
-        try:
-            current = self.record(name)
-        except KeyError:
-            current = None
-        identity = current.id if current else uuid4()
-        if self.category is Relation:
-            item = Relation(name, value.id, identity)
-        else:
-            item = value
+        item = value
         self.entity.items._put(item)
 
     def __delitem__(self, name):
@@ -580,29 +599,3 @@ class NamedValues(MutableMapping):
         order = [next(slots) if identity in ids else identity for identity in records]
         self.entity.items._records = {identity: records[identity] for identity in order}
         self.entity.items._reindex_order()
-
-
-class TagValues(MutableSet):
-    def __init__(self, entity):
-        self.entity = entity
-
-    def __contains__(self, name):
-        return (Tag, name) in self.entity.items._names
-
-    def __iter__(self):
-        return iter(tuple(item.name for item in self.entity.items.all(Tag)))
-
-    def __len__(self):
-        return len(self.entity.items.all(Tag))
-
-    def add(self, name):
-        if name not in self:
-            self.entity.items._put(Tag(name))
-
-    def discard(self, name):
-        if name in self:
-            self.entity.items._drop(self.entity.items.named(Tag, name).id)
-
-    def update(self, names):
-        for name in names:
-            self.add(name)

@@ -2,12 +2,12 @@
 
 
 def draw():
-    viewport = entity.relations['viewport']
+    viewport = entity.items.require_target('viewport')
     if not viewport.items.get_value('visible', True) or viewport.w <= 0 or viewport.h <= 0:
         return
-    with graphics.view(entity.relations["camera"], entity.relations["viewport"]):
-        camera = entity.relations.get("camera")
-        viewport = entity.relations.get("viewport")
+    with graphics.view(entity.items.require_target("camera"), entity.items.require_target("viewport")):
+        camera = entity.items.target("camera")
+        viewport = entity.items.target("viewport")
         zoom = getattr(camera, "zoom", 32.0) if camera else 32.0
         cam_x = camera.items.get_value("x", 0.0) if camera else 0.0
         cam_y = camera.items.get_value("y", 0.0) if camera else 0.0
@@ -81,7 +81,7 @@ def draw():
             if isinstance(clr, (list, tuple)) and len(clr) >= 3:
                 graphics.rect(tx, ty, tw, th, color=clr[:3], key=(target.id.hex, "fallback_draw"), layer=1)
 
-        selected = entity.relations.get("selection")
+        selected = entity.items.target("selection")
         outline = assets.get("dbc0d180-5a28-56a1-bc9c-85d63174e431")
         if selected is not None and selected.alive and outline and outline in selected.scripts:
             selected.run(outline, entity, zoom)

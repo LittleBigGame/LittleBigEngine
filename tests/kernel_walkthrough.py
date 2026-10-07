@@ -40,7 +40,7 @@ def main():
                 if frame == 24:
                     assert player.x > initial
                     assert tuple(editor.game.query(tags=('bullet',)))
-                    assert any('asset_pill' in e.tags and e.visible for e in editor.code.children)
+                    assert any(e.items.has_tag('asset_pill') and e.visible for e in editor.code.children)
                     assert not editor.app.systems['app'].errors
                     assert not editor.game.systems['walk_shoot'].errors
                     complete.append(True)

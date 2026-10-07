@@ -27,11 +27,11 @@ class UITests(unittest.TestCase):
                                on_drag=lambda control,event: calls.append(control))
             for event in (('scroll',12,12,0,-1), ('click',12,12,2,0)):
                 ui.dispatch(event)
-                self.assertNotIn('active_drag', root.relations)
+                self.assertNotIn('active_drag', root.items.link_dict())
                 ui.dispatch(('drag',30,20,1,0,18,8))
                 self.assertEqual(calls, [])
             ui.dispatch(('click',12,12,1,0))
-            self.assertIs(root.relations['active_drag'], handle)
+            self.assertIs(root.items.require_target('active_drag'), handle)
             ui.dispatch(('drag',30,20,1,0,18,8))
             self.assertEqual(calls, [handle])
             ui.dispatch(('release',30,20,1,0))
@@ -52,7 +52,7 @@ class UITests(unittest.TestCase):
             self.assertNotIn("application_state", root.items.value_dict())
             self.assertFalse(any(e.items.get_value("name") in ("Game", "InspectorPanel", "CodeEditorPanel")
                                  for e in runtime.entities))
-            notes = next(e for e in root.descendants if "multiline" in e.tags)
+            notes = next(e for e in root.descendants if e.items.has_tag("multiline"))
             self.input.pending.extend([("click", notes.x+60, notes.y+10, 1, 0),
                                        ("key", "A", True, False), ("text", "Independent app\nSecond line")])
             runtime.step(0)

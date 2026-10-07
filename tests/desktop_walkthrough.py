@@ -39,7 +39,7 @@ def main():
                 return [click(entity), ("key", "A", True, False), ("text", text)]
 
             def menu_item(text):
-                menu = editor.app.relations["context_menu"]
+                menu = editor.app.items.require_target("context_menu")
                 return next(child for child in menu.children if text in child.items.get_value("text", ""))
 
             def component(key):
@@ -62,7 +62,7 @@ def main():
                 lambda: enter(editor.code, SOURCE),
                 lambda: [("key", "S", True, False)],
                 lambda: [("click", row.x+row.w/2, row.y+row.h/2, 1, 0, 2)
-                         for row in editor.hierarchy_rows if row.visible and row.relations.get("target") is editor.game],
+                         for row in editor.hierarchy_rows if row.visible and row.items.target("target") is editor.game],
                 lambda: [click(editor.add_system_button)],
                 lambda: [click(menu_item("physics"))],
             ]

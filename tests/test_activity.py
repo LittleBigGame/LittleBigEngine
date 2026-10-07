@@ -136,8 +136,8 @@ class ActivityTests(unittest.TestCase):
             state = app.application_state
             state.ui.dispatch(('key', 'L', True, False))
             runtime.step(0)
-            panel = app.relations['system_log_panel']
-            self.assertIn('ui', panel.tags)
+            panel = app.items.require_target('system_log_panel')
+            self.assertIn('ui', set(panel.items.tag_names()))
             self.assertIn('system_log', panel.systems)
             state.game.test_value = 12
             runtime.step(0)
@@ -215,7 +215,7 @@ class ActivityTests(unittest.TestCase):
             state=runtime.entities[0].application_state
             ui=state.ui
             ui.dispatch(('key','L',True,False));runtime.step(0)
-            panel=state.app.relations['system_log_panel']
+            panel=state.app.items.require_target('system_log_panel')
             start=panel.x,panel.y
             ui.dispatch(('click',panel.x+20,panel.y+10,1,0))
             ui.dispatch(('drag',panel.x+70,panel.y+30,1,0,50,20))
@@ -254,7 +254,7 @@ class ActivityTests(unittest.TestCase):
             runtime.step(0)
             app = runtime.entities[0]
             app.application_state.ui.dispatch(('key','L',True,False))
-            panel = app.relations['system_log_panel']
+            panel = app.items.require_target('system_log_panel')
             original = tuple(panel.children)
             definition = panel.systems['system_log'].definition
             panel.systems.reload('system_log', definition)
@@ -287,11 +287,11 @@ class ActivityTests(unittest.TestCase):
             baseline = len(runtime.entities), len(runtime.events._observers)
             for cycle in range(12):
                 app.application_state.ui.dispatch(('key','L',True,False))
-                panel = app.relations['system_log_panel']
+                panel = app.items.require_target('system_log_panel')
                 panel.systems.reload('system_log', panel.systems['system_log'].definition)
                 runtime.step(0)
                 runtime.destroy(panel)
-                self.assertNotIn('system_log_panel', app.relations)
+                self.assertNotIn('system_log_panel', app.items.link_dict())
                 self.assertNotIn(panel.id, log.excluded)
                 self.assertEqual((len(runtime.entities),len(runtime.events._observers)), baseline)
             self.assertFalse(runtime.changes.errors)

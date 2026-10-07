@@ -37,7 +37,7 @@ class KernelEditorTests(unittest.TestCase):
         player = self.create_demo()
         uid = player.items.component('speed').id
         self.assertIsInstance(player[uid], InheritedComponent)
-        self.assertNotIn('x', next(e for e in self.editor.game.children if 'blueprint' in e.tags).items.value_dict())
+        self.assertNotIn('x', next(e for e in self.editor.game.children if e.items.has_tag('blueprint')).items.value_dict())
         self.input.press('D')
         self.input.press('SPACE')
         self.runtime.step(0.1)
@@ -91,7 +91,7 @@ class KernelEditorTests(unittest.TestCase):
         code.buffer = TextBuffer('value = ' + token)
         self.editor.ui.focus(code)
         self.runtime.step(0)
-        pills = [e for e in code.children if 'asset_pill' in e.tags and e.visible]
+        pills = [e for e in code.children if e.items.has_tag('asset_pill') and e.visible]
         self.assertEqual(len(pills), 1)
         self.assertIn('Component: x', pills[0].text)
         code.buffer.cursor = code.buffer.anchor = len(code.buffer.text)
@@ -101,5 +101,34 @@ class KernelEditorTests(unittest.TestCase):
         code.buffer = TextBuffer('value = ' + token)
         del source.x
         self.runtime.step(0)
-        pill = next(e for e in code.children if 'asset_pill' in e.tags and e.visible)
+        pill = next(e for e in code.children if e.items.has_tag('asset_pill') and e.visible)
         self.assertIn('Missing Component', pill.text)
+
+    def test_inspector_rename_and_failed_save_preserve_typed_identity(self):
+        source = self.runtime.create(parent=self.editor.game, speed=6.0)
+        target = self.runtime.create(parent=self.editor.game)
+        original = target.items.inherit_value('speed', source.items.component('speed').id)
+        handle = self.runtime.linker.handle(original.id)
+        self.editor.select(target)
+        self.editor.add_name.items.set_value('renaming_key', 'speed')
+        self.editor.add_name.buffer = TextBuffer('movement_speed')
+        self.editor.add_value.buffer = TextBuffer('9.0')
+        with patch.object(self.editor, 'save_editor_project', side_effect=OSError('disk full')):
+            with self.assertRaises(OSError):
+                self.editor.add_component()
+        self.assertIs(target.items[original.id], original)
+        self.assertIs(self.runtime.linker.resolve_handle(handle), original)
+        self.assertEqual(target.items.value(original.id), 6.0)
+        self.assertFalse(target.items.has_value('movement_speed'))
+
+        self.editor.add_name.items.set_value('renaming_key', 'speed')
+        self.editor.add_name.buffer = TextBuffer('movement_speed')
+        self.editor.add_value.buffer = TextBuffer('9.0')
+        self.editor.add_component()
+        renamed = target.items.component('movement_speed')
+        self.assertEqual(renamed.id, original.id)
+        self.assertIsInstance(renamed, InheritedComponent)
+        self.assertEqual(renamed.source, original.source)
+        self.assertEqual(target.items.value(original.id), 9.0)
+        self.assertEqual(source.items.require_value('speed'), 6.0)
+        self.assertIs(self.runtime.linker.resolve_handle(handle), renamed)

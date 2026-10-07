@@ -24,7 +24,7 @@ class EditorTests(unittest.TestCase):
         target.x='bad geometry'
         self.runtime.step(0)
         self.runtime.step(0)
-        panel=ed.app.relations.get('system_log_panel')
+        panel=ed.app.items.target('system_log_panel')
         self.assertIsNotNone(panel)
         self.assertTrue(panel.visible)
         self.assertFalse(panel.modal)
@@ -163,21 +163,21 @@ class EditorTests(unittest.TestCase):
         self.addCleanup(lambda: shutil.rmtree(self.directory.name + '-roots', ignore_errors=True))
         reopened.step(0)
         ed = reopened.entities[0].application_state
-        self.assertIs(ed.hierarchy.relations['view_root'], ed.game)
+        self.assertIs(ed.hierarchy.items.require_target('view_root'), ed.game)
         self.assertEqual(ed.file_explorer.items.get_value('view_root', 'systems/game'),'systems/game')
         target = reopened.create(parent=ed.game,name='Scoped')
         ed.set_hierarchy_root(target)
-        self.assertIs(ed.hierarchy.relations['view_root'],target)
+        self.assertIs(ed.hierarchy.items.require_target('view_root'),target)
         ed.select(ed.camera)
         ed.hierarchy_sync()
-        self.assertIs(ed.hierarchy.relations['view_root'],ed.app)
-        self.assertTrue(any(r.visible and r.relations.get('target') is ed.camera for r in ed.hierarchy_rows))
+        self.assertIs(ed.hierarchy.items.require_target('view_root'),ed.app)
+        self.assertTrue(any(r.visible and r.items.target('target') is ed.camera for r in ed.hierarchy_rows))
         actions = ed.app.systems['app'].namespace['context_actions'](ed.app)
         self.assertNotIn('Set parent as root entity',[a['label'] for a in actions if a])
         ed.set_hierarchy_root(target)
         reopened.destroy(target)
         ed.hierarchy_sync()
-        self.assertIs(ed.hierarchy.relations['view_root'],ed.game)
+        self.assertIs(ed.hierarchy.items.require_target('view_root'),ed.game)
         ed.switch_left_tab('files')
         ed.set_file_root(ed.project/'systems/game')
         ed.reveal_file(ed.project/'inspector.py')
@@ -317,7 +317,7 @@ class EditorTests(unittest.TestCase):
         self.runtime = load_project(self.window, self.graphics, self.input, self.directory.name, template=template_path("editor"))
         self.addCleanup(self.runtime.close)
         self.editor = self.runtime.entities[0].items.require_value("application_state")
-        self.editor.hierarchy.relations['view_root'] = self.editor.app
+        self.editor.hierarchy.items.connect('view_root', self.editor.app)
         self.editor.file_explorer.items.set_value('view_root', '.')
         self.runtime.step(0)
         self.assert_healthy()
@@ -362,19 +362,19 @@ class EditorTests(unittest.TestCase):
             self.send(("key", "ENTER", False, False))
 
     def select(self, target):
-        row = next((row for row in self.editor.hierarchy_rows if row.visible and row.relations.get("target") is target), None)
+        row = next((row for row in self.editor.hierarchy_rows if row.visible and row.items.target("target") is target), None)
         if row is None:
             for _ in range(20):
                 self.send(("scroll", self.editor.hierarchy.x + 20, self.editor.hierarchy.y + 20, 0, -1))
                 self.runtime.step(0)
-                row = next((row for row in self.editor.hierarchy_rows if row.visible and row.relations.get("target") is target), None)
+                row = next((row for row in self.editor.hierarchy_rows if row.visible and row.items.target("target") is target), None)
                 if row is not None:
                     break
         if row is None:
             for _ in range(40):
                 self.send(("scroll", self.editor.hierarchy.x + 20, self.editor.hierarchy.y + 20, 0, 1))
                 self.runtime.step(0)
-                row = next((row for row in self.editor.hierarchy_rows if row.visible and row.relations.get("target") is target), None)
+                row = next((row for row in self.editor.hierarchy_rows if row.visible and row.items.target("target") is target), None)
                 if row is not None:
                     break
         if row is not None:
@@ -386,7 +386,7 @@ class EditorTests(unittest.TestCase):
             self.runtime.step(0)
 
     def test_live_component_editing_and_spatial_refresh(self):
-        selected = self.editor.app.relations["selection"]
+        selected = self.editor.app.items.require_target("selection")
         x_field = next(field for _, field in self.editor.component_rows if field.visible and field.component_key == "x")
         self.type(x_field, "10.0", commit=True)
         self.assertEqual(selected.x, 10)
@@ -401,7 +401,7 @@ class EditorTests(unittest.TestCase):
         original = moving.x, moving.y
         stationary = still.x, still.y
         self.click(self.editor.add_comp_menu_button)
-        menu = self.editor.app.relations.get("context_menu")
+        menu = self.editor.app.items.target("context_menu")
         vel_item = next(c for c in menu.children if "+ Velocity" in c.items.get_value("text", ""))
         self.click(vel_item)
         vx_field = next(fld for _, fld in self.editor.component_rows if fld.visible and fld.component_key == "vx")
@@ -424,7 +424,7 @@ class EditorTests(unittest.TestCase):
         self.assertEqual(tuple(instance.errors), ())
         self.click(self.editor.system_panel_button)
         self.assertEqual(self.editor.extra_panels[-1].view_type, "system")
-        self.assertIs(self.editor.extra_panels[-1].relations["target"], self.editor.game)
+        self.assertIs(self.editor.extra_panels[-1].items.require_target("target"), self.editor.game)
 
     def test_syntax_error_preserves_editor_and_previous_renderer(self):
         old = self.editor.game.systems["render"]
@@ -449,18 +449,18 @@ class EditorTests(unittest.TestCase):
         self.assertIn(moving, self.runtime.services["space"].query(10, 0))
 
     def test_tags_relations_parent_and_generic_panel(self):
-        moving = self.editor.app.relations["selection"]
+        moving = self.editor.app.items.require_target("selection")
         self.type(self.editor.tags_field, "visible, selected", commit=True)
-        self.assertEqual(set(moving.tags), {"visible", "selected"})
+        self.assertEqual(set(set(moving.items.tag_names())), {"visible", "selected"})
         self.type(self.editor.relation_field, "friend=Entity B", commit=True)
-        self.assertIs(moving.relations["friend"], self.editor.game.children[1])
+        self.assertIs(moving.items.require_target("friend"), self.editor.game.children[1])
         self.type(self.editor.parent_field, "Application", commit=True)
         self.assertIs(moving.parent, self.editor.app)
         self.click(self.editor.panel_button)
         panel = self.editor.extra_panels[-1]
-        self.assertIs(panel.relations["target"], moving)
+        self.assertIs(panel.items.require_target("target"), moving)
         self.assertIn(panel, self.editor.app.children)
-        self.assertTrue(all("ui" in child.tags for child in panel.children))
+        self.assertTrue(all(child.items.has_tag("ui") for child in panel.children))
 
     def test_clipboard_and_undo(self):
         self.type(self.editor.code, "hello")
@@ -470,8 +470,8 @@ class EditorTests(unittest.TestCase):
         self.assertEqual(self.editor.code.buffer.text, "hello")
 
     def test_unsupported_value_is_readonly(self):
-        self.editor.app.relations["selection"].items.clear_values()
-        self.editor.app.relations["selection"].opaque = object()
+        self.editor.app.items.require_target("selection").items.clear_values()
+        self.editor.app.items.require_target("selection").opaque = object()
         self.runtime.step(0)
         field = next(field for _, field in self.editor.component_rows if field.visible)
         self.assertTrue(field.readonly)
@@ -615,8 +615,8 @@ class EditorTests(unittest.TestCase):
         self.runtime.step(0)
 
         # Check hierarchy row has clear visual highlight indicator
-        row_first = next(r for r in self.editor.hierarchy_rows if r.visible and r.relations.get("target") is first)
-        row_second = next(r for r in self.editor.hierarchy_rows if r.visible and r.relations.get("target") is second)
+        row_first = next(r for r in self.editor.hierarchy_rows if r.visible and r.items.target("target") is first)
+        row_second = next(r for r in self.editor.hierarchy_rows if r.visible and r.items.target("target") is second)
         self.assertIn("> ", row_first.text)
         self.assertNotIn("> ", row_second.text)
         self.assertEqual(row_first.color, (45, 95, 125))
@@ -647,7 +647,7 @@ class EditorTests(unittest.TestCase):
         self.graphics.rectangles.clear()
         self.runtime.step(0)
 
-        row_game = next(r for r in self.editor.hierarchy_rows if r.visible and r.relations.get("target") is self.editor.game)
+        row_game = next(r for r in self.editor.hierarchy_rows if r.visible and r.items.target("target") is self.editor.game)
         self.assertIn("> ", row_game.text)
         self.assertEqual(row_game.color, (45, 95, 125))
         # No selection borders drawn in viewport for Game
@@ -752,7 +752,7 @@ class EditorTests(unittest.TestCase):
         self.click(ed.panel_button)
         panel = ed.extra_panels[-1]
         self.assertEqual(panel.dock, "float")
-        close_btn = next(c for c in panel.children if "button" in c.tags)
+        close_btn = next(c for c in panel.children if c.items.has_tag("button"))
         line0 = next(c for c in panel.children if c.items.get_value("line_index") == 0)
 
         initial_close_x = close_btn.x
@@ -774,7 +774,7 @@ class EditorTests(unittest.TestCase):
         # 1. Select CodeEditorPanel and discover its behavior
         self.select(ed.code_panel)
         self.runtime.step(0)
-        self.assertIs(ed.app.relations["selection"], ed.code_panel)
+        self.assertIs(ed.app.items.require_target("selection"), ed.code_panel)
 
         sys_buttons = [b for b in ed.system_rows if b.visible]
         self.assertTrue(any(b.items.get_value("text", "").endswith(" code_editor.py") for b in sys_buttons))
@@ -792,7 +792,7 @@ class EditorTests(unittest.TestCase):
         self.runtime.step(0)
 
         # TextArea is now selected and hierarchy automatically expanded
-        self.assertIs(ed.app.relations["selection"], ed.code)
+        self.assertIs(ed.app.items.require_target("selection"), ed.code)
         self.assertIn(ed.code_panel.id, ed.hierarchy.expanded)
 
         # 3. Inspect TextArea's reusable behavior and coding-specific behavior
@@ -836,7 +836,7 @@ class EditorTests(unittest.TestCase):
         # 1. Edit components on moving entity
         self.select(moving)
         self.click(ed.add_comp_menu_button)
-        menu = ed.app.relations.get("context_menu")
+        menu = ed.app.items.target("context_menu")
         vel_item = next(c for c in menu.children if "+ Velocity" in c.items.get_value("text", ""))
         self.click(vel_item)
         vx_field = next(fld for _, fld in ed.component_rows if fld.visible and fld.component_key == "vx")
@@ -846,7 +846,7 @@ class EditorTests(unittest.TestCase):
         self.assertEqual((moving.vx, moving.vy), (2, -1))
 
         # 2. Add relation with reference to another entity
-        moving.relations["partner"] = still
+        moving.items.connect("partner", still)
 
         # 3. Author physics system and attach to Game
         self.click(ed.new_button)
@@ -889,8 +889,8 @@ class EditorTests(unittest.TestCase):
         self.assertEqual((moving2.vx, moving2.vy), (2, -1))
 
         # 9. Verify reference integrity
-        self.assertIn("partner", moving2.relations)
-        self.assertIs(moving2.relations["partner"], still2)
+        self.assertIn("partner", moving2.items.link_dict())
+        self.assertIs(moving2.items.require_target("partner"), still2)
 
         # 10. Verify system attachment is reconstructed and running
         self.assertIn("physics", game2.systems)
@@ -1027,15 +1027,16 @@ class EditorTests(unittest.TestCase):
         self.click(code)
         self.send(("key", "A", True, False), ("key", "BACKSPACE", False, False))
 
-        # Type 'entity.c' to trigger autocomplete
-        self.send(("text", "entity.c"))
+        # The native UUID item collection is exposed through the real API.
+        self.send(("text", "entity.i"))
         self.await_completion()
 
         ac_state = code.items.get_value("autocomplete_state")
         self.assertIsNotNone(ac_state)
         self.assertTrue(ac_state.get("active"))
         match_names = [m[0] for m in ac_state.get("matches", [])]
-        self.assertIn("components", match_names)
+        self.assertIn("items", match_names)
+        self.assertNotIn("components", match_names)
 
         # Popup panel entity is visible
         popup = next(c for c in code.children if c.items.get_value("part") == "autocomplete_popup")
@@ -1055,14 +1056,14 @@ class EditorTests(unittest.TestCase):
 
         # Mouse click on autocomplete item
         self.send(("key", "A", True, False), ("key", "BACKSPACE", False, False))
-        self.send(("text", "entity.t"))
+        self.send(("text", "entity.it"))
         self.await_completion()
         self.assertTrue(ac_state.get("active"))
         item0 = next(c for c in code.children if c.items.get_value("part") == "ac_item:0")
         self.assertTrue(item0.visible)
         self.click(item0)
         self.runtime.step(0)
-        self.assertIn("entity.tags", code.buffer.text)
+        self.assertIn("entity.items", code.buffer.text)
         self.assertFalse(ac_state.get("active"))
 
     def test_f5_toggles_game_run_pause_and_period_does_not_run_game(self):
@@ -1226,7 +1227,7 @@ class EditorTests(unittest.TestCase):
         self.assertEqual(ed.code_panel.h, orig_cp_h + 30)
 
         # 6. Release clears active drag
-        self.assertNotIn("active_drag", ed.app.relations)
+        self.assertNotIn("active_drag", ed.app.items.link_dict())
 
         # 6. Save project and verify layout persistence across reopen
         self.click(ed.save_project_button)
@@ -1249,7 +1250,7 @@ class EditorTests(unittest.TestCase):
         self.select(ed.code)
         self.runtime.step(0)
 
-        self.assertIs(ed.app.relations["selection"], ed.code)
+        self.assertIs(ed.app.items.require_target("selection"), ed.code)
         children_count = len(ed.code.children)
         self.assertGreater(children_count, 20)
 
@@ -1353,21 +1354,21 @@ class EditorTests(unittest.TestCase):
 
         # 2. Right-click context action: Add child entity
         self.send(("click", ed.name_field.x + 10, ed.name_field.y + 5, 4, 0))
-        menu = ed.app.relations.get("context_menu")
+        menu = ed.app.items.target("context_menu")
         self.assertIsNotNone(menu)
         add_child_item = next(c for c in menu.children if c.items.get_value("text") == "Add child entity")
         self.click(add_child_item)
-        new_child = ed.app.relations["selection"]
+        new_child = ed.app.items.require_target("selection")
         self.assertIs(new_child.parent, entity_a)
         self.assertIn("Entity", new_child.items.get_value("name", ""))
 
         # 3. Right-click context action: Duplicate entity
         new_child.items.set_value("tag_sample", "original")
         self.send(("click", ed.name_field.x + 10, ed.name_field.y + 5, 4, 0))
-        menu = ed.app.relations.get("context_menu")
+        menu = ed.app.items.target("context_menu")
         dup_item = next(c for c in menu.children if c.items.get_value("text") == "Duplicate entity")
         self.click(dup_item)
-        dup = ed.app.relations["selection"]
+        dup = ed.app.items.require_target("selection")
         self.assertIsNot(dup, new_child)
         self.assertIs(dup.parent, entity_a)
         self.assertEqual(dup.items.get_value("tag_sample"), "original")
@@ -1376,16 +1377,16 @@ class EditorTests(unittest.TestCase):
         # 4. Right-click context action: Delete entity
         dup_name = dup.items.get_value("name")
         self.send(("click", ed.name_field.x + 10, ed.name_field.y + 5, 4, 0))
-        menu = ed.app.relations.get("context_menu")
+        menu = ed.app.items.target("context_menu")
         del_item = next(c for c in menu.children if c.items.get_value("text") == "Delete entity")
         self.click(del_item)
         self.assertFalse(dup.alive)
-        self.assertIs(ed.app.relations["selection"], entity_a)
+        self.assertIs(ed.app.items.require_target("selection"), entity_a)
 
         # 5. Prevent deleting root Game or Application (Delete entity not offered)
         self.select(ed.game)
         self.send(("click", ed.name_field.x + 10, ed.name_field.y + 5, 4, 0))
-        menu = ed.app.relations.get("context_menu")
+        menu = ed.app.items.target("context_menu")
         del_item = next((c for c in menu.children if c.items.get_value("text") == "Delete entity"), None)
         self.assertIsNone(del_item)
         self.assertTrue(ed.game.alive)
@@ -1400,32 +1401,32 @@ class EditorTests(unittest.TestCase):
 
         # 1. Quick presets via '+ Add' dropdown menu: + Pos, + Size, + Vel, + Color
         self.click(ed.add_comp_menu_button)
-        menu = ed.app.relations.get("context_menu")
+        menu = ed.app.items.target("context_menu")
         self.click(next(c for c in menu.children if "+ Transform" in c.items.get_value("text", "")))
         self.assertIn("x", bare.items.value_dict())
         self.assertIn("y", bare.items.value_dict())
 
         self.click(ed.add_comp_menu_button)
-        menu = ed.app.relations.get("context_menu")
+        menu = ed.app.items.target("context_menu")
         self.click(next(c for c in menu.children if "+ Size" in c.items.get_value("text", "")))
         self.assertIn("w", bare.items.value_dict())
         self.assertIn("h", bare.items.value_dict())
 
         self.click(ed.add_comp_menu_button)
-        menu = ed.app.relations.get("context_menu")
+        menu = ed.app.items.target("context_menu")
         self.click(next(c for c in menu.children if "+ Velocity" in c.items.get_value("text", "")))
         self.assertIn("vx", bare.items.value_dict())
         self.assertIn("vy", bare.items.value_dict())
 
         self.click(ed.add_comp_menu_button)
-        menu = ed.app.relations.get("context_menu")
+        menu = ed.app.items.target("context_menu")
         self.click(next(c for c in menu.children if "+ Color" in c.items.get_value("text", "")))
         self.assertIn("color", bare.items.value_dict())
 
         # 2. Component deletion via right-click context menu
         lbl, fld = next((lbl, fld) for (lbl, fld) in ed.component_rows if fld.visible and fld.component_key == "color")
         self.send(("click", fld.x + 10, fld.y + 10, 4, 0))
-        menu = ed.app.relations.get("context_menu")
+        menu = ed.app.items.target("context_menu")
         self.assertIsNotNone(menu)
         del_item = next(c for c in menu.children if "Delete" in c.items.get_value("text", ""))
         self.click(del_item)
@@ -1434,7 +1435,7 @@ class EditorTests(unittest.TestCase):
         # 3. Interactive relations list and unlinking via context menu
         other = self.runtime.create(parent=ed.game, name="TargetAlly")
         self.type(ed.relation_field, "ally=TargetAlly", commit=True)
-        self.assertIs(bare.relations.get("ally"), other)
+        self.assertIs(bare.items.target("ally"), other)
 
         # Check relation row exists and unlink via right click context menu
         self.assertEqual(len([r for r, u in ed.relation_rows if r.visible]), 1)
@@ -1442,11 +1443,11 @@ class EditorTests(unittest.TestCase):
         self.assertIn("ally -> TargetAlly", rel_btn.items.get_value("text", ""))
 
         self.send(("click", rel_btn.x + 10, rel_btn.y + 10, 4, 0))
-        menu = ed.app.relations.get("context_menu")
+        menu = ed.app.items.target("context_menu")
         self.assertIsNotNone(menu)
         unlink_item = next(c for c in menu.children if "Unlink" in c.items.get_value("text", ""))
         self.click(unlink_item)
-        self.assertNotIn("ally", bare.relations)
+        self.assertNotIn("ally", bare.items.link_dict())
         self.assertEqual(len([r for r, u in ed.relation_rows if r.visible]), 0)
 
     def test_right_click_rename_in_hierarchy_and_inspector(self):
@@ -1455,15 +1456,15 @@ class EditorTests(unittest.TestCase):
         self.runtime.step(0)
 
         # 1. Right click row in hierarchy
-        row = next(r for r in ed.hierarchy_rows if r.visible and r.relations.get("target") is target)
+        row = next(r for r in ed.hierarchy_rows if r.visible and r.items.target("target") is target)
         self.send(("click", row.x + 20, row.y + 10, 4, 0))
-        menu = ed.app.relations.get("context_menu")
+        menu = ed.app.items.target("context_menu")
         self.assertIsNotNone(menu)
         rename_btn = next(c for c in menu.children if c.items.get_value("text") == "Rename")
         self.click(rename_btn)
 
         # Verify target is selected and name_field is focused with all text selected
-        self.assertIs(ed.app.relations["selection"], target)
+        self.assertIs(ed.app.items.require_target("selection"), target)
         self.assertIs(ed.ui.focused, ed.name_field)
         self.assertEqual(ed.name_field.buffer.selected_text, "RenameTarget")
 
@@ -1473,7 +1474,7 @@ class EditorTests(unittest.TestCase):
 
         # 2. Right click inside Inspector background / identity label
         self.send(("click", ed.identity_label.x + 10, ed.identity_label.y + 5, 4, 0))
-        menu2 = ed.app.relations.get("context_menu")
+        menu2 = ed.app.items.target("context_menu")
         self.assertIsNotNone(menu2)
         self.assertIs(menu2.context_target, target)
         rename_btn2 = next(c for c in menu2.children if c.items.get_value("text") == "Rename")
@@ -1489,12 +1490,12 @@ class EditorTests(unittest.TestCase):
 
         # 1. Context menu on entity provides unified + Add Component...
         self.send(("click", ed.identity_label.x + 10, ed.identity_label.y + 5, 4, 0))
-        menu = ed.app.relations.get("context_menu")
+        menu = ed.app.items.target("context_menu")
         self.assertIsNotNone(menu)
 
         add_item = next(c for c in menu.children if "+ Add Component" in c.items.get_value("text", ""))
         self.click(add_item)
-        menu = ed.app.relations.get("context_menu")
+        menu = ed.app.items.target("context_menu")
         self.assertIsNotNone(menu)
 
         speed_item = next(c for c in menu.children if "+ Speed" in c.items.get_value("text", ""))
@@ -1503,10 +1504,10 @@ class EditorTests(unittest.TestCase):
 
         # 2. Context menu '+ Custom Component...' focuses add_name
         self.send(("click", ed.identity_label.x + 10, ed.identity_label.y + 5, 4, 0))
-        menu = ed.app.relations.get("context_menu")
+        menu = ed.app.items.target("context_menu")
         add_item = next(c for c in menu.children if "+ Add Component" in c.items.get_value("text", ""))
         self.click(add_item)
-        menu = ed.app.relations.get("context_menu")
+        menu = ed.app.items.target("context_menu")
         custom_item = next(c for c in menu.children if "+ Custom Component..." in c.items.get_value("text", ""))
         self.click(custom_item)
         custom_lbl = next(l for l, _ in ed.component_rows if l.visible and l.component_key == "custom_component")
@@ -1515,7 +1516,7 @@ class EditorTests(unittest.TestCase):
         # 3. Dedicated '+ Component' button opens preset menu
         self.assertTrue(ed.add_comp_menu_button.visible)
         self.click(ed.add_comp_menu_button)
-        menu = ed.app.relations.get("context_menu")
+        menu = ed.app.items.target("context_menu")
         self.assertIsNotNone(menu)
         color_item = next(c for c in menu.children if "+ Color" in c.items.get_value("text", ""))
         self.click(color_item)
@@ -1531,7 +1532,7 @@ class EditorTests(unittest.TestCase):
         # 1. Add link using '+' button with case-insensitive bare target name
         self.type(ed.relation_field, "dockingbay")
         self.click(ed.link_add_button)
-        self.assertIs(ship.relations.get("dockingbay"), dock)
+        self.assertIs(ship.items.target("dockingbay"), dock)
 
         # 2. Existing relation row has [Edit] button
         self.assertEqual(len([r for r, u in ed.relation_rows if r.visible]), 1)
@@ -1547,16 +1548,16 @@ class EditorTests(unittest.TestCase):
         # Update relation name to 'home_port' and click '+' button
         self.type(ed.relation_field, "home_port=DockingBay")
         self.click(ed.link_add_button)
-        self.assertIs(ship.relations.get("home_port"), dock)
-        self.assertNotIn("dockingbay", ship.relations)
+        self.assertIs(ship.items.target("home_port"), dock)
+        self.assertNotIn("dockingbay", ship.items.link_dict())
 
         # 3. Right-clicking relation row shows context menu
         self.send(("click", rel_btn.x + 10, rel_btn.y + 5, 4, 0))
-        menu = ed.app.relations.get("context_menu")
+        menu = ed.app.items.target("context_menu")
         self.assertIsNotNone(menu)
         unlink_item = next(c for c in menu.children if "Unlink 'home_port'" in c.items.get_value("text", ""))
         self.click(unlink_item)
-        self.assertNotIn("home_port", ship.relations)
+        self.assertNotIn("home_port", ship.items.link_dict())
 
     def test_inspector_header_layout_and_button_dimensions(self):
         ed = self.editor
@@ -1599,7 +1600,7 @@ class EditorTests(unittest.TestCase):
         self.send(('drag', viewport.x+100, viewport.y+100, 1, 0, 50, 50))
         self.assertEqual((self.editor.camera.x, self.editor.camera.y), camera_before)
         self.send(('release', viewport.x+100, viewport.y+100, 1, 0))
-        self.assertNotIn('text_drag', self.editor.app.relations)
+        self.assertNotIn('text_drag', self.editor.app.items.link_dict())
         code.buffer.anchor, code.buffer.cursor = 3, 5
         self.runtime.step(0)
         parts = {c.items.get_value('part'): c for c in code.children}
@@ -2182,7 +2183,7 @@ class EditorTests(unittest.TestCase):
 
         # 2. Click '+ Attach' button to open system menu
         self.click(ed.add_system_button)
-        menu = ed.app.relations.get("context_menu")
+        menu = ed.app.items.target("context_menu")
         self.assertIsNotNone(menu)
         render_item = next((c for c in menu.children if "render" in c.items.get_value("text", "")), None)
         self.assertIsNotNone(render_item)
@@ -2204,7 +2205,7 @@ class EditorTests(unittest.TestCase):
 
         # 4. Right click system row to detach
         self.send(("click", sys_btn.x + 10, sys_btn.y + 10, 4, 0))
-        detach_menu = ed.app.relations.get("context_menu")
+        detach_menu = ed.app.items.target("context_menu")
         self.assertIsNotNone(detach_menu)
         detach_item = next((c for c in detach_menu.children if "Detach" in c.items.get_value("text", "")), None)
         self.assertIsNotNone(detach_item)
@@ -2240,7 +2241,7 @@ class EditorTests(unittest.TestCase):
 
         # 1. Preset via + Add button focuses value with highlight
         self.click(ed.add_comp_menu_button)
-        menu = ed.app.relations.get("context_menu")
+        menu = ed.app.items.target("context_menu")
         self.assertIsNotNone(menu)
         pos_item = next(c for c in menu.children if "+ Transform" in c.items.get_value("text", ""))
         self.click(pos_item)
@@ -2254,7 +2255,7 @@ class EditorTests(unittest.TestCase):
         # 2. Right-click 'y' component to rename inline
         lbl, y_fld = next((lbl, fld) for (lbl, fld) in ed.component_rows if fld.visible and fld.component_key == "y")
         self.send(("click", y_fld.x + 10, y_fld.y + 10, 4, 0))
-        menu = ed.app.relations.get("context_menu")
+        menu = ed.app.items.target("context_menu")
         self.assertIsNotNone(menu)
         rename_item = next(c for c in menu.children if "Rename" in c.items.get_value("text", ""))
         self.click(rename_item)
@@ -2271,7 +2272,7 @@ class EditorTests(unittest.TestCase):
 
         # 3. Add Custom Component automatically focuses name field with highlight
         self.click(ed.add_comp_menu_button)
-        menu = ed.app.relations.get("context_menu")
+        menu = ed.app.items.target("context_menu")
         custom_item = next(c for c in menu.children if "Custom Component" in c.items.get_value("text", ""))
         self.click(custom_item)
         self.assertIn("custom_component", ent.items.value_dict())
@@ -2344,12 +2345,12 @@ class EditorTests(unittest.TestCase):
         ed = self.editor
         child = self.runtime.create(parent=ed.game, name="RightClickTarget")
         self.runtime.step(0)
-        row = next(r for r in ed.hierarchy_rows if r.visible and r.relations.get("target") is child)
+        row = next(r for r in ed.hierarchy_rows if r.visible and r.items.target("target") is child)
         self.send(("click", row.x + 40, row.y + 10, 4, 0))
         # Child is now selected
-        self.assertIs(ed.app.relations.get("selection"), child)
+        self.assertIs(ed.app.items.target("selection"), child)
         # Context menu is open targeting child
-        menu = ed.app.relations.get("context_menu")
+        menu = ed.app.items.target("context_menu")
         self.assertIsNotNone(menu)
         self.assertIs(menu.context_target, child)
 
@@ -2359,7 +2360,7 @@ class EditorTests(unittest.TestCase):
 
         # 1. Normal right-click on Code Editor provides code actions, not selecting CodeEditor in hierarchy
         self.send(("click", ed.code.x + 20, ed.code.y + 20, 4, 0))
-        menu = ed.app.relations.get("context_menu")
+        menu = ed.app.items.target("context_menu")
         self.assertIsNotNone(menu)
         self.assertIsInstance(menu.context_target, dict)
         self.assertTrue(menu.context_target.get("code"))
@@ -2400,7 +2401,7 @@ class EditorTests(unittest.TestCase):
 
         # 4. Ctrl + Right-Click on game entity provides color-coded stack selection
         self.send(("click", sx, sy, 4, 2))  # Modifier 2 = MOD_CTRL
-        menu_game = ed.app.relations.get("context_menu")
+        menu_game = ed.app.items.target("context_menu")
         self.assertIsNotNone(menu_game)
         self.assertTrue(menu_game.context_target.get("deep"))
         game_items = [c for c in menu_game.children if c.items.has_value("text")]
@@ -2412,12 +2413,12 @@ class EditorTests(unittest.TestCase):
         # Clicking '> Select 'Viewport' (Parent)' selects the viewport
         vp_btn = next(c for c in game_items if "Viewport" in c.text and "Select" in c.text)
         self.click(vp_btn)
-        self.assertIs(ed.app.relations.get("selection"), ed.viewport)
+        self.assertIs(ed.app.items.target("selection"), ed.viewport)
         self.send(("key", "ESCAPE", False, False))
 
         # 5. Ctrl + Right-Click on RunButton deeply targets it and allows selection
         self.send(("click", ed.run_button.x + 10, ed.run_button.y + 10, 4, 2))
-        menu_btn = ed.app.relations.get("context_menu")
+        menu_btn = ed.app.items.target("context_menu")
         self.assertIsNotNone(menu_btn)
         self.assertTrue(menu_btn.context_target.get("deep"))
         self.assertIs(menu_btn.context_target.get("entity"), ed.run_button)
@@ -2439,11 +2440,11 @@ class EditorTests(unittest.TestCase):
 
         # Viewport click directly on child entity selects the child entity
         self.send(("click", tx, ty, 1, 0))
-        self.assertIs(ed.app.relations.get("selection"), turret)
+        self.assertIs(ed.app.items.target("selection"), turret)
 
         # Ctrl + Right-Click on turret includes Turret as Leaf and Player as Parent
         self.send(("click", tx, ty, 4, 2))
-        menu_turret = ed.app.relations.get("context_menu")
+        menu_turret = ed.app.items.target("context_menu")
         self.assertIsNotNone(menu_turret)
         turret_items = [c.text for c in menu_turret.children if c.items.has_value("text") and "Select" in c.text]
         self.assertTrue(any("Turret" in lbl and "Leaf" in lbl for lbl in turret_items))
@@ -2457,7 +2458,7 @@ class EditorTests(unittest.TestCase):
         tx_moved, ty_moved = world_to_screen(ed.camera, ed.viewport, 2.5, 3.5)
         # Clicking at new world position selects turret
         self.send(("click", tx_moved, ty_moved, 1, 0))
-        self.assertIs(ed.app.relations.get("selection"), turret)
+        self.assertIs(ed.app.items.target("selection"), turret)
 
     def test_component_context_menu_change_type(self):
         """Issue #65: Context menu on component row provides Change type... to convert values."""
@@ -2469,7 +2470,7 @@ class EditorTests(unittest.TestCase):
         # Right-click score component
         _, score_fld = next((lbl, fld) for (lbl, fld) in ed.component_rows if fld.visible and fld.component_key == "score")
         self.send(("click", score_fld.x + 10, score_fld.y + 10, 4, 0))
-        menu = ed.app.relations.get("context_menu")
+        menu = ed.app.items.target("context_menu")
         self.assertIsNotNone(menu)
 
         # Verify Change type item exists
@@ -2478,7 +2479,7 @@ class EditorTests(unittest.TestCase):
 
         # Click Change type to open types submenu
         self.click(change_item)
-        type_menu = ed.app.relations.get("context_menu")
+        type_menu = ed.app.items.target("context_menu")
         self.assertIsNotNone(type_menu)
 
         # Change to int
@@ -2490,10 +2491,10 @@ class EditorTests(unittest.TestCase):
         # Change to bool
         _, score_fld = next((lbl, fld) for (lbl, fld) in ed.component_rows if fld.visible and fld.component_key == "score")
         self.send(("click", score_fld.x + 10, score_fld.y + 10, 4, 0))
-        menu = ed.app.relations.get("context_menu")
+        menu = ed.app.items.target("context_menu")
         change_item = next(c for c in menu.children if "Change type" in c.items.get_value("text", ""))
         self.click(change_item)
-        type_menu = ed.app.relations.get("context_menu")
+        type_menu = ed.app.items.target("context_menu")
         bool_choice = next(c for c in type_menu.children if "bool" in c.items.get_value("text", ""))
         self.click(bool_choice)
         self.assertEqual(ent.items.require_value("score"), True)
@@ -2502,10 +2503,10 @@ class EditorTests(unittest.TestCase):
         # Change to str
         _, score_fld = next((lbl, fld) for (lbl, fld) in ed.component_rows if fld.visible and fld.component_key == "score")
         self.send(("click", score_fld.x + 10, score_fld.y + 10, 4, 0))
-        menu = ed.app.relations.get("context_menu")
+        menu = ed.app.items.target("context_menu")
         change_item = next(c for c in menu.children if "Change type" in c.items.get_value("text", ""))
         self.click(change_item)
-        type_menu = ed.app.relations.get("context_menu")
+        type_menu = ed.app.items.target("context_menu")
         str_choice = next(c for c in type_menu.children if "str" in c.items.get_value("text", ""))
         self.click(str_choice)
         self.assertEqual(ent.items.require_value("score"), "True")
@@ -2522,7 +2523,7 @@ class EditorTests(unittest.TestCase):
         # Right-click target_entity component row
         _, tgt_fld = next((lbl, fld) for (lbl, fld) in ed.component_rows if fld.visible and fld.component_key == "target_entity")
         self.send(("click", tgt_fld.x + 10, tgt_fld.y + 10, 4, 0))
-        menu = ed.app.relations.get("context_menu")
+        menu = ed.app.items.target("context_menu")
         self.assertIsNotNone(menu)
 
         texts = [c.items.get_value("text", "") for c in menu.children if c.items.has_value("text")]
@@ -2540,7 +2541,7 @@ class EditorTests(unittest.TestCase):
         # Clicking select entity selects BossShip
         select_item = next(c for c in menu.children if "Select Entity 'BossShip'" in c.items.get_value("text", ""))
         self.click(select_item)
-        self.assertIs(ed.app.relations.get("selection"), target_ent)
+        self.assertIs(ed.app.items.target("selection"), target_ent)
 
     def test_add_component_context_menu_unification(self):
         """Issue #65: Viewport, hierarchy, and inspector context menus all offer unified + Add Component... expanding presets."""
@@ -2552,7 +2553,7 @@ class EditorTests(unittest.TestCase):
         # 1. Viewport right-click on entity
         sx, sy = world_to_screen(ed.camera, ed.viewport, 0.5, 0.5)
         self.send(("click", sx, sy, 4, 0))
-        vp_menu = ed.app.relations.get("context_menu")
+        vp_menu = ed.app.items.target("context_menu")
         self.assertIsNotNone(vp_menu)
         vp_texts = [c.items.get_value("text", "") for c in vp_menu.children if c.items.has_value("text")]
         self.assertIn("+ Add Component...", vp_texts)
@@ -2561,7 +2562,7 @@ class EditorTests(unittest.TestCase):
         # Click + Add Component... and verify presets expand
         add_btn = next(c for c in vp_menu.children if c.items.get_value("text") == "+ Add Component...")
         self.click(add_btn)
-        vp_submenu = ed.app.relations.get("context_menu")
+        vp_submenu = ed.app.items.target("context_menu")
         self.assertIsNotNone(vp_submenu)
         sub_texts = [c.items.get_value("text", "") for c in vp_submenu.children if c.items.has_value("text")]
         self.assertTrue(any("+ Transform / Pos" in t for t in sub_texts))
@@ -2570,9 +2571,9 @@ class EditorTests(unittest.TestCase):
         self.send(("key", "ESCAPE", False, False))
 
         # 2. Hierarchy right-click on row
-        row = next(r for r in ed.hierarchy_rows if r.visible and r.relations.get("target") is unit)
+        row = next(r for r in ed.hierarchy_rows if r.visible and r.items.target("target") is unit)
         self.send(("click", row.x + 40, row.y + 10, 4, 0))
-        h_menu = ed.app.relations.get("context_menu")
+        h_menu = ed.app.items.target("context_menu")
         self.assertIsNotNone(h_menu)
         h_texts = [c.items.get_value("text", "") for c in h_menu.children if c.items.has_value("text")]
         self.assertIn("+ Add Component...", h_texts)
@@ -2594,7 +2595,7 @@ class EditorTests(unittest.TestCase):
         self.runtime.step(0)
         # Right click in the code editor area
         self.send(("click", ed.code.x + 40, ed.code.y + 40, 4, 0))
-        menu = ed.app.relations.get("context_menu")
+        menu = ed.app.items.target("context_menu")
         self.assertIsNotNone(menu)
         texts = [c.items.get_value("text", "") for c in menu.children if c.items.has_value("text")]
         self.assertTrue(any("Save / reload" in t for t in texts))
@@ -2794,12 +2795,12 @@ class EditorTests(unittest.TestCase):
     def test_view_menu_opens_system_log(self):
         ed = self.editor
         self.click(ed.menu_view_btn)
-        menu = ed.app.relations['context_menu']
+        menu = ed.app.items.require_target('context_menu')
         item = next(c for c in menu.children if c.items.get_value('text') == 'System Log (Ctrl+L)')
         self.click(item)
-        panel = ed.app.relations['system_log_panel']
+        panel = ed.app.items.require_target('system_log_panel')
         self.assertTrue(panel.visible)
-        self.assertIsNone(ed.app.relations.get('context_menu'))
+        self.assertIsNone(ed.app.items.target('context_menu'))
 
     def test_view_menu_toggles_and_restores_panels(self):
         """Req 3: Classic top menu buttons exist, close minimizes, and View menu restores to default."""

@@ -38,8 +38,8 @@ def stop():
                            ('on_drag', move), ('on_release', release)):
         if entity.items.get_value(name) is callback:
             entity.items.remove_value(name)
-    if entity.root.relations.get('active_drag') is entity:
-        del entity.root.relations['active_drag']
+    if entity.root.items.target('active_drag') is entity:
+        entity.root.items.disconnect('active_drag')
     entity.items.remove_value('drag_offset', None)
     if entity.items.get_value('log') is log:
         entity.items.remove_value('log')
@@ -49,7 +49,7 @@ def stop():
 def press(control, event):
     if event[3] == 1 and event[2] < entity.y+28:
         entity.drag_offset = (event[1]-entity.x, event[2]-entity.y)
-        entity.root.relations['active_drag'] = entity
+        entity.root.items.connect('active_drag', entity)
         return True
     return False
 

@@ -173,7 +173,7 @@ class AssetSystemTests(unittest.TestCase):
         self.runtime.step(0)
 
         # Find the inline asset pill control
-        pills = [c for c in ed.ui.controls() if "asset_pill" in c.tags and c.visible]
+        pills = [c for c in ed.ui.controls() if c.items.has_tag("asset_pill") and c.visible]
         self.assertTrue(len(pills) >= 1)
         pill = pills[0]
         self.assertEqual(pill.items.get_value("asset_id"), str(player_id))
@@ -191,13 +191,13 @@ class AssetSystemTests(unittest.TestCase):
         ed.code.buffer.text = f'snd = asset("{jump_id}")\n'
         self.runtime.step(0)
 
-        pills = [c for c in ed.ui.controls() if "asset_pill" in c.tags and c.visible]
+        pills = [c for c in ed.ui.controls() if c.items.has_tag("asset_pill") and c.visible]
         self.assertTrue(len(pills) >= 1)
         pill = pills[0]
 
         # Right-click the pill
         self.send(("click", pill.x + 5, pill.y + 5, 4, 0))
-        menu = ed.app.relations.get("context_menu")
+        menu = ed.app.items.target("context_menu")
         self.assertIsNotNone(menu)
 
         # Verify Locate in Project Files
@@ -208,17 +208,17 @@ class AssetSystemTests(unittest.TestCase):
 
         # Verify Copy Asset UUID
         self.send(("click", pill.x + 5, pill.y + 5, 4, 0))
-        menu = ed.app.relations.get("context_menu")
+        menu = ed.app.items.target("context_menu")
         copy_item = next(c for c in menu.children if "Copy Asset UUID" in c.items.get_value("text", ""))
         self.click(copy_item)
         self.assertEqual(self.clipboard, str(jump_id))
 
         # Verify Replace reference
         self.send(("click", pill.x + 5, pill.y + 5, 4, 0))
-        menu = ed.app.relations.get("context_menu")
+        menu = ed.app.items.target("context_menu")
         replace_item = next(c for c in menu.children if "Replace" in c.items.get_value("text", ""))
         self.click(replace_item)
-        picker_menu = ed.app.relations.get("context_menu")
+        picker_menu = ed.app.items.target("context_menu")
         self.assertIsNotNone(picker_menu)
         player_picker_item = next(c for c in picker_menu.children if "player.png" in c.items.get_value("text", ""))
         self.click(player_picker_item)
@@ -226,9 +226,9 @@ class AssetSystemTests(unittest.TestCase):
 
         # Verify Remove reference
         self.runtime.step(0)
-        new_pill = next(c for c in ed.ui.controls() if "asset_pill" in c.tags and c.visible)
+        new_pill = next(c for c in ed.ui.controls() if c.items.has_tag("asset_pill") and c.visible)
         self.send(("click", new_pill.x + 5, new_pill.y + 5, 4, 0))
-        menu = ed.app.relations.get("context_menu")
+        menu = ed.app.items.target("context_menu")
         remove_item = next(c for c in menu.children if "Remove reference" in c.items.get_value("text", ""))
         self.click(remove_item)
         self.assertNotIn('asset(', ed.code.buffer.text)
@@ -280,7 +280,7 @@ class AssetSystemTests(unittest.TestCase):
         self.runtime.step(0)
 
         # Pill displays "player.png"
-        pill = next(c for c in ed.ui.controls() if "asset_pill" in c.tags and c.visible)
+        pill = next(c for c in ed.ui.controls() if c.items.has_tag("asset_pill") and c.visible)
         self.assertIn("player.png", pill.text)
 
         # Rename file on disk & in registry
@@ -295,7 +295,7 @@ class AssetSystemTests(unittest.TestCase):
         self.assertEqual(ed.code.buffer.text, raw_code)
 
         # 2. Inline pill automatically reflects the new name!
-        updated_pill = next(c for c in ed.ui.controls() if "asset_pill" in c.tags and c.visible)
+        updated_pill = next(c for c in ed.ui.controls() if c.items.has_tag("asset_pill") and c.visible)
         self.assertIn("hero_warrior.png", updated_pill.text)
 
     def test_atomic_pill_navigation_and_deletion(self):
@@ -509,7 +509,7 @@ class AssetSystemTests(unittest.TestCase):
 
         # Step to sync text and render inline pill
         self.runtime.step(0)
-        pills = [c for c in ed.ui.controls() if "asset_pill" in c.tags and c.visible]
+        pills = [c for c in ed.ui.controls() if c.items.has_tag("asset_pill") and c.visible]
         self.assertTrue(len(pills) >= 1)
         self.assertIn("HeroNode", pills[0].text)
         self.assertIn("🔷", pills[0].text)
@@ -526,7 +526,7 @@ class AssetSystemTests(unittest.TestCase):
 
         # 3. Dropping entity onto another entity row in Hierarchy reparents it
         # Find row for parent_ent
-        row = next(r for r in ed.hierarchy_rows if r.visible and r.relations.get("target") is parent_ent)
+        row = next(r for r in ed.hierarchy_rows if r.visible and r.items.target("target") is parent_ent)
         drop_hier = ("release", row.x + 20, row.y + 10, 0, 0)
         ed.app.items.require_value("on_entity_drop")(ent_drag, drop_hier)
 
@@ -716,14 +716,14 @@ class AssetSystemTests(unittest.TestCase):
         self.assertIn("EntityAlpha", ed.identity_label.text)
 
         # Find row for EntityBeta
-        row_b = next(r for r in ed.hierarchy_rows if r.visible and r.relations.get("target") is ent_b)
+        row_b = next(r for r in ed.hierarchy_rows if r.visible and r.items.target("target") is ent_b)
 
         # 1. Single click on EntityBeta row
         self.send(("click", row_b.x + 40, row_b.y + 10, 1, 0))
         self.runtime.step(0)
 
         # Selection relation is updated to EntityBeta (for hierarchy/viewport highlight)
-        self.assertIs(ed.app.relations.get("selection"), ent_b)
+        self.assertIs(ed.app.items.target("selection"), ent_b)
         # BUT Inspector STILL inspects EntityAlpha!
         self.assertIn("EntityAlpha", ed.identity_label.text)
 
@@ -749,7 +749,7 @@ class AssetSystemTests(unittest.TestCase):
         self.assertIn("TargetEntity", ed.identity_label.text)
 
         # Single-click/drag DraggedEntity from Hierarchy
-        row_drag = next(r for r in ed.hierarchy_rows if r.visible and r.relations.get("target") is dragged_ent)
+        row_drag = next(r for r in ed.hierarchy_rows if r.visible and r.items.target("target") is dragged_ent)
         self.send(("drag", row_drag.x + 40, row_drag.y + 10, 1, 0, 10, 0))
         self.runtime.step(0)
 

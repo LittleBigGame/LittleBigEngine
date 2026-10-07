@@ -276,7 +276,7 @@ class SystemInstance:
                             else:
                                 targets = list(self.entity.query(*self.definition.components, recursive=True))
                         else:
-                            if not self.entity.children or ("root" not in self.entity.tags and self.entity.parent is not None):
+                            if not self.entity.children or (not self.entity.items.has_tag("root") and self.entity.parent is not None):
                                 targets = [self.entity]
                             else:
                                 targets = list(self.entity.children)

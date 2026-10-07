@@ -49,9 +49,9 @@ def open_path():
     state.code.items.set_value('system_name', path.stem)
     sel = selected()
     if sel and path.stem in sel.systems:
-        state.code.relations['owner'] = sel
+        state.code.items.connect('owner', sel)
     else:
-        state.code.relations.pop('owner', None)
+        state.code.items.disconnect('owner', None)
     message(f'Opened {path.name}')
 
 def open_specific_file(path):
@@ -70,9 +70,9 @@ def open_specific_file(path):
     state.code.items.set_value('system_name', path.stem)
     sel = selected()
     if sel and path.stem in sel.systems:
-        state.code.relations['owner'] = sel
+        state.code.items.connect('owner', sel)
     else:
-        state.code.relations.pop('owner', None)
+        state.code.items.disconnect('owner', None)
     state.reveal_file(path)
     message(f"Opened {rel_name}")
     return True
@@ -184,7 +184,7 @@ def open_system(owner, name):
     state.code.buffer = TextBuffer(instance.definition.source)
     state._saved_source = (state.path_field.buffer.text, state.code.buffer.text)
     state.code.system_name = name
-    state.code.relations['owner'] = owner
+    state.code.items.connect('owner', owner)
     if getattr(state, 'ready', False) and path.is_relative_to(state.project):
         state.reveal_file(path)
     message(f"{name} | {('running' if instance.running else 'stopped')} | {', '.join(instance.lifecycle)}")
@@ -223,7 +223,7 @@ def attach():
     save()
     path = source_path()
     definition = state.runtime.assets.system(path)
-    owner = state.code.relations.get('owner') or selected()
+    owner = state.code.items.target('owner') or selected()
     if owner is None:
         owner = state.game
     if path.stem in owner.systems:
@@ -236,7 +236,7 @@ def attach():
         err = instance.errors[-1].message if instance.errors else "Attachment failed"
         raise RuntimeError(err)
     state.code.system_name = path.stem
-    state.code.relations['owner'] = owner
+    state.code.items.connect('owner', owner)
     save_editor_project()
     inspector_sync()
     message(f"Attached {path.stem} to {owner.items.get_value('name', owner.id)}")
@@ -322,7 +322,7 @@ def delete_file_item(item):
         state.code.source_path = str(state.project / 'new_system.py')
         state._saved_source = None
         state.code.items.remove_value('system_name', None)
-        state.code.relations.pop('owner', None)
+        state.code.items.disconnect('owner', None)
     refresh_project_files()
     message(f"Deleted '{path.name}'; references remain recoverable")
 

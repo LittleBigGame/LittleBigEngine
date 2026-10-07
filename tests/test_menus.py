@@ -30,7 +30,7 @@ class MenuTests(unittest.TestCase):
         self.ui.dispatch(('key', 'DOWN', False, False))
         self.ui.dispatch(('key', 'ENTER', False, False))
         self.assertEqual(target['count'], 1)
-        self.assertNotIn('context_menu', self.root.relations)
+        self.assertNotIn('context_menu', self.root.items.link_dict())
         self.assertIs(self.ui.focused, field)
 
     def test_provider_discovery_right_click_and_outside_capture(self):
@@ -38,7 +38,7 @@ class MenuTests(unittest.TestCase):
         button = self.ui.button(self.root, 'Button', 'Button', lambda: calls.append('button'), x=0,y=0,w=100,h=30)
         button.context_actions = lambda target: [dict(label='Custom',run=lambda t: calls.append(t))]
         self.ui.dispatch(('click', 10, 10, 4, 0))
-        menu = self.root.relations['context_menu']
+        menu = self.root.items.require_target('context_menu')
         self.assertIs(menu.context_target, button)
         self.assertEqual(calls, [])
         self.ui.dispatch(('click', 800, 600, 1, 0))
@@ -56,7 +56,7 @@ class MenuTests(unittest.TestCase):
         self.runtime.destroy(target)
         self.ui.dispatch(('key', 'ENTER', False, False))
         self.assertEqual(calls, [target])
-        self.assertNotIn('context_menu', self.root.relations)
+        self.assertNotIn('context_menu', self.root.items.link_dict())
 
     def test_long_menu_keyboard_reveals_last_action(self):
         self.ui.window.height = 100
@@ -76,11 +76,11 @@ class MenuTests(unittest.TestCase):
             ui = state.ui
             row = next(r for r in state.hierarchy_rows if r.visible)
             ui.dispatch(('click', row.x+40, row.y+10, 4, 0))
-            self.assertIs(root.relations['context_menu'].context_target, row.relations['target'])
+            self.assertIs(root.items.require_target('context_menu').context_target, row.items.require_target('target'))
             ui.dispatch(('key', 'ESCAPE', False, False))
             viewport = state.viewport
             ui.dispatch(('click', viewport.x+viewport.w-5, viewport.y+viewport.h-5, 4, 0))
-            self.assertIs(root.relations['context_menu'].context_target, state.game)
+            self.assertIs(root.items.require_target('context_menu').context_target, state.game)
             self.assertTrue(all(not s.errors for e in runtime.entities for s in e.systems.values()))
 
     def test_menu_motion_scroll_and_empty_actions(self):
@@ -145,15 +145,15 @@ class MenuTests(unittest.TestCase):
         released, dropped = [], []
         handle = self.ui.splitter(self.root, 'Handle', x=10,y=10,w=10,h=100)
         handle.on_release = lambda control,event: released.append(control)
-        self.root.relations['active_drag'] = handle
-        self.root.relations['text_drag'] = handle
+        self.root.items.connect('active_drag', handle)
+        self.root.items.connect('text_drag', handle)
         for name in ('entity', 'asset', 'dock'):
             self.root.items.set_value(name+'_drag', {'value': name})
             self.root.items.set_value('on_'+name+'_drop', lambda data,event: dropped.append(data))
         menu = open_menu(self.ui, object(), 100,100, [dict(label='Run',run=lambda target:None)])
         self.ui.dispatch(('release',110,110,1,0))
-        self.assertNotIn('active_drag', self.root.relations)
-        self.assertNotIn('text_drag', self.root.relations)
+        self.assertNotIn('active_drag', self.root.items.link_dict())
+        self.assertNotIn('text_drag', self.root.items.link_dict())
         self.assertEqual(released, [handle])
         self.assertEqual(dropped, [])
         for name in ('entity_drag','asset_drag','dock_drag'):

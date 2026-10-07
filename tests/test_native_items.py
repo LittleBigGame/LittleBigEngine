@@ -81,6 +81,45 @@ class NativeItemTests(unittest.TestCase):
         target.destroy()
         self.assertNotIn(link.id, owner.items)
 
+    def test_named_tag_helpers_mutate_actual_uuid_records(self):
+        owner = self.runtime.create(tags=('player', 'player'))
+        original, = owner.all(Tag)
+        self.assertIs(owner.items.add_tag('player'), original)
+        renamed = owner.items.rename(original.id, 'enemy')
+        self.assertTrue(owner.items.has_tag('enemy'))
+        self.assertFalse(owner.items.has_tag('player'))
+        self.assertIs(owner.items[original.id], renamed)
+        owner.items.remove_tag('enemy')
+        self.assertFalse(owner.all(Tag))
+        with self.assertRaises(KeyError):
+            self.runtime.linker.resolve(original.id)
+
+    def test_retarget_link_preserves_uuid_and_handle_and_cleans_indexes(self):
+        owner, first, second = (self.runtime.create() for _ in range(3))
+        link = owner.items.connect('target', first)
+        handle = self.runtime.linker.handle(link.id)
+        edited = owner.items.connect('target', second)
+        self.assertEqual(edited.id, link.id)
+        self.assertIs(self.runtime.linker.resolve_handle(handle), edited)
+        self.assertNotIn(first, self.runtime._incoming)
+        self.assertEqual(self.runtime._incoming[second], {(owner, 'target')})
+        first.destroy()
+        self.assertIs(owner.items.require_target('target'), second)
+        second.destroy()
+        self.assertFalse(owner.items.has_link('target'))
+        self.assertNotIn(link.id, owner.items)
+
+    def test_invalid_named_tag_and_link_names_do_not_insert_records(self):
+        owner, target = self.runtime.create(), self.runtime.create()
+        for name in (None, '', 3, []):
+            with self.subTest(name=name):
+                with self.assertRaises(ValueError):
+                    owner.items.add_tag(name)
+                with self.assertRaises(ValueError):
+                    owner.items.connect(name, target)
+        self.assertFalse(owner.items)
+        self.assertFalse(self.runtime._incoming)
+
     def test_native_parent_record_controls_real_hierarchy(self):
         parent = self.runtime.create()
         child = self.runtime.create()
@@ -210,13 +249,14 @@ class NativeItemTests(unittest.TestCase):
         self.assertEqual(owner.all(DefinitionMetadata), (record,))
         self.assertNotIn(record.id, self.runtime.linker.dependencies)
 
-    def test_entity_has_no_component_collection_facade(self):
+    def test_entity_has_no_legacy_data_collection_facades(self):
         owner = self.runtime.create(x=1)
-        self.assertNotIn('components', type(owner).__dict__)
-        self.assertNotIn('_components', type(owner).__slots__)
-        self.assertFalse(hasattr(owner, 'components'))
-        with self.assertRaises(AttributeError):
-            _ = owner.components
+        for old_name in ('components', 'tags', 'relations'):
+            self.assertNotIn(old_name, type(owner).__dict__)
+            self.assertNotIn('_' + old_name, type(owner).__slots__)
+            self.assertFalse(hasattr(owner, old_name))
+            with self.assertRaises(AttributeError):
+                getattr(owner, old_name)
         self.assertEqual(owner.items.require_value('x'), 1)
 
     def test_entity_creation_accepts_actual_typed_uuid_records(self):

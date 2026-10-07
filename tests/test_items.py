@@ -27,11 +27,11 @@ class ItemTests(unittest.TestCase):
     def test_hierarchy_and_relations_store_flat_uuids(self):
         p = self.runtime.create()
         c = self.runtime.create(parent=p)
-        c.relations["target"] = p
+        c.items.connect("target", p)
         self.assertEqual(c.all(Parent)[0].target, p.id)
         self.assertEqual(c.all(Relation)[0].target, p.id)
         self.assertIs(c.parent, p)
-        self.assertIs(c.relations["target"], p)
+        self.assertIs(c.items.require_target("target"), p)
         c.parent = None
         self.assertFalse(c.all(Parent))
         self.assertFalse(p.children)

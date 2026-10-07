@@ -20,7 +20,7 @@ def world_position(entity, root=None):
     x = y = 0.0
     current = entity
     while current is not None and current is not root:
-        if current is not entity and root is None and "root" in current.tags:
+        if current is not entity and root is None and current.items.has_tag("root"):
             break
         x += current.items.get_value("x", 0.0)
         y += current.items.get_value("y", 0.0)
@@ -192,7 +192,7 @@ class SpatialIndex:
         for other in candidates:
             if not getattr(other, "alive", True):
                 continue
-            if tag is not None and tag not in getattr(other, "tags", ()):
+            if tag is not None and not other.items.has_tag(tag):
                 continue
             obox = self._bounds.get(other)
             if obox is None:

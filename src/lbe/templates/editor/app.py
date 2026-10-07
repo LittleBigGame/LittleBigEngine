@@ -27,30 +27,30 @@ def message(text):
 
 
 def selected():
-    sel = state.app.relations.get('selection')
+    sel = state.app.items.target('selection')
     if sel is None or not sel.alive:
         sel = state.game
-        state.app.relations['selection'] = sel
+        state.app.items.connect('selection', sel)
     return sel
 
 
 def inspected():
-    ins = state.app.relations.get('inspected')
+    ins = state.app.items.target('inspected')
     if ins is None or not ins.alive:
         ins = selected()
-        state.app.relations['inspected'] = ins
+        state.app.items.connect('inspected', ins)
     return ins
 
 
 def select(entity):
     if entity is None or not entity.alive:
         entity = state.game
-    state.app.relations['selection'] = entity
-    state.game.relations['selection'] = entity
-    state.app.relations['inspected'] = entity
+    state.app.items.connect('selection', entity)
+    state.game.items.connect('selection', entity)
+    state.app.items.connect('inspected', entity)
     state.inspector.scroll = 0
-    if 'focus' in state.app.relations:
-        del state.app.relations['focus']
+    if state.app.items.has_link('focus'):
+        state.app.items.disconnect('focus')
     for ancestor in entity.ancestors:
         state.hierarchy.expanded.add(ancestor.id)
     if hasattr(state, "inspector_sync"):
@@ -253,7 +253,7 @@ def initialize():
     project_data = load_project_data(project)
     if project_data is not None and project_data.get("entities"):
         restored = deserialize_entities(project_data["entities"], state.runtime, default_parent=entity, project_dir=project, activate=False)
-        state.game = next((e for e in restored.values() if "root" in e.tags and e.items.get_value("name") == "Game"), None)
+        state.game = next((e for e in restored.values() if e.items.has_tag("root") and e.items.get_value("name") == "Game"), None)
         if state.game is None:
             state.game = next((e for e in restored.values() if e.parent is entity), next(iter(restored.values())))
     else:
@@ -267,8 +267,8 @@ def initialize():
     state.viewport_panel = state.ui.create(entity, "ViewportPanel", "panel", color=PANEL, layer=0)
     state.viewport = state.ui.create(state.viewport_panel, "Viewport", "surface", color=(12, 18, 25), layer=0)
     space.configure(scope=state.game, bounds_fn=world_bounds)
-    state.game.relations["camera"] = state.camera
-    state.game.relations["viewport"] = state.viewport
+    state.game.items.connect("camera", state.camera)
+    state.game.items.connect("viewport", state.viewport)
     if project_data and project_data.get("entities"):
         activate_entities(restored.values(), state.runtime, project_dir=project)
 
@@ -317,8 +317,8 @@ def initialize():
             initial_sel = None
     if initial_sel is None or not initial_sel.alive:
         initial_sel = state.game.children[0] if state.game.children else state.game
-    state.app.relations['selection'] = initial_sel
-    state.game.relations['selection'] = initial_sel
+    state.app.items.connect('selection', initial_sel)
+    state.game.items.connect('selection', initial_sel)
 
     state.app.items.set_value("left_column_w", layout_data.get("left_column_w", 370))
     state.header = state.ui.create(state.app, 'Header', 'panel', text='LBE', color=BG, dock='top', h=44, padding=(8, 16, 8, 16))
@@ -961,7 +961,7 @@ def get_project_entities():
 
 
 def extract_completion_context():
-    owner = state.code.relations.get('owner', selected())
+    owner = state.code.items.target('owner', selected())
     owner_comps = {}
     if owner and owner.alive:
         for k, v in owner.items.value_dict().items():
@@ -991,7 +991,7 @@ def extract_completion_context():
 
 
 def get_editor_layout():
-    sel = state.app.relations.get('selection')
+    sel = state.app.items.target('selection')
     return {
         "left_column_w": state.app.items.get_value("left_column_w", 370),
         "hierarchy": {
@@ -1052,14 +1052,14 @@ def attach(*args, **kwargs):
         return callback(*args, **kwargs)
 
 def inspect_system():
-    owner = state.code.relations.get('owner')
+    owner = state.code.items.target('owner')
     name = state.code.items.get_value('system_name')
     if owner is None or name not in owner.systems:
         raise ValueError('Open an attached system first')
     open_panel(name, owner)
 
 def detach_system():
-    owner = state.code.relations.get('owner')
+    owner = state.code.items.target('owner')
     name = state.code.items.get_value('system_name')
     if owner is None or (name not in owner.systems and name not in owner.scripts):
         message('Open an attached system first')
@@ -1081,7 +1081,7 @@ def open_panel(system_name=None, target=None, component=None):
                             x=state.viewport.x + 20 + n * 20, y=state.viewport.y + 20 + n * 20, w=440, h=270,
                             layer=4, modal=True, view_type=view_type, system_name=system_name, component=component,
                             dock='float', movable=True, resizable=True)
-    panel.relations['target'] = target
+    panel.items.connect('target', target)
     close = state.ui.button(panel, f'ClosePanel{n}', 'X', panel.destroy)
     put(close, x=panel.x + 400, y=panel.y + 5, w=30, h=24, layer=6)
     for index in range(10):
@@ -1091,14 +1091,14 @@ def open_panel(system_name=None, target=None, component=None):
 def panels_sync():
     state.extra_panels[:] = [panel for panel in state.extra_panels if panel.alive]
     for panel in state.extra_panels:
-        close = next((c for c in panel.children if 'button' in c.tags), None)
+        close = next((c for c in panel.children if c.items.has_tag('button')), None)
         if close:
             put(close, x=panel.x + max(10, panel.w - 40), y=panel.y + 5, w=30, h=24)
         for child in panel.children:
             if child.items.has_value('line_index'):
                 idx = child.items.require_value('line_index')
                 put(child, x=panel.x + 12, y=panel.y + 35 + idx * 22, w=max(0, panel.w - 24), h=20)
-        target = panel.relations.get('target')
+        target = panel.items.target('target')
         if target is None:
             lines = ['Target no longer exists']
         elif panel.view_type == 'system':
@@ -1113,9 +1113,9 @@ def panels_sync():
             value = safe_repr(target.items.get_value(panel.component, '<removed>'))
             lines = [panel.component] + [value[i:i + 50] for i in range(0, len(value), 50)]
         else:
-            lines = [str(target.id), 'Tags: ' + ', '.join(target.tags)]
+            lines = [str(target.id), 'Tags: ' + ', '.join(set(target.items.tag_names()))]
             lines += [f'{k}: {safe_repr(v)}' for k, v in target.items.value_dict().items()]
-            lines += [f"{k} -> {v.items.get_value('name', v.id)}" for k, v in target.relations.items()]
+            lines += [f"{k} -> {v.items.get_value('name', v.id)}" for k, v in target.items.link_dict().items()]
         for child in panel.children:
             if child.items.has_value('line_index'):
                 index = child.line_index
@@ -1233,7 +1233,7 @@ def on_asset_drop(asset_drag, event):
         tgt = None
         for row in getattr(state, "hierarchy_rows", []):
             if state.ui.visible(row) and contains(row, mx, my):
-                tgt = row.relations.get("target")
+                tgt = row.items.target("target")
                 break
         if tgt is None:
             tgt = selected()
@@ -1314,7 +1314,7 @@ def on_entity_drop(entity_drag, event):
             target_parent = None
             for row in getattr(state, "hierarchy_rows", []):
                 if state.ui.visible(row) and contains(row, mx, my):
-                    target_parent = row.relations.get("target")
+                    target_parent = row.items.target("target")
                     break
             if target_parent is not None and target_parent is not dragged_ent:
                 dragged_ent.parent = target_parent
@@ -1636,20 +1636,20 @@ def start():
     if state is None:
         initialize()
     bind_actions()
-    entity.tags.add('editor')
+    entity.items.add_tag('editor')
     if "ui" not in entity.systems:
         state.ui.install(definition=assets["20fe7e55-f05e-5d02-9ed0-a36a56f66c5d"])
 
 
 def open_system_log():
-    existing = state.app.relations.get('system_log_panel')
+    existing = state.app.items.target('system_log_panel')
     if existing is not None:
         existing.visible = not existing.visible
         return
     panel = state.ui.create(state.app, 'SystemLogPanel', 'panel', text='SYSTEM LOG',
                             x=max(0, state.window.width-840), y=80, w=820, h=360,
                             layer=20, modal=False, dock='float', movable=True, resizable=True)
-    state.app.relations['system_log_panel'] = panel
+    state.app.items.connect('system_log_panel', panel)
     panel.systems.attach('system_log', assets["6df949df-402f-5552-bc5e-c4566531ee40"])
 
 
@@ -1657,12 +1657,12 @@ def update(dt):
     failures=[r for r in log.records if r.kind=='script.error' and r.sequence>getattr(state,'last_script_error',0)]
     if failures:
         state.last_script_error=failures[-1].sequence
-        panel=state.app.relations.get('system_log_panel')
+        panel=state.app.items.target('system_log_panel')
         if panel is None:
             open_system_log()
         else:
             panel.visible=True
-    owner = state.code.relations.get('owner', selected())
+    owner = state.code.items.target('owner', selected())
     context_key = (state.project_graph.schema_revision, owner.id, tuple((key, type(value)) for key, value in owner.items.value_dict().items()))
     if getattr(state, "completion_context_key", None) != context_key:
         state.code.completion_components = tuple(owner.items.value_dict()) if owner.alive else ()
@@ -1787,7 +1787,7 @@ def context_target(control, event):
         owner = next((e for e in state.runtime.entities if e.id == owner_id), None)
         if owner:
             return dict(entity=owner, system=sys_name)
-    if "asset_pill" in control.tags:
+    if control.items.has_tag("asset_pill"):
         return dict(asset_pill=control, asset_id=control.items.get_value("asset_id"),
                     asset_name=control.items.get_value("asset_name"), control=control)
     for candidate in (control,) + control.ancestors:
@@ -1797,10 +1797,10 @@ def context_target(control, event):
         return dict(file_explorer=True, control=state.file_explorer)
     if control is state.tags_field or control is state.tags_label:
         return dict(entity=inspected(), tags=True)
-    if control.items.has_value('component_key') and 'target' in control.relations:
-        return dict(entity=control.relations['target'], component=control.component_key)
-    if control.items.has_value('relation_key') and 'target' in control.relations:
-        return dict(entity=control.relations['target'], relation=control.relation_key)
+    if control.items.has_value('component_key') and control.items.has_link('target'):
+        return dict(entity=control.items.require_target('target'), component=control.component_key)
+    if control.items.has_value('relation_key') and control.items.has_link('target'):
+        return dict(entity=control.items.require_target('target'), relation=control.relation_key)
     if control is state.viewport:
         wx, wy = screen_to_world(state.camera, control, event[1], event[2])
         tgt = find_hit_game_entity(wx, wy)
@@ -1810,12 +1810,12 @@ def context_target(control, event):
         select(tgt)
         return tgt
     for candidate in (control,) + control.ancestors:
-        if candidate in state.hierarchy_rows and 'target' in candidate.relations:
-            tgt = candidate.relations['target']
+        if candidate in state.hierarchy_rows and candidate.items.has_link('target'):
+            tgt = candidate.items.require_target('target')
             select(tgt)
             return tgt
-        if 'target' in candidate.relations:
-            return candidate.relations['target']
+        if candidate.items.has_link('target'):
+            return candidate.items.require_target('target')
     if control is state.inspector or state.inspector in control.ancestors:
         return inspected()
     if control is state.code or state.code in control.ancestors or control is state.code_panel or state.code_panel in control.ancestors:
@@ -1968,8 +1968,8 @@ def context_actions(target):
             dict(label="Open file...", run=lambda _: open_file_menu()),
             dict(label="+ New system script...", run=lambda _: new_source_in_dir(state.project / state.file_explorer.items.get_value("view_root", "systems/game"))),
         ]
-        if state.code.items.get_value("system_name") and 'owner' in state.code.relations:
-            owner = state.code.relations['owner']
+        if state.code.items.get_value("system_name") and state.code.items.has_link('owner'):
+            owner = state.code.items.require_target('owner')
             sys_name = state.code.items.require_value('system_name')
             actions.append(dict(label=f"Revert system '{sys_name}'", run=lambda _: open_system(owner, sys_name)))
         actions.append(None)
@@ -2004,7 +2004,7 @@ def context_actions(target):
     if isinstance(target, dict) and 'tags' in target:
         ent = target['entity']
         actions = []
-        for t in sorted(ent.tags):
+        for t in sorted(set(ent.items.tag_names())):
             actions.append(dict(label=f"Rename tag '{t}'...", run=lambda _, tag=t: start_rename_tag(ent, tag)))
             actions.append(dict(label=f"Remove tag '{t}'", run=lambda _, tag=t: remove_tag(ent, tag)))
         if actions:
@@ -2057,7 +2057,7 @@ def context_actions(target):
     if isinstance(target, dict) and 'relation' in target:
         ent = target['entity']
         rel = target['relation']
-        tgt = ent.relations.get(rel)
+        tgt = ent.items.target(rel)
         tgt_label = str(tgt.items.get_value('name', str(tgt.id)[:8])) if tgt else 'None'
         actions = []
         if tgt:
@@ -2080,7 +2080,7 @@ def context_actions(target):
         dict(label="+ Add Component...", run=lambda e: (select(e), open_add_component_menu())),
     ]
 
-    if target is state.hierarchy.relations.get('view_root') and target.parent is not None:
+    if target is state.hierarchy.items.target('view_root') and target.parent is not None:
         actions.append(dict(label='Set parent as root entity', run=lambda e: state.set_hierarchy_root(e.parent)))
     sel = selected()
     if target is not sel and sel is not None and sel.alive:
@@ -2117,7 +2117,7 @@ def context_add_child(target):
 
 def create_walk_shoot_demo():
     """Keep the existing scene and author the sample using ordinary ECS objects."""
-    existing = state.game.relations.get('demo_player')
+    existing = state.game.items.target('demo_player')
     if existing is not None:
         select(existing)
         message('Walk/shoot demo exists; WASD/arrows move, Space shoots')
@@ -2129,7 +2129,7 @@ def create_walk_shoot_demo():
     drawing = assets.get('f084e424-d2d9-5fd1-8624-63580396274c')
     if drawing:
         player.scripts.attach(drawing)
-    state.game.relations['demo_player'] = player
+    state.game.items.connect('demo_player', player)
     definition = assets.system(state.project / 'systems/game/walk_shoot.py')
     state.game.systems.attach('walk_shoot', definition)
     select(player)

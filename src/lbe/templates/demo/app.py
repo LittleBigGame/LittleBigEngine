@@ -8,8 +8,8 @@ game = create(parent=entity, name="Game", tags=["root"])
 space.configure(scope=game, bounds_fn=world_bounds)
 camera = create(parent=entity, name="Camera", x=0.0, y=0.0, zoom=48.0)
 viewport = create(parent=entity, name="Viewport", x=0, y=0, w=window.width, h=window.height)
-game.relations["camera"] = camera
-game.relations["viewport"] = viewport
+game.items.connect("camera", camera)
+game.items.connect("viewport", viewport)
 
 # Player entity (Entity A)
 player = create(parent=game, name="Entity A", x=-3.0, y=-1.0, w=2.0, h=2.0,
@@ -78,7 +78,7 @@ def update(dt):
     # 2. Broadphase spatial collision detection using space partitioning
     hits = space.query_collisions(player)
     for other in hits:
-        if "pickup" in other.tags:
+        if other.items.has_tag("pickup"):
             player.items.set_value("score", player.items.get_value("score", 0) + 10)
             spawn_spark(other.x + other.w / 2, other.y + other.h / 2)
             # Relocate collectible to new position
@@ -87,7 +87,7 @@ def update(dt):
 
     # 3. Update active particle sparks
     for child in tuple(game.children):
-        if "fx" in child.tags:
+        if child.items.has_tag("fx"):
             child.items.set_value("life", child.items.get_value("life", 0.0) - dt)
             if child.items.require_value("life") <= 0:
                 child.destroy()

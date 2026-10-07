@@ -24,7 +24,7 @@ class PersistenceContracts(TestCase):
             b = runtime.create(parent=root, name='B')
             root.move_child(b, 0)
             a.link = b
-            a.relations['peer'] = b
+            a.items.connect('peer', b)
             root.systems.attach('inspect', runtime.assets.system(folder / 'inspect.py'))
             identities = root.id, a.id, b.id
             for _ in range(3):
@@ -36,7 +36,7 @@ class PersistenceContracts(TestCase):
                 self.assertEqual(root.children, (b, a))
                 self.assertEqual(root.seen, ['B', 'A'])
                 self.assertIs(a.link, b)
-                self.assertIs(a.relations['peer'], b)
+                self.assertIs(a.items.require_target('peer'), b)
                 self.assertIsNone(a.nullable)
                 self.assertEqual(a.settings, {'__type__': 'tuple', 'values': [1, 2]})
             runtime.close()
@@ -78,12 +78,12 @@ class PersistenceContracts(TestCase):
     def test_deferred_activation_sees_application_links_and_inline_source_survives(self):
         runtime = Runtime()
         entity = runtime.create()
-        entity.systems.attach('inline', SystemDefinition('def start():\n    entity.ready = "camera" in entity.relations\n'))
+        entity.systems.attach('inline', SystemDefinition('def start():\n    entity.ready = entity.items.has_link("camera")\n'))
         data = serialize_entities([entity])
         other = Runtime()
         restored = deserialize_entities(data, other, activate=False)[entity.id]
         camera = other.create()
-        restored.relations['camera'] = camera
+        restored.items.connect('camera', camera)
         activate_entities([restored], other)
         self.assertTrue(restored.ready)
         runtime.close()
@@ -174,7 +174,7 @@ class EditorContracts(TestCase):
             self.send(('key', 'ENTER', False, False))
 
     def menu_item(self, text):
-        menu = self.editor.app.relations['context_menu']
+        menu = self.editor.app.items.require_target('context_menu')
         return next(child for child in menu.children if text in child.items.get_value('text', ''))
 
     def test_visible_authoring_workflow_and_restart(self):
@@ -192,7 +192,7 @@ class EditorContracts(TestCase):
         self.type(ed.path_field, 'physics.py', commit=True)
         self.type(ed.code, 'def update(dt):\n    for child in query("x", "vx"):\n        child.x += child.vx * dt\n')
         self.send(('key', 'S', True, False))
-        row = next(row for row in ed.hierarchy_rows if row.visible and row.relations.get('target') is ed.game)
+        row = next(row for row in ed.hierarchy_rows if row.visible and row.items.target('target') is ed.game)
         self.send(('click', row.x + row.w / 2, row.y + row.h / 2, 1, 0, 2))
         self.click(ed.add_system_button)
         self.click(self.menu_item('physics'))
@@ -277,7 +277,7 @@ class EditorContracts(TestCase):
         ed.commit_component(field)
         self.assertEqual(entity.precise, 1.234567891)
         ed.inspector_duplicate_entity()
-        duplicate = ed.app.relations['inspected']
+        duplicate = ed.app.items.require_target('inspected')
         duplicate.data.append(2)
         self.assertEqual(entity.data, [1])
 

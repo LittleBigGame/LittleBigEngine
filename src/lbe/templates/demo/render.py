@@ -2,9 +2,9 @@
 
 
 def draw():
-    with graphics.view(entity.relations["camera"], entity.relations["viewport"]):
-        camera = entity.relations.get("camera")
-        viewport = entity.relations.get("viewport")
+    with graphics.view(entity.items.require_target("camera"), entity.items.require_target("viewport")):
+        camera = entity.items.target("camera")
+        viewport = entity.items.target("viewport")
         zoom = getattr(camera, "zoom", 48.0) if camera else 48.0
         cam_x = camera.items.get_value("x", 0.0) if camera else 0.0
         cam_y = camera.items.get_value("y", 0.0) if camera else 0.0

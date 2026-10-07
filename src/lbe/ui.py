@@ -343,13 +343,13 @@ class UI:
 
     @property
     def focused(self):
-        return self.root.relations.get("focus")
+        return self.root.items.target("focus")
 
     def focus(self, control=None):
         if control is None:
-            self.root.relations.pop("focus", None)
+            self.root.items.disconnect("focus", None)
         else:
-            self.root.relations["focus"] = control
+            self.root.items.connect("focus", control)
 
     def controls(self):
         if not getattr(self.root, "alive", False):
@@ -433,7 +433,7 @@ class UI:
         if not getattr(self.root, "alive", False):
             return
         # Continuous selection drag autoscroll when mouse is held outside multiline control
-        text_drag = self.root.relations.get("text_drag")
+        text_drag = self.root.items.target("text_drag")
         if text_drag is not None and self.visible(text_drag) and hasattr(self, "mouse_pos"):
             mx, my = self.mouse_pos
             pitch = text_drag.items.get_value("pitch", self.pitch)
@@ -456,7 +456,7 @@ class UI:
         for control in tuple(self.controls()):
             if not getattr(self.root, "alive", False):
                 return
-            if "multiline" in control.tags and self.visible(control):
+            if control.items.has_tag("multiline") and self.visible(control):
                 try:
                     self._sync_text(control)
                 except Exception as error:
@@ -504,12 +504,12 @@ class UI:
 
         if dispatch_menu(self, event):
             if kind == 'release':
-                self.root.relations.pop('text_drag', None)
+                self.root.items.disconnect('text_drag', None)
                 for name in ('entity_drag', 'asset_drag', 'dock_drag'):
                     self.root.items.remove_value(name, None)
-                active_drag = self.root.relations.pop('active_drag', None)
+                active_drag = self.root.items.disconnect('active_drag', None)
                 if active_drag is not None:
-                    if any(tag in active_drag.tags for tag in ('splitter', 'scrollbar_thumb', 'button', 'chip')):
+                    if any(active_drag.items.has_tag(tag) for tag in ('splitter', 'scrollbar_thumb', 'button', 'chip')):
                         normal = active_drag.items.get_value('normal_color', active_drag.items.get_value('color', FIELD))
                         put(active_drag, color=normal)
                     callback = active_drag.items.get_value('on_release')
@@ -519,8 +519,8 @@ class UI:
         if kind == "motion":
             mx, my = event[1], event[2]
             for control in self.controls():
-                if ("splitter" in control.tags or "scrollbar_thumb" in control.tags or "button" in control.tags or "chip" in control.tags or "hoverable" in control.tags) and self.visible(control):
-                    active = self.root.relations.get("active_drag")
+                if (control.items.has_tag("splitter") or control.items.has_tag("scrollbar_thumb") or control.items.has_tag("button") or control.items.has_tag("chip") or control.items.has_tag("hoverable")) and self.visible(control):
+                    active = self.root.items.target("active_drag")
                     hovered = (active is control) or (active is None and contains(control, mx, my))
                     normal = control.items.get_value("normal_color")
                     if normal is None:
@@ -531,7 +531,7 @@ class UI:
                         control.color = target_color
             return
         if kind == "release":
-            self.root.relations.pop("text_drag", None)
+            self.root.items.disconnect("text_drag", None)
             entity_drag = self.root.items.remove_value("entity_drag", None)
             if entity_drag is not None:
                 cb = self.root.items.get_value("on_entity_drop")
@@ -550,9 +550,9 @@ class UI:
                 if cb:
                     cb(dock_drag, event)
                 return
-            active_drag = self.root.relations.pop("active_drag", None)
+            active_drag = self.root.items.disconnect("active_drag", None)
             if active_drag is not None:
-                if "splitter" in active_drag.tags or "scrollbar_thumb" in active_drag.tags or "button" in active_drag.tags or "chip" in active_drag.tags:
+                if active_drag.items.has_tag("splitter") or active_drag.items.has_tag("scrollbar_thumb") or active_drag.items.has_tag("button") or active_drag.items.has_tag("chip"):
                     normal = active_drag.items.get_value("normal_color", active_drag.items.get_value("color", FIELD))
                     if active_drag.color != normal:
                         active_drag.color = normal
@@ -569,7 +569,7 @@ class UI:
                 if cb:
                     cb(dock_drag, event)
                 return
-            text_drag = self.root.relations.get("text_drag")
+            text_drag = self.root.items.target("text_drag")
             if text_drag is not None and self.visible(text_drag) and event[3] & 1:
                 mx, my = event[1], event[2]
                 pitch = text_drag.items.get_value("pitch", self.pitch)
@@ -590,7 +590,7 @@ class UI:
                 text_drag.buffer.reveal(rows, cols)
                 text_drag.items.touch_value("buffer")
                 return
-            active_drag = self.root.relations.get("active_drag")
+            active_drag = self.root.items.target("active_drag")
             if active_drag is not None and self.visible(active_drag):
                 cb = active_drag.items.get_value("on_drag")
                 if cb:
@@ -599,7 +599,7 @@ class UI:
             controls = [e for e in self.controls() if self.visible(e) and contains(e, event[1], event[2])]
             controls.sort(key=lambda e: (e.items.get_value("layer", 2), e.depth), reverse=True)
             for control in controls:
-                if "splitter" in control.tags or "scrollbar_thumb" in control.tags:
+                if control.items.has_tag("splitter") or control.items.has_tag("scrollbar_thumb"):
                     continue  # Splitters and scrollbars must be directly clicked/pressed to initiate dragging
                 cb = control.items.get_value("on_drag")
                 if cb:
@@ -610,7 +610,7 @@ class UI:
             return
         if kind in ("click", "scroll"):
             if kind == "click":
-                self.root.relations.pop("text_drag", None)
+                self.root.items.disconnect("text_drag", None)
                 mx, my = event[1], event[2]
                 now = monotonic()
                 last_time, last_x, last_y, last_count, last_ctl = getattr(self, "_click_state", (0, 0, 0, 0, None))
@@ -623,32 +623,32 @@ class UI:
                 self._click_state = (now, mx, my, click_count, None)
                 if len(event) < 6:
                     event = (*event, click_count)
-            self.root.relations.pop("active_drag", None)
+            self.root.items.disconnect("active_drag", None)
             controls = [e for e in self.controls() if self.visible(e) and contains(e, event[1], event[2])]
             controls.sort(key=lambda e: (e.items.get_value("layer", 2), e.depth), reverse=True)
             for control in controls:
-                if kind == 'click' and event[3] == 1 and ("splitter" in control.tags or "scrollbar_thumb" in control.tags):
-                    self.root.relations["active_drag"] = control
+                if kind == 'click' and event[3] == 1 and (control.items.has_tag("splitter") or control.items.has_tag("scrollbar_thumb")):
+                    self.root.items.connect("active_drag", control)
                     control.color = control.items.get_value("hover_color", ACCENT)
                 callback = control.items.get_value("on_"+kind)
                 if callback:
                     if callback(control, event) is not False:
                         return
                 if kind == "scroll":
-                    if "multiline" in control.tags:
+                    if control.items.has_tag("multiline"):
                         control.buffer.scroll = max(0, control.buffer.scroll-int(event[4])*3)
                         control.items.touch_value("buffer")
                         return
                     continue
-                if "button" in control.tags:
+                if control.items.has_tag("button"):
                     self.runtime.events.emit('ui.action', control, getattr(control.action, '__qualname__', type(control.action).__name__))
                     control.action()
                     return
-                if "field" in control.tags and not control.items.get_value("readonly", False):
+                if control.items.has_tag("field") and not control.items.get_value("readonly", False):
                     self.focus(control)
                     control.buffer.cursor = control.buffer.anchor = len(control.buffer.text)
                     return
-                if "multiline" in control.tags:
+                if control.items.has_tag("multiline"):
                     self.focus(control)
                     click_count = event[5]
                     idx = self.text_index(control, mx, my)
@@ -682,7 +682,7 @@ class UI:
                         if not event[4] & 1:
                             control.buffer.anchor = control.buffer.cursor
                         if event[3] == 1:
-                            self.root.relations["text_drag"] = control
+                            self.root.items.connect("text_drag", control)
                     control.items.touch_value("buffer")
                     pitch = control.items.get_value("pitch", self.pitch)
                     line = control.items.get_value("line_height", self.line_height)
@@ -706,7 +706,7 @@ class UI:
             if on_text and on_text(control, event):
                 return
         buffer = control.buffer
-        multiline = "multiline" in control.tags
+        multiline = control.items.has_tag("multiline")
         if kind == "text":
             if multiline:
                 for m in self.references(control):
@@ -786,7 +786,7 @@ class UI:
                 if multiline:
                     buffer.indent(dedent=shift)
                 else:
-                    fields = [e for e in self.controls() if "field" in e.tags and self.visible(e) and not e.items.get_value("readonly", False)]
+                    fields = [e for e in self.controls() if e.items.has_tag("field") and self.visible(e) and not e.items.get_value("readonly", False)]
                     self.focus(fields[(fields.index(control)+(-1 if shift else 1)) % len(fields)])
             elif ctrl and key in ("SLASH", "/"):
                 if multiline and hasattr(buffer, "toggle_comment"):
@@ -856,8 +856,8 @@ class UI:
         caret = part("cursor", "rect", color=ACCENT, layer=control.layer+3)
         scroll_track = part("scroll_track", "scrollbar_track", color=(28, 36, 48), layer=control.layer+3)
         scrollbar = part("scrollbar", "scrollbar_thumb", color=(55, 75, 95), hover_color=(75, 115, 155), layer=control.layer+4)
-        scrollbar.tags.add("scrollbar_thumb")
-        scroll_track.tags.add("scrollbar_track")
+        scrollbar.items.add_tag("scrollbar_thumb")
+        scroll_track.items.add_tag("scrollbar_track")
         selection_start, selection_end = buffer.selection
         offset = sum(len(line)+1 for line in lines[:buffer.scroll])
         used = {"cursor", "scrollbar", "scroll_track"}
@@ -949,7 +949,7 @@ class UI:
                 pill_index += 1
                 used.add(pill_part_name)
                 pill = part(pill_part_name, "button", layer=control.layer+3)
-                pill.tags.add("asset_pill")
+                pill.items.add_tag("asset_pill")
                 if c_vis_end > c_vis_start and (col_start >= buffer.horizontal or col_end > buffer.horizontal):
                     pill_x = line.x + c_vis_start * pitch
                     span_w = (c_vis_end - c_vis_start) * pitch
@@ -1073,9 +1073,9 @@ class UI:
                 if not self.visible(control):
                     continue
                 layer = control.items.get_value("layer", 2)
-                if "label" not in control.tags:
+                if not control.items.has_tag("label"):
                     graphics.rect(control.x, control.y, control.w, control.h, control.color, key=control.id, layer=layer)
-                    framed = any(tag in control.tags for tag in ('panel', 'field')) or ('button' in control.tags and control.color != PANEL)
+                    framed = any(control.items.has_tag(tag) for tag in ('panel', 'field')) or (control.items.has_tag('button') and control.color != PANEL)
                     if control.items.get_value('bevel', framed):
                         graphics.rect(control.x, control.y, control.w, 1, (*INK[:3], 35), key=(control.id, 'bevel_top'), layer=layer+1)
                         graphics.rect(control.x, control.y+control.h-1, control.w, 1, (*BG, 180), key=(control.id, 'bevel_bottom'), layer=layer+1)
@@ -1095,7 +1095,7 @@ class UI:
                                 graphics.rect(x,y,w,h,border,key=(control.id,'border',edge),layer=layer+1)
                     if accent is not None:
                         graphics.rect(control.x, control.y+control.h-2, control.w, 2, accent, key=(control.id, 'accent'), layer=layer+1)
-                if "field" in control.tags:
+                if control.items.has_tag("field"):
                     pitch = control.items.get_value("pitch", self.pitch)
                     buffer = control.buffer
                     width = max(1, int((control.w-12)//pitch))
@@ -1115,7 +1115,7 @@ class UI:
                     graphics.text(text, control.x+6, control.y+5, color=ink, key=(control.id, "text"), layer=layer+2)
                 elif control.items.has_value("text"):
                     pitch = control.items.get_value("pitch", self.pitch)
-                    inset = 8 if "panel" in control.tags or "button" in control.tags else 0
+                    inset = 8 if control.items.has_tag("panel") or control.items.has_tag("button") else 0
                     width = max(1, int((control.w-inset*2)//pitch))
                     spans = control.items.get_value("spans")
                     if spans:
@@ -1125,12 +1125,12 @@ class UI:
                             if col >= width:
                                 break
                             chunk_str = str(chunk)[:width - col]
-                            graphics.text(chunk_str, x_cursor, control.y+(8 if "panel" in control.tags else 4),
+                            graphics.text(chunk_str, x_cursor, control.y+(8 if control.items.has_tag("panel") else 4),
                                           color=ink, key=(control.id, "span", span_idx), layer=layer+1)
                             x_cursor += len(chunk_str) * pitch
                             col += len(chunk_str)
                     else:
-                        graphics.text(str(control.text)[:width], control.x+inset, control.y+(8 if "panel" in control.tags else 4),
+                        graphics.text(str(control.text)[:width], control.x+inset, control.y+(8 if control.items.has_tag("panel") else 4),
                                       color=control.items.get_value("ink", INK), key=(control.id, "text"), layer=layer+1)
             except Exception as error:
                 message = f"{type(error).__name__} in UI.draw: {error}"

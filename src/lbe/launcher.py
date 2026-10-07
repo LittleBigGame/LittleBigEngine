@@ -298,7 +298,7 @@ def create_launcher_runtime(window, graphics, input_state, on_select_project):
                 row_entity = ui.create(items_container, f"Row_{p.name}", "panel", w=row_w, h=34, color=(25, 34, 45))
                 main_btn = ui.button(row_entity, f"Btn_{p.name}", text=display_name, action=action,
                                      w=max(100, row_w - 12), h=30, color=btn_color, hover_color=btn_hover, ink=ink_color)
-                main_btn.tags.add("main_act")
+                main_btn.items.add_tag("main_act")
                 stack(row_entity, [main_btn], axis="x", padding=2, gap=0)
                 dynamic_rows.append(row_entity)
             else:
@@ -334,7 +334,7 @@ def create_launcher_runtime(window, graphics, input_state, on_select_project):
 
                 main_btn = ui.button(row_entity, f"Btn_{p.name}", text=display_name, action=action,
                                      w=max(100, row_w - 210), h=30, color=btn_color, hover_color=btn_hover, ink=ink_color)
-                main_btn.tags.add("main_act")
+                main_btn.items.add_tag("main_act")
 
                 def make_rename_action(target=p):
                     def handler():
@@ -433,7 +433,7 @@ def create_launcher_runtime(window, graphics, input_state, on_select_project):
         # 5. Position dynamic row children and stack dynamic rows inside items_container
         for r in dynamic_rows:
             r.w = items_container.w - 20
-            main_btn = next((c for c in r.children if "main_act" in c.tags), None)
+            main_btn = next((c for c in r.children if c.items.has_tag("main_act")), None)
             if main_btn:
                 if state.mode == "pick_template":
                     main_btn.w = max(100, r.w - 12)

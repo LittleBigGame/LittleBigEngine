@@ -14,7 +14,7 @@ class ItemStorageTests(unittest.TestCase):
     def test_roundtrip_preserves_every_item_identity_and_patch(self):
         source = self.runtime.create(x=2, tags=["blueprint"])
         child = self.runtime.create(parent=source)
-        child.relations["source"] = source
+        child.items.connect("source", source)
         child.items.inherit_value("x", source.items.component("x"), [{"op": "add", "value": 3}])
         child.systems.attach("idle", SystemDefinition("def update(dt): pass"))
         data = serialize_entities([child, source])

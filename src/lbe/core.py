@@ -1,100 +1,18 @@
 """Generic entity storage, hierarchy and live queries."""
 
-from collections.abc import MutableMapping, MutableSet
 from uuid import UUID, uuid4
 from math import isfinite
 
 from .events import Changes, Events, ABSENT
-from .items import Component, InheritedComponent, Items, NamedValues, Tag, TagValues, Relation, Parent
+from .items import Component, InheritedComponent, Items, Tag, Relation, Parent
 
 _MISSING = object()
-
-
-class Tags(MutableSet):
-    def __init__(self, entity):
-        self._entity = entity
-        self._values = TagValues(entity)
-
-    def __contains__(self, value):
-        self._entity._check()
-        return value in self._values
-
-    def __iter__(self):
-        self._entity._check()
-        return iter(sorted(self._values))
-
-    def __len__(self):
-        self._entity._check()
-        return len(self._values)
-
-    def add(self, value):
-        self._entity._check()
-        if not isinstance(value, str) or not value:
-            raise ValueError("Tags must be nonempty strings")
-        if value not in self._values:
-            self._values.add(value)
-            self._entity._changed("tag.add", value, old=False, new=True)
-
-    def discard(self, value):
-        self._entity._check()
-        if value in self._values:
-            self._values.remove(value)
-            self._entity._changed("tag.remove", value, old=True, new=False)
-
-
-class Relations(MutableMapping):
-    """Named directed links to live entities in the same runtime."""
-
-    def __init__(self, entity):
-        self._entity = entity
-        self._values = NamedValues(entity, Relation)
-
-    def __getitem__(self, key):
-        self._entity._check()
-        return self._values[key]
-
-    def __setitem__(self, key, target):
-        self._entity._check()
-        if not isinstance(key, str) or not key:
-            raise ValueError("Relation names must be nonempty strings")
-        self._entity.runtime._validate(target)
-        if target._destroying:
-            raise RuntimeError("Cannot link to an entity during destruction")
-        runtime = self._entity.runtime
-        previous = self._values.get(key)
-        if previous is not None:
-            incoming = runtime._incoming.get(previous)
-            if incoming is not None:
-                incoming.discard((self._entity, key))
-                if not incoming:
-                    runtime._incoming.pop(previous, None)
-        self._values[key] = target
-        runtime._incoming.setdefault(target, set()).add((self._entity, key))
-        self._entity._changed("relation.set", key, old=previous, new=target)
-
-    def __delitem__(self, key):
-        self._entity._check()
-        target = self._values.pop(key)
-        incoming = self._entity.runtime._incoming.get(target)
-        if incoming is not None:
-            incoming.discard((self._entity, key))
-            if not incoming:
-                self._entity.runtime._incoming.pop(target, None)
-        self._entity._changed("relation.remove", key, old=target)
-
-    def __iter__(self):
-        self._entity._check()
-        return iter(tuple(self._values))
-
-    def __len__(self):
-        self._entity._check()
-        return len(self._values)
 
 
 class Entity:
     __slots__ = (
         "_runtime", "_id", "_alive", "_destroying", "_items",
-        "_tags", "_relations", "_systems", "_scripts",
+        "_systems", "_scripts",
     )
 
     def __init__(self, runtime, identity):
@@ -106,16 +24,12 @@ class Entity:
         object.__setattr__(self, "_alive", True)
         object.__setattr__(self, "_destroying", False)
         object.__setattr__(self, "_items", Items(self))
-        object.__setattr__(self, "_tags", Tags(self))
-        object.__setattr__(self, "_relations", Relations(self))
         object.__setattr__(self, "_systems", Systems(self))
         object.__setattr__(self, "_scripts", Scripts(self))
 
     id = property(lambda self: self._id)
     alive = property(lambda self: self._alive)
     runtime = property(lambda self: self._runtime)
-    tags = property(lambda self: self._tags)
-    relations = property(lambda self: self._relations)
     systems = property(lambda self: self._systems)
     scripts = property(lambda self: self._scripts)
     items = property(lambda self: self._items)
@@ -260,7 +174,7 @@ class Entity:
     @property
     def root(self):
         chain = (self,) + self.ancestors
-        return next((e for e in chain if "root" in e.tags), chain[-1])
+        return next((e for e in chain if e.items.has_tag("root")), chain[-1])
 
     def inherit(self, key, default=_MISSING):
         for entity in (self,) + self.ancestors:
@@ -326,7 +240,7 @@ def _matches_requirement(entity, requirement):
 
 def _matches(entity, components, tags):
     tags = (tags,) if isinstance(tags, str) else tags
-    return entity.alive and all(_matches_requirement(entity,k) for k in components) and all(t in entity.tags for t in tags)
+    return entity.alive and all(_matches_requirement(entity,k) for k in components) and all(entity.items.has_tag(t) for t in tags)
 
 
 class Query:
@@ -363,19 +277,6 @@ class Runtime:
         self.assets = Assets()
         self.services = {}
         self._stepping = False
-        self._incoming_relations = {}
-
-    def _track_relation(self, source, key, target):
-        if target not in self._incoming_relations:
-            self._incoming_relations[target] = set()
-        self._incoming_relations[target].add((source, key))
-
-    def _untrack_relation(self, source, key, target):
-        incoming = self._incoming_relations.get(target)
-        if incoming:
-            incoming.discard((source, key))
-            if not incoming:
-                del self._incoming_relations[target]
 
     @property
     def entities(self):
@@ -440,7 +341,8 @@ class Runtime:
         self.linker.register(entity)
         for name, value in data.items():
             entity.items._put(Component(name, value))
-        entity._tags._values.update(tags)
+        for name in dict.fromkeys(tags):
+            entity.items._put(Tag(name))
         object.__setattr__(entity, "_parent", parent)
         if parent is not None:
             parent._children.append(entity)
@@ -489,9 +391,9 @@ class Runtime:
             node.systems.clear()
             node.scripts.clear()
             for other, key in tuple(self._incoming.pop(node, ())):
-                if other.alive and other.relations.get(key) is node:
-                    del other.relations[key]
-            node.relations.clear()
+                if other.alive and other.items.target(key) is node:
+                    other.items.disconnect(key)
+            node.items.clear_links()
             if node._parent is not None:
                 node._parent._children.remove(node)
             object.__setattr__(node, "_parent", None)
@@ -521,7 +423,7 @@ class Runtime:
                                 is_p = False
                                 curr = ent
                                 while curr is not None:
-                                    if "paused" in curr.tags or (curr.items.get_value("paused") is True):
+                                    if curr.items.has_tag("paused") or (curr.items.get_value("paused") is True):
                                         is_p = True
                                         break
                                     if curr in pause_cache:

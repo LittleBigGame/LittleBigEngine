@@ -89,7 +89,7 @@ class CoreTests(unittest.TestCase):
         a.vx = 2
         self.assertEqual(tuple(query), (a,))
         self.assertEqual(tuple(parent.query("x", recursive=True)), (a, b))
-        a.tags.add("moving")
+        a.items.add_tag("moving")
         self.assertEqual(tuple(parent.query(tags="moving")), (a,))
         a.parent = other
         self.assertEqual(tuple(query), ())
@@ -112,17 +112,17 @@ class CoreTests(unittest.TestCase):
         parent = self.runtime.create()
         child = self.runtime.create(parent=parent)
         survivor = self.runtime.create()
-        survivor.relations["target"] = child
+        survivor.items.connect("target", child)
         parent.destroy()
         self.assertEqual(self.runtime.entities, (survivor,))
-        self.assertEqual(dict(survivor.relations), {})
+        self.assertEqual(dict(survivor.items.link_dict()), {})
         self.assertFalse(child.alive)
         with self.assertRaises(ReferenceError):
             child.x = 1
         with self.assertRaises(KeyError):
             self.runtime.resolve(child.id)
         with self.assertRaises(ValueError):
-            survivor.relations["outside"] = Runtime().create()
+            survivor.items.connect("outside", Runtime().create())
 
     def test_changes_and_listener_failure_do_not_break_mutation(self):
         entity = self.runtime.create()
@@ -131,9 +131,9 @@ class CoreTests(unittest.TestCase):
             raise ValueError("listener failed")
         self.runtime.changes.subscribe(broken)
         unsubscribe = self.runtime.changes.subscribe(seen.append)
-        entity.tags.add("a")
-        entity.tags.add("a")
-        entity.tags.discard("a")
+        entity.items.add_tag("a")
+        entity.items.add_tag("a")
+        entity.items.remove_tag("a")
         entity.x = 1
         del entity.x
         unsubscribe()
@@ -170,22 +170,22 @@ class CoreTests(unittest.TestCase):
         # Tag names
         for bad in ("", 123, None):
             with self.assertRaises(ValueError):
-                entity.tags.add(bad)
+                entity.items.add_tag(bad)
         with self.assertRaises(ValueError):
             self.runtime.create(tags=[""])
 
         # Relation names
         for bad in ("", 123, None):
             with self.assertRaises(ValueError):
-                entity.relations[bad] = target
+                entity.items.connect(bad, target)
 
         # Collection lengths
         entity.items.set_value("a", 1)
-        entity.tags.add("t1")
-        entity.relations["r1"] = target
+        entity.items.add_tag("t1")
+        entity.items.connect("r1", target)
         self.assertEqual(len(entity.items.value_dict()), 1)
-        self.assertEqual(len(entity.tags), 1)
-        self.assertEqual(len(entity.relations), 1)
+        self.assertEqual(len(set(entity.items.tag_names())), 1)
+        self.assertEqual(len(entity.items.link_dict()), 1)
 
     def test_core_invariants_and_error_handling(self):
         parent = self.runtime.create()
@@ -214,7 +214,7 @@ class CoreTests(unittest.TestCase):
         inst.start()
         self.runtime.step(0.1)
         self.assertEqual(len(updated), 1)
-        parent.tags.add("paused")
+        parent.items.add_tag("paused")
         self.runtime.step(0.1)
         self.assertEqual(len(updated), 1)  # Skipped because ancestor has paused tag
 

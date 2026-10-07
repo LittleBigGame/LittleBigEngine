@@ -93,8 +93,8 @@ class ProjectPersistenceTests(unittest.TestCase):
         child_id = uuid4()
         parent = self.runtime.create(identity=parent_id, tags=["root", "game"], name="GameRoot", level=1)
         child = self.runtime.create(identity=child_id, parent=parent, tags=["actor"], name="Player", hp=100)
-        parent.relations["player"] = child
-        child.relations["target"] = parent
+        parent.items.connect("player", child)
+        child.items.connect("target", parent)
 
         serialized = serialize_entities([parent, child])
         self.assertEqual(len(serialized), 2)
@@ -112,8 +112,8 @@ class ProjectPersistenceTests(unittest.TestCase):
 
         self.assertEqual(r_parent.id, parent_id)
         self.assertEqual(r_child.id, child_id)
-        self.assertEqual(set(r_parent.tags), {"root", "game"})
-        self.assertEqual(set(r_child.tags), {"actor"})
+        self.assertEqual(set(set(r_parent.items.tag_names())), {"root", "game"})
+        self.assertEqual(set(set(r_child.items.tag_names())), {"actor"})
         self.assertEqual(r_parent.name, "GameRoot")
         self.assertEqual(r_parent.level, 1)
         self.assertEqual(r_child.name, "Player")
@@ -124,8 +124,8 @@ class ProjectPersistenceTests(unittest.TestCase):
         self.assertEqual(r_parent.children, (r_child,))
 
         # Relations (reference integrity)
-        self.assertIs(r_parent.relations["player"], r_child)
-        self.assertIs(r_child.relations["target"], r_parent)
+        self.assertIs(r_parent.items.require_target("player"), r_child)
+        self.assertIs(r_child.items.require_target("target"), r_parent)
 
     def test_system_attachments_serialized_and_reconstructed_safely(self):
         project_dir = Path(self.directory.name)
@@ -251,7 +251,7 @@ class ProjectPersistenceTests(unittest.TestCase):
         app_entity = runtime.resolve(app_id)
         self.assertEqual(app_entity.id, app_id)
         self.assertEqual(app_entity.items.get_value("name"), "Application")
-        self.assertIn("root", app_entity.tags)
+        self.assertIn("root", set(app_entity.items.tag_names()))
 
     def test_system_script_resolves_application_entity_by_uuid_after_reload(self):
         project_dir = Path(self.directory.name)
@@ -330,7 +330,7 @@ class ProjectPersistenceTests(unittest.TestCase):
 
         editor2.open_specific_file(render_path)
         runtime2.step(0)
-        pills = [e for e in runtime2.entities if "asset_pill" in e.tags]
+        pills = [e for e in runtime2.entities if e.items.has_tag("asset_pill")]
         app_pills = [p for p in pills if p.items.get_value("asset_id") == str(app_id)]
         self.assertTrue(len(app_pills) >= 1)
         self.assertIn("Application", app_pills[0].items.get_value("asset_name", ""))
@@ -389,7 +389,7 @@ class ProjectPersistenceTests(unittest.TestCase):
         app_id = uuid4()
         app_entity = self.runtime.create(identity=app_id, name="Application", tags=["root"])
         game_entity = self.runtime.create(name="Game", tags=["game"])
-        game_entity.relations["app_root"] = app_entity
+        game_entity.items.connect("app_root", app_entity)
 
         save_project(project_dir, entities=[game_entity], application_id=app_id)
 
@@ -400,9 +400,9 @@ class ProjectPersistenceTests(unittest.TestCase):
         restored = deserialize_entities(data["entities"], runtime2, default_parent=app2, project_dir=project_dir)
 
         game2 = next(e for e in restored.values() if e.items.get_value("name") == "Game")
-        self.assertIn("app_root", game2.relations)
-        self.assertIs(game2.relations["app_root"], app2)
-        self.assertEqual(game2.relations["app_root"].id, app_id)
+        self.assertIn("app_root", game2.items.link_dict())
+        self.assertIs(game2.items.require_target("app_root"), app2)
+        self.assertEqual(game2.items.require_target("app_root").id, app_id)
 
     def test_parent_hierarchy_under_application_entity_persists(self):
         project_dir = Path(self.directory.name)
@@ -488,11 +488,11 @@ class ProjectPersistenceTests(unittest.TestCase):
         missing_id = uuid4()
         buf = TextBuffer(f'app = resolve("{missing_id}")\ntex = asset("{missing_id}")\n')
         control = fake_runtime.create(x=0, y=0, w=500, h=300, layer=0, buffer=buf, inline_references=True)
-        control.tags.add("multiline")
+        control.items.add_tag("multiline")
 
         ui._sync_text(control)
 
-        pills = [e for e in fake_runtime.entities if "asset_pill" in e.tags]
+        pills = [e for e in fake_runtime.entities if e.items.has_tag("asset_pill")]
         pill0 = next((p for p in pills if p.items.get_value("asset_row") == 0), None)
         self.assertIsNotNone(pill0)
         self.assertIn("Entity", pill0.items.get_value("asset_name", ""))

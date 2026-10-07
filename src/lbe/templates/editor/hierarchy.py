@@ -9,17 +9,17 @@ select = lambda target: state.select(target)
 message = lambda text: state.message(text)
 
 def view_root():
-    root = entity.relations.get("view_root")
+    root = entity.items.target("view_root")
     if root is None or not root.alive:
         root = state.game if state.game.alive else state.app
-        entity.relations["view_root"] = root
+        entity.items.connect("view_root", root)
     return root
 
 
 def set_hierarchy_root(target):
     if target is None or not target.alive:
         return
-    entity.relations["view_root"] = target
+    entity.items.connect("view_root", target)
     state.hierarchy.scroll = 0
     state.hierarchy.expanded.add(target.id)
     state.select(target)
@@ -33,7 +33,7 @@ def reveal_hierarchy(target):
     # Separate top-level trees have no shared entity ancestor.
     if root is not target and root not in target.ancestors:
         root = target.root
-    entity.relations["view_root"] = root
+    entity.items.connect("view_root", root)
     for ancestor in target.ancestors:
         state.hierarchy.expanded.add(ancestor.id)
     return root
@@ -85,8 +85,8 @@ def hierarchy_sync():
             put(row, visible=False)
             continue
         target, depth = visible[source]
-        if row.relations.get('target') is not target:
-            row.relations['target'] = target
+        if row.items.target('target') is not target:
+            row.items.connect('target', target)
         name = str(target.items.get_value('name', str(target.id)[:8]))
         marker = '-' if target.id in expanded else '+'
         is_selected = target is selected()
@@ -147,7 +147,7 @@ def hierarchy_track_click(track, event):
 
 
 def hierarchy_click(row, event):
-    target = row.relations.get("target")
+    target = row.items.target("target")
     if target is None:
         return
     if event[1] < row.x + row.indent + 24:
@@ -162,14 +162,14 @@ def hierarchy_click(row, event):
     if click_count >= 2:
         select(target)
     else:
-        state.app.relations['selection'] = target
-        state.game.relations['selection'] = target
+        state.app.items.connect('selection', target)
+        state.game.items.connect('selection', target)
 
 
 def hierarchy_row_drag(row, event):
     if state.app.items.get_value("entity_drag") is not None or state.app.items.get_value("asset_drag") is not None:
         return True
-    target = row.relations.get("target")
+    target = row.items.target("target")
     if target is None:
         return False
     ent_name = str(target.items.get_value("name", str(target.id)[:8]))
