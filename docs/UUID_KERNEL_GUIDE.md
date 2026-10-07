@@ -1,5 +1,9 @@
 # UUID item kernel and GUI walkthrough
 
+This describes an intermediate migration checkpoint, not the completed
+no-compatibility architecture. The inspector still has split sections;
+behaviour access and project persistence still need their native-only cutover.
+
 ## Start through the project launcher
 
 Run `F:\NanoEngine\main.py` as usual. Choose a directory, enter a new project
@@ -80,9 +84,22 @@ typed records in that collection. `entity[uuid]` retrieves a declaration;
 other type queries retrieve matching typed records. `System` and `Script` are
 aliases of the existing instance classes, not another execution model.
 
-The familiar `entity.x`, `entity.components`, `entity.tags`, `entity.relations`,
-`entity.systems` and `entity.scripts` remain supported as projections. Their
-internal dictionaries no longer independently own application data. Ordinary
+`Entity.components`, `Entity.tags` and `Entity.relations` have been removed,
+including their backing slots and projection classes. Named convenience
+operations now read or mutate the actual UUID records:
+
+```python
+player.items.set_value('x', 2.0)
+player.items.add_tag('player')
+link = player.items.connect('target', enemy)
+player.items.rename(link.id, 'aim_target')
+target = player.items.require_target('aim_target')
+```
+
+Names identify records within a type category; UUIDs remain the dictionary keys.
+`value_dict()` and `link_dict()` return disposable snapshots, not live collections.
+Dynamic `entity.x` and the `entity.systems` / `entity.scripts` projections still
+exist at this checkpoint and are outstanding removal work. Ordinary
 component edits, renames and successful attachment reloads preserve item UUIDs.
 Deletion/recreation is a new identity. Systems retain the existing lifecycle,
 per-attachment namespaces, subscription cleanup and update-before-draw order.
@@ -97,7 +114,7 @@ Resolution reads the live source and applies a private-copy patch. Supported
 operations are `set`/`replace`, numeric/list `add`, `multiply`, and path `remove`.
 Paths are lists of mapping keys or list indices. Source edits notify inherited
 consumers through the existing change stream. Nested edits use
-`components.edit(key)` or explicit `components.patch(key, operations)`; modifying
+`items.edit_value(name)` or explicit `items.patch_value(item_uuid, operations)`; modifying
 a resolved inherited copy alone does not persist an edit. The old nearest-ancestor
 `entity.inherit("name")` helper keeps its existing meaning.
 
@@ -133,7 +150,8 @@ design and optimize measured hot paths before scaling to large worlds; there is
 no evidence here that a wholesale rebuild is necessary or that this refactor is
 faster than the old engine.
 
-One local comparison against `9f37a27` (median milliseconds):
+One historical comparison of checkpoint `ace82b8` against `9f37a27` (median
+milliseconds; not a measurement of the latest cutover):
 
 | Workload | Before | UUID kernel |
 | --- | ---: | ---: |
