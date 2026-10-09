@@ -252,7 +252,7 @@ def initialize():
 
     project_data = load_project_data(project)
     if project_data is not None and project_data.get("entities"):
-        restored = deserialize_entities(project_data["entities"], state.runtime, default_parent=entity, project_dir=project, activate=False)
+        restored = deserialize_entities(project_data["entities"], state.runtime, project_dir=project, activate=False)
         state.game = next((e for e in restored.values() if e.items.has_tag("root") and e.items.get_value("name") == "Game"), None)
         if state.game is None:
             state.game = next((e for e in restored.values() if e.parent is entity), next(iter(restored.values())))

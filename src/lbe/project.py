@@ -181,7 +181,7 @@ def serialize_entities(entities, *, project_dir=None, on_unsupported="error", kn
                              transient_relations=transient_relations.get(e.id, ())) for e in entities]
 
 
-def deserialize_entities(entity_data_list, runtime, *, default_parent=None, project_dir=None, activate=True):
+def deserialize_entities(entity_data_list, runtime, *, project_dir=None, activate=True):
     """Register all native records before linking references and executing behaviour."""
     from .item_storage import validate_record, StoredSource, ITEM_TYPES
     from .items import Component, InheritedComponent, Tag, Relation, Parent

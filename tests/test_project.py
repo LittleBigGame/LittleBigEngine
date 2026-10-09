@@ -279,7 +279,7 @@ class ProjectPersistenceTests(unittest.TestCase):
         runtime2 = Runtime()
         self.addCleanup(runtime2.close)
         app2 = runtime2.create(identity=UUID(data["application_id"]), name="Application", tags=["root"])
-        restored = deserialize_entities(data["entities"], runtime2, default_parent=app2, project_dir=project_dir)
+        restored = deserialize_entities(data["entities"], runtime2, project_dir=project_dir)
         runtime2.step(0)
 
         game2 = next(e for e in restored.values() if e.items.get_value("name") == "Game")
@@ -377,7 +377,7 @@ class ProjectPersistenceTests(unittest.TestCase):
         runtime2 = Runtime()
         self.addCleanup(runtime2.close)
         app2 = runtime2.create(identity=UUID(data["application_id"]), name="Application", tags=["root"])
-        restored = deserialize_entities(data["entities"], runtime2, default_parent=app2, project_dir=project_dir)
+        restored = deserialize_entities(data["entities"], runtime2, project_dir=project_dir)
 
         player2 = next(e for e in restored.values() if e.items.get_value("name") == "Player")
         self.assertIs(player2.items.require_value("app_ref"), app2)
@@ -396,7 +396,7 @@ class ProjectPersistenceTests(unittest.TestCase):
         runtime2 = Runtime()
         self.addCleanup(runtime2.close)
         app2 = runtime2.create(identity=UUID(data["application_id"]), name="Application", tags=["root"])
-        restored = deserialize_entities(data["entities"], runtime2, default_parent=app2, project_dir=project_dir)
+        restored = deserialize_entities(data["entities"], runtime2, project_dir=project_dir)
 
         game2 = next(e for e in restored.values() if e.items.get_value("name") == "Game")
         self.assertIn("app_root", game2.items.link_dict())
@@ -415,7 +415,7 @@ class ProjectPersistenceTests(unittest.TestCase):
         runtime2 = Runtime()
         self.addCleanup(runtime2.close)
         app2 = runtime2.create(identity=UUID(data["application_id"]), name="Application", tags=["root"])
-        restored = deserialize_entities(data["entities"], runtime2, default_parent=app2, project_dir=project_dir)
+        restored = deserialize_entities(data["entities"], runtime2, project_dir=project_dir)
 
         game2 = next(e for e in restored.values() if e.items.get_value("name") == "Game")
         self.assertIs(game2.parent, app2)
