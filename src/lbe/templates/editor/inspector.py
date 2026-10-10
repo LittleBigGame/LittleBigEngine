@@ -148,7 +148,7 @@ def commit_item_data(control):
     def apply(record):
         current = state.runtime.resolve(target.id)
         current.items.replace(identity, record)
-        for _, field in state.component_rows:
+        for _, field in state.item_rows:
             if field.items.target('target') is current and field.items.get_value('item_id') == identity:
                 field.buffer = TextBuffer(item_presentation(current, record)[3])
                 field.committed_text = field.buffer.text
@@ -225,29 +225,19 @@ def inspector_sync():
     ip = state.inspector
     # These former sections are not alternative projections of the data anymore.
     retired = ("add_child_button", "duplicate_button", "delete_button", "quick_add_chip_btn",
-               "add_name", "add_value", "add_button", "divider_components", "system_label",
-               "add_system_button", "no_systems_label", "divider_systems", "links_header",
-               "tags_label", "tags_field", "parent_label", "parent_field", "relations_label",
-               "relation_field", "link_add_button")
+               "add_name", "add_value", "add_button")
     for name in retired:
         put(getattr(state, name), visible=False)
-    for group in (state.quick_preset_chips, state.component_delete_buttons, state.system_rows,
-                  state.system_edit_buttons, state.system_detach_buttons, state.relation_edit_buttons,
-                  state.child_rows):
+    for group in (state.quick_preset_chips,):
         for control in group:
             put(control, visible=False)
-    for pair in state.relation_rows:
-        for control in pair:
-            put(control, visible=False)
-    if not hasattr(state, "item_type_buttons"):
-        state.item_type_buttons = []
     visible = ip.items.get_value("visible", True)
     for control in (state.name_label, state.name_field, state.identity_label, state.divider_identity,
-                    state.components_title, state.add_comp_menu_button, state.metadata):
+                    state.items_title, state.add_item_button, state.metadata):
         put(control, visible=visible)
     put(state.selection_label, visible=False)
     if not visible:
-        for label, field in state.component_rows:
+        for label, field in state.item_rows:
             put(label, visible=False)
             put(field, visible=False)
         for control in state.item_type_buttons:
@@ -266,24 +256,24 @@ def inspector_sync():
     state.identity_label.on_click = lambda *args: open_identity_menu(owner)
     put(state.divider_identity, x=ip.x+12, y=ip.y+78, w=max(0, ip.w-24), h=1)
     collapsed = "items" in state.collapsed_sections
-    put(state.components_title, x=ip.x+12, y=ip.y+84, w=max(80, ip.w-110), h=22,
+    put(state.items_title, x=ip.x+12, y=ip.y+84, w=max(80, ip.w-110), h=22,
         text=f"{'▶' if collapsed else '▼'} ITEMS ({len(records)})")
-    state.components_title.action = lambda: toggle_section("items")
-    put(state.add_comp_menu_button, x=ip.x+ip.w-82, y=ip.y+84, w=70, h=22, text="+ Add")
+    state.items_title.action = lambda: toggle_section("items")
+    put(state.add_item_button, x=ip.x+ip.w-82, y=ip.y+84, w=70, h=22, text="+ Add")
     row_y = ip.y+112
     capacity = max(0, int((bottom-row_y-24)//44)) if not collapsed else 0
     max_scroll = max(0, len(records)-capacity)
     ip.items.update_values(item_count=len(records), capacity=capacity, scroll=max(0,min(ip.scroll,max_scroll)))
-    while len(state.component_rows) < capacity:
-        index = len(state.component_rows)
+    while len(state.item_rows) < capacity:
+        index = len(state.item_rows)
         label = state.ui.field(ip, f"ItemName{index}", "")
         field = state.ui.field(ip, f"ItemData{index}", "")
-        state.component_rows.append((label, field))
-    while len(state.item_type_buttons) < len(state.component_rows):
+        state.item_rows.append((label, field))
+    while len(state.item_type_buttons) < len(state.item_rows):
         index = len(state.item_type_buttons)
         state.item_type_buttons.append(state.ui.button(ip, f"ItemType{index}", "", lambda: None, color=PANEL))
     scrolling = capacity > 0 and len(records) > capacity
-    for index, (label, field) in enumerate(state.component_rows):
+    for index, (label, field) in enumerate(state.item_rows):
         badge = state.item_type_buttons[index]
         source = index+ip.scroll
         shown = index < capacity and source < len(records)
@@ -349,7 +339,7 @@ def commit_component(field):
         if current is None or not current.alive:
             raise ValueError('Edited entity no longer exists')
         current.items.replace(declaration.id, declaration)
-        for _, control in state.component_rows:
+        for _, control in state.item_rows:
             if control.items.target('target') is current and control.items.get_value('component_key') == key:
                 control.buffer = TextBuffer(safe_repr(current.items.require_value(key)))
                 control.committed_text = control.buffer.text
@@ -417,105 +407,10 @@ def add_component():
     save_component_changes(ent, before)
     inspector_sync()
 
-def commit_tags():
-    ent = inspected()
-    renaming_tag = state.tags_field.items.remove_value("renaming_tag", None)
-    tags = {tag.strip() for tag in state.tags_field.buffer.text.split(',') if tag.strip()}
-    previous = set(ent.items.tag_names())
-    added = tags - previous
-    if renaming_tag in previous and renaming_tag not in tags and len(added) == 1:
-        from lbe import Tag
-        ent.items.rename(ent.items.named(Tag, renaming_tag).id, next(iter(added)))
-    for tag in set(ent.items.tag_names()) - tags:
-        ent.items.remove_tag(tag)
-    for tag in tags:
-        ent.items.add_tag(tag)
-    save_editor_project()
-    message('Tags updated')
-    inspector_sync()
 
-def resolve_name(text):
-    text = text.strip()
-    if not text:
-        raise ValueError('Enter an entity name or UUID')
-    try:
-        return state.runtime.resolve(text)
-    except (ValueError, KeyError):
-        exact = [e for e in state.runtime.entities if e.items.get_value('name') == text]
-        if len(exact) == 1:
-            return exact[0]
-        if len(exact) > 1:
-            raise ValueError(f"Ambiguous entity name '{text}'. Use UUID instead.")
 
-        lower_matches = [e for e in state.runtime.entities if str(e.items.get_value('name', '')).lower() == text.lower()]
-        if len(lower_matches) == 1:
-            return lower_matches[0]
-        if len(lower_matches) > 1:
-            raise ValueError(f"Ambiguous entity name '{text}'. Use UUID instead.")
 
-        uuid_matches = [e for e in state.runtime.entities if str(e.id).lower().startswith(text.lower())]
-        if len(uuid_matches) == 1:
-            return uuid_matches[0]
-        if len(uuid_matches) > 1:
-            raise ValueError(f"Ambiguous UUID prefix '{text}'. Use full UUID.")
 
-        tag_matches = [e for e in state.runtime.entities if e.items.has_tag(text)]
-        if len(tag_matches) == 1:
-            return tag_matches[0]
-        if len(tag_matches) > 1:
-            raise ValueError(f"Multiple entities share tag '{text}'. Use UUID or unique name.")
-
-        raise ValueError(f"No entity found matching '{text}'")
-
-def commit_parent():
-    text = state.parent_field.buffer.text.strip()
-    inspected().parent = resolve_name(text) if text else None
-    message('Parent updated')
-    hierarchy_sync()
-    inspector_sync()
-
-def commit_relation():
-    raw = state.relation_field.buffer.text.strip()
-    if not raw:
-        raise ValueError('Enter relation=target or target name')
-    editing_rel = state.relation_field.items.remove_value("editing_relation", None)
-    if '=' in raw:
-        name, _, text = raw.partition('=')
-        name = name.strip()
-        text = text.strip()
-        if not name:
-            raise ValueError('Use relation=entity name or UUID')
-        if text:
-            target = resolve_name(text)
-            if editing_rel and editing_rel != name:
-                inspected().items.disconnect(editing_rel, None)
-            inspected().items.connect(name, target)
-            tgt_name = str(target.items.get_value('name', str(target.id)[:8]))
-            message(f"Linked '{name}' -> '{tgt_name}'")
-        else:
-            rel_to_remove = editing_rel or name
-            inspected().items.disconnect(rel_to_remove, None)
-            message(f"Unlinked relation '{rel_to_remove}'")
-    else:
-        target = resolve_name(raw)
-        tgt_name = str(target.items.get_value('name', str(target.id)[:8]))
-        name = editing_rel or tgt_name.lower().replace(" ", "_")
-        inspected().items.connect(name, target)
-        message(f"Linked '{name}' -> '{tgt_name}'")
-    state.relation_field.buffer = TextBuffer()
-    inspector_sync()
-
-def start_edit_link(name, tgt_name=None):
-    ent = inspected()
-    if tgt_name is None:
-        tgt = ent.items.target(name)
-        tgt_name = str(tgt.items.get_value('name', str(tgt.id)[:8])) if tgt else ''
-    state.relation_field.buffer = TextBuffer(f"{name}={tgt_name}")
-    state.relation_field.buffer.anchor = 0
-    state.relation_field.buffer.cursor = len(state.relation_field.buffer.text)
-    state.relation_field.items.set_value("editing_relation", name)
-    state.ui.focus(state.relation_field)
-    message(f"Editing link '{name}'. Press Enter or click + to save.")
 
 def quick_link_to(target):
     source = inspected()
@@ -603,15 +498,6 @@ def delete_component(key):
         inspector_sync()
 
 
-def unlink_relation(name):
-    ent = inspected()
-    if ent.items.has_link(name):
-        ent.items.disconnect(name)
-        if state.relation_field.items.get_value("editing_relation") == name:
-            state.relation_field.items.remove_value("editing_relation", None)
-            state.relation_field.buffer = TextBuffer()
-        message(f"Unlinked relation '{name}'")
-        inspector_sync()
 
 
 def focus_component_value(key):
@@ -625,7 +511,7 @@ def focus_component_value(key):
             neighbour=min(len(identities)-1,index+1)
             state.inspector.scroll=max(0,neighbour-capacity+1)
             inspector_sync()
-    for lbl, fld in state.component_rows:
+    for lbl, fld in state.item_rows:
         if fld.visible and getattr(fld, 'component_key', None) == key:
             state.ui.focus(fld)
             fld.buffer.anchor = 0
@@ -721,9 +607,9 @@ def commit_component_key(lbl):
         focus_component_value(new_key)
 
 
-def open_add_component_menu(x=None, y=None, target=None):
+def open_add_item_menu(x=None, y=None, target=None):
     ent = target or inspected()
-    btn = getattr(state, "add_comp_menu_button", None)
+    btn = getattr(state, "add_item_button", None)
     if x is None or y is None:
         mouse = getattr(state.ui, "mouse_pos", None)
         if mouse and (btn is None or not contains(btn, *mouse)):
@@ -798,7 +684,7 @@ def focus_item(owner, identity):
     index = identities.index(identity)
     state.inspector.scroll = index
     inspector_sync()
-    for label, field in state.component_rows:
+    for label, field in state.item_rows:
         if label.visible and label.items.get_value("item_id") == identity:
             state.ui.focus(label)
             label.buffer.anchor = 0
@@ -933,7 +819,8 @@ def open_attach_system_menu():
         actions.append(None)
     actions.append(dict(label="+ New System Script...", run=lambda e: prompt_new_system(ent)))
 
-    open_menu(state.ui, ent, state.add_system_button.x, state.add_system_button.y + state.add_system_button.h + 2, actions=actions)
+    button = state.add_item_button
+    open_menu(state.ui, ent, button.x, button.y + button.h + 2, actions=actions)
 
 
 def prompt_new_system(ent):
@@ -1055,7 +942,7 @@ def remove_quick_preset(name):
 
 
 def start_rename_component(ent, old_key):
-    for lbl, fld in state.component_rows:
+    for lbl, fld in state.item_rows:
         if lbl.visible and getattr(lbl, 'component_key', None) == old_key:
             state.ui.focus(lbl)
             lbl.buffer.anchor = 0
@@ -1070,22 +957,10 @@ def start_rename_component(ent, old_key):
     message(f"Renaming component '{old_key}': type new name and press Enter")
 
 
-def start_rename_tag(ent, old_tag):
-    state.tags_field.items.set_value("renaming_tag", old_tag)
-    state.ui.focus(state.tags_field)
-    message(f"Renaming tag '{old_tag}': edit in Tags box and press Enter")
 
 
-def remove_tag(ent, tag):
-    ent.items.remove_tag(tag)
-    save_editor_project()
-    inspector_sync()
-    message(f"Removed tag '{tag}'")
 
 
-def start_add_tag(ent):
-    state.ui.focus(state.tags_field)
-    message("Type tag name and press Enter to save")
 
 
 
@@ -1248,18 +1123,12 @@ def start():
         "parse_value": parse_value,
         "commit_component": commit_component,
         "add_component": add_component,
-        "commit_tags": commit_tags,
-        "resolve_name": resolve_name,
-        "commit_parent": commit_parent,
-        "commit_relation": commit_relation,
-        "start_edit_link": start_edit_link,
         "quick_link_to": quick_link_to,
         "commit_name": commit_name,
         "inspector_add_child": inspector_add_child,
         "inspector_duplicate_entity": inspector_duplicate_entity,
         "inspector_delete_entity": inspector_delete_entity,
         "delete_component": delete_component,
-        "unlink_relation": unlink_relation,
         "focus_component_value": focus_component_value,
         "quick_add_pos": quick_add_pos,
         "quick_add_size": quick_add_size,
@@ -1269,7 +1138,7 @@ def start():
         "add_custom_component": add_custom_component,
         "context_add_component": context_add_component,
         "commit_component_key": commit_component_key,
-        "open_add_component_menu": open_add_component_menu,
+        "open_add_item_menu": open_add_item_menu,
         "open_attach_system_menu": open_attach_system_menu,
         "prompt_new_system": prompt_new_system,
         "attach_system_to_entity": attach_system_to_entity,
@@ -1281,9 +1150,6 @@ def start():
         "apply_quick_preset": apply_quick_preset,
         "remove_quick_preset": remove_quick_preset,
         "start_rename_component": start_rename_component,
-        "start_rename_tag": start_rename_tag,
-        "remove_tag": remove_tag,
-        "start_add_tag": start_add_tag,
         "change_component_type": change_component_type,
         "open_change_type_menu": open_change_type_menu,
         "inspector_scroll_drag": inspector_scroll_drag,

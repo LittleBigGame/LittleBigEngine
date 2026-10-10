@@ -1,8 +1,9 @@
 # UUID item kernel and GUI walkthrough
 
 This describes an intermediate migration checkpoint, not the completed
-no-compatibility architecture. The inspector still has split sections;
-dynamic data attributes still need their native-only cutover.
+no-compatibility architecture. The inspector is now one UUID-item list;
+dynamic data attributes and legacy source-authoring paths still need their
+native-only cutover.
 
 ## Start through the project launcher
 
@@ -25,14 +26,16 @@ deliberate manual update. Do not copy an entire template over your game.
    movement direction. **F5** pauses/resumes the game. The initial two example
    rectangles remain in the scene; they are not obstacles and have no collision.
 3. Inspect **Player**. It has ordinary position, size, colour and aiming components.
-   Scroll the component section to see **speed**.
+   Scroll the **ITEMS** list to see **speed**. Names are editable tinted pills;
+   the symbol/type badge underneath identifies the stored record type.
 4. Inspect **PlayerBlueprint**. It has a speed value but no position, size, physics
    or drawing requirement. Change its speed: the player picks up the change.
 5. Inspect Player again. Its speed label is purple because the declaration is
    inherited. Editing the value creates a local replacement patch. The blueprint
    is untouched. Right-click speed and choose **Reset local patch** to follow the
    blueprint again. Inspector value edits support undo/redo, including the patch.
-6. Inspect Game's **walk_shoot** system and click **Edit**. The normal project file
+6. Inspect Game, find its **walk_shoot** item and click its source/data field.
+   The normal project file
    `systems/game/walk_shoot.py` contains movement, aiming, cooldown, bullet creation,
    bullet movement and lifetime expiry. Edit it and use **Ctrl+S** to reload.
 7. Use **Save project**, close and reopen. Entity, component, link and attachment
@@ -45,6 +48,15 @@ Click an inspector's Entity identity heading to inspect its UUID, temporary
 runtime handle and item count, or copy its Entity reference. Right-click a
 component to copy a Component reference. Attachment menus similarly copy the
 attachment's identity, which is distinct from the source asset's identity.
+
+The inspector's **+ Add** menu creates values, inherited components, tags,
+relationships, parent links and behaviours. A tag is its own UUID item, not text
+in a comma-separated tags box. Rename a relationship's pill without changing
+its UUID; its type badge opens target selection and removal. Clicking relationship
+data navigates to the target. Missing targets remain explicit visible items.
+Custom dataclass records expose their data fields as an editable dictionary;
+identity and name are not part of that data edit. Child and affecting-system
+navigation is in the Entity identity menu, not mixed into the owned item list.
 
 Paste references into source:
 

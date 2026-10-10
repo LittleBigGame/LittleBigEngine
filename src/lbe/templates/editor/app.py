@@ -287,11 +287,8 @@ def initialize():
             target.items.attach_script(outline)
 
     state.hierarchy_rows = []
-    state.component_rows = []
-    state.system_rows = []
-    state.system_edit_buttons = []
-    state.system_detach_buttons = []
-    state.child_rows = []
+    state.item_rows = []
+    state.item_type_buttons = []
     state.extra_panels = []
     state.quick_component_presets = [
         ("pos", {"x": 0.0, "y": 0.0}),
@@ -434,14 +431,9 @@ def initialize():
     state.quick_speed_btn = state.ui.button(state.inspector, 'QuickSpeedBtn', 'speed', quick_add_speed, color=PANEL, hover_color=(45, 60, 80))
     state.quick_preset_chips = [state.quick_pos_btn, state.quick_size_btn, state.quick_vel_btn, state.quick_color_btn, state.quick_speed_btn]
     state.quick_add_chip_btn = state.ui.button(state.inspector, 'QuickAddChip', '+', open_add_chip_menu, color=PANEL, hover_color=(45, 60, 80))
-    state.components_title = state.ui.button(state.inspector, 'ItemsTitle', '▼ ITEMS', lambda: toggle_section('items'), color=PANEL, hover_color=(38, 50, 66))
-    state.add_comp_menu_button = state.ui.button(state.inspector, 'AddCompMenuBtn', '+ Add', open_add_component_menu)
+    state.items_title = state.ui.button(state.inspector, 'ItemsTitle', '▼ ITEMS', lambda: toggle_section('items'), color=PANEL, hover_color=(38, 50, 66))
+    state.add_item_button = state.ui.button(state.inspector, 'AddItemButton', '+ Add', open_add_item_menu)
     state.divider_identity = state.ui.create(state.inspector, 'DividerIdentity', 'rect', color=(38, 48, 62), layer=2)
-    state.divider_components = state.ui.create(state.inspector, 'DividerComponents', 'rect', color=(38, 48, 62), layer=2)
-    state.divider_systems = state.ui.create(state.inspector, 'DividerSystems', 'rect', color=(38, 48, 62), layer=2)
-    state.component_delete_buttons = []
-    state.relation_rows = []
-    state.relation_edit_buttons = []
     state.hierarchy_scroll_track = state.ui.create(state.hierarchy, 'HierarchyScrollTrack', 'scrollbar_track', color=(28, 36, 48))
     state.hierarchy_scroll_track.on_click = hierarchy_track_click
     state.hierarchy_scroll_thumb = state.ui.create(state.hierarchy, 'HierarchyScrollThumb', 'scrollbar_thumb', color=(55, 75, 95), hover_color=(75, 115, 155), layer=3)
@@ -455,24 +447,7 @@ def initialize():
     state.add_value = state.ui.field(state.inspector, 'ComponentValue', '', hint='value, e.g. 2.0')
     state.add_value.on_commit = add_component
     state.add_button = state.ui.button(state.inspector, 'AddComponent', '+', add_component)
-    state.tags_field = state.ui.field(state.inspector, 'Tags', '', hint='tags, comma separated')
-    state.tags_field.on_commit = commit_tags
-    state.parent_field = state.ui.field(state.inspector, 'Parent', '', hint='parent name or UUID; blank detaches')
-    state.parent_field.on_commit = commit_parent
-    state.relation_field = state.ui.field(state.inspector, 'Relations', '', hint='relation=target or target name')
-    state.relation_field.on_commit = commit_relation
-    state.link_add_button = state.ui.button(state.inspector, 'AddLinkBtn', '+', commit_relation)
     state.metadata = state.ui.create(state.inspector, 'Metadata', 'label', text='', ink=MUTED)
-    state.system_label = state.ui.button(state.inspector, 'SystemsTitle', '▼ SYSTEMS', lambda: toggle_section('systems'), color=PANEL, hover_color=(38, 50, 66))
-    state.add_system_button = state.ui.button(state.inspector, 'AddSystemBtn', '+ Attach', open_attach_system_menu)
-    state.add_sys_menu_button = state.add_system_button
-    state.no_systems_label = state.ui.create(state.inspector, 'NoSystemsLabel', 'label', text='No systems attached', ink=MUTED)
-    state.links_header = state.ui.button(state.inspector, 'LinksHeader', '▼ LINKS & PARENT', lambda: toggle_section('links'), color=PANEL, hover_color=(38, 50, 66))
-    state.links_title = state.links_header
-    state.tags_label = state.ui.create(state.inspector, 'TagsLabel', 'label', text='Tags', ink=MUTED)
-    state.parent_label = state.ui.create(state.inspector, 'ParentLabel', 'label', text='Parent', ink=MUTED)
-    state.relations_label = state.ui.create(state.inspector, 'RelationsLabel', 'label', text='Link', ink=MUTED)
-    state.relation_label = state.relations_label
     state.code_info = state.ui.create(state.code_panel, 'SourceInfo', 'label', text='', ink=MUTED)
     state.col_splitter = state.ui.splitter(state.app, 'ColumnSplitter', axis='x', on_drag=on_drag_col_splitter)
     state.hierarchy_splitter = state.ui.splitter(state.app, 'HierarchySplitter', axis='y', on_drag=on_drag_hierarchy_splitter)
@@ -671,34 +646,14 @@ def delete_component(*args, **kwargs):
         return fn(*args, **kwargs)
 
 
-def commit_tags(*args, **kwargs):
-    fn = getattr(state, "commit_tags", None)
-    if fn and fn is not commit_tags:
-        return fn(*args, **kwargs)
 
 
-def resolve_name(text):
-    fn = getattr(state, "resolve_name", None)
-    if fn and fn is not resolve_name:
-        return fn(text)
 
 
-def commit_parent(*args, **kwargs):
-    fn = getattr(state, "commit_parent", None)
-    if fn and fn is not commit_parent:
-        return fn(*args, **kwargs)
 
 
-def commit_relation(*args, **kwargs):
-    fn = getattr(state, "commit_relation", None)
-    if fn and fn is not commit_relation:
-        return fn(*args, **kwargs)
 
 
-def start_edit_link(*args, **kwargs):
-    fn = getattr(state, "start_edit_link", None)
-    if fn and fn is not start_edit_link:
-        return fn(*args, **kwargs)
 
 
 def quick_link_to(*args, **kwargs):
@@ -731,10 +686,6 @@ def inspector_delete_entity(*args, **kwargs):
         return fn(*args, **kwargs)
 
 
-def unlink_relation(*args, **kwargs):
-    fn = getattr(state, "unlink_relation", None)
-    if fn and fn is not unlink_relation:
-        return fn(*args, **kwargs)
 
 
 def focus_component_value(*args, **kwargs):
@@ -785,9 +736,9 @@ def commit_component_key(*args, **kwargs):
         return fn(*args, **kwargs)
 
 
-def open_add_component_menu(*args, **kwargs):
-    fn = getattr(state, "open_add_component_menu", None)
-    if fn and fn is not open_add_component_menu:
+def open_add_item_menu(*args, **kwargs):
+    fn = getattr(state, "open_add_item_menu", None)
+    if fn and fn is not open_add_item_menu:
         return fn(*args, **kwargs)
 
 
@@ -857,22 +808,10 @@ def start_rename_component(*args, **kwargs):
         return fn(*args, **kwargs)
 
 
-def start_rename_tag(*args, **kwargs):
-    fn = getattr(state, "start_rename_tag", None)
-    if fn and fn is not start_rename_tag:
-        return fn(*args, **kwargs)
 
 
-def remove_tag(*args, **kwargs):
-    fn = getattr(state, "remove_tag", None)
-    if fn and fn is not remove_tag:
-        return fn(*args, **kwargs)
 
 
-def start_add_tag(*args, **kwargs):
-    fn = getattr(state, "start_add_tag", None)
-    if fn and fn is not start_add_tag:
-        return fn(*args, **kwargs)
 
 
 def change_component_type(*args, **kwargs):
@@ -1247,7 +1186,7 @@ def on_asset_drop(asset_drag, event):
         tgt = inspected()
         if tgt:
             component_identity = None
-            for label, field in state.component_rows:
+            for label, field in state.item_rows:
                 if field.visible and contains(field, mx, my) and field.items.get_value('component_key'):
                     component_identity = field.items.require_value('item_id')
                     break
@@ -1296,7 +1235,7 @@ def on_entity_drop(entity_drag, event):
         tgt = selected()
         if tgt and dragged_ent and tgt is not dragged_ent:
             target_comp_key = None
-            for lbl, fld in getattr(state, "component_rows", []):
+            for lbl, fld in getattr(state, "item_rows", []):
                 if state.ui.visible(fld) and (contains(lbl, mx, my) or contains(fld, mx, my)):
                     target_comp_key = fld.items.get_value("component_key")
                     break
@@ -1601,29 +1540,17 @@ def bind_actions():
                             (state.quick_color_btn, lambda: apply_quick_preset("color")),
                             (state.quick_speed_btn, lambda: apply_quick_preset("speed")),
                             (state.quick_add_chip_btn, open_add_chip_menu),
-                            (state.components_title, lambda: toggle_section("items")),
-                            (state.add_comp_menu_button, open_add_component_menu),
-                            (state.system_label, lambda: toggle_section("systems")),
-                            (state.add_system_button, open_attach_system_menu),
-                            (state.links_header, lambda: toggle_section("links"))):
+                            (state.items_title, lambda: toggle_section("items")),
+                            (state.add_item_button, open_add_item_menu)):
         control.action = action
     state.path_field.on_click = on_path_field_click
-    for control, action in ((state.tags_field, commit_tags),
-                            (state.parent_field, commit_parent), (state.relation_field, commit_relation),
-                            (state.name_field, commit_name)):
-        control.on_commit = action
+    state.name_field.on_commit = commit_name
     state.hierarchy_scroll_track.on_click = hierarchy_track_click
     state.hierarchy_scroll_thumb.on_drag = hierarchy_scroll_drag
     state.inspector_scroll_track.on_click = inspector_track_click
     state.inspector_scroll_thumb.on_drag = inspector_scroll_drag
     for row in state.hierarchy_rows:
         row.on_click = hierarchy_click
-    for button in state.system_rows:
-        button.items.remove_value("system_key", None)
-    for button in state.system_edit_buttons:
-        button.items.remove_value("system_key", None)
-    for button in state.system_detach_buttons:
-        button.items.remove_value("system_key", None)
     state.app.items.set_value("on_asset_drop", on_asset_drop)
     state.app.items.set_value("on_entity_drop", on_entity_drop)
     if hasattr(state, "tab_hierarchy") and hasattr(state, "tab_files"):
@@ -1799,12 +1726,8 @@ def context_target(control, event):
             return dict(file_item=candidate.items.require_value("file_item"), control=candidate)
     if hasattr(state, "file_explorer") and (control is state.file_explorer or state.file_explorer in control.ancestors):
         return dict(file_explorer=True, control=state.file_explorer)
-    if control is state.tags_field or control is state.tags_label:
-        return dict(entity=inspected(), tags=True)
     if control.items.has_value('component_key') and control.items.has_link('target'):
         return dict(entity=control.items.require_target('target'), component=control.component_key)
-    if control.items.has_value('relation_key') and control.items.has_link('target'):
-        return dict(entity=control.items.require_target('target'), relation=control.relation_key)
     if control is state.viewport:
         wx, wy = screen_to_world(state.camera, control, event[1], event[2])
         tgt = find_hit_game_entity(wx, wy)
@@ -1866,7 +1789,7 @@ def context_actions(target):
             actions.extend([
                 dict(label=f"Inspect '{leaf_name}'", ink=leaf_color, run=lambda _: open_panel(target=leaf_ent)),
                 dict(label=f"Rename '{leaf_name}'...", ink=leaf_color, run=lambda _: context_rename(leaf_ent)),
-                dict(label=f"+ Add Component to '{leaf_name}'...", ink=leaf_color, run=lambda _: (select(leaf_ent), open_add_component_menu())),
+                dict(label=f"+ Add Item to '{leaf_name}'...", ink=leaf_color, run=lambda _: (select(leaf_ent), open_add_item_menu())),
                 dict(label=f"Add child to '{leaf_name}'", ink=leaf_color, run=lambda _: context_add_child(leaf_ent)),
                 dict(label=f"Duplicate '{leaf_name}'", ink=leaf_color, run=lambda _: (select(leaf_ent), inspector_duplicate_entity())),
             ])
@@ -1892,7 +1815,7 @@ def context_actions(target):
                 dict(label=f"Inspect '{ent_name}'", run=lambda _: open_panel(target=ent)),
                 dict(label=f"Rename '{ent_name}'...", run=lambda _: context_rename(ent)),
                 None,
-                dict(label="+ Add Component...", run=lambda _: (select(ent), open_add_component_menu())),
+                dict(label="+ Add Item...", run=lambda _: (select(ent), open_add_item_menu())),
                 dict(label="Add child entity", run=lambda _: context_add_child(ent)),
                 dict(label="Duplicate entity", run=lambda _: (select(ent), inspector_duplicate_entity())),
             ]
@@ -2017,16 +1940,6 @@ def context_actions(target):
             None,
             dict(label=f"Detach system '{name}'", run=lambda t: detach_system_from_entity(ent, name)),
         ]
-    if isinstance(target, dict) and 'tags' in target:
-        ent = target['entity']
-        actions = []
-        for t in sorted(set(ent.items.tag_names())):
-            actions.append(dict(label=f"Rename tag '{t}'...", run=lambda _, tag=t: start_rename_tag(ent, tag)))
-            actions.append(dict(label=f"Remove tag '{t}'", run=lambda _, tag=t: remove_tag(ent, tag)))
-        if actions:
-            actions.append(None)
-        actions.append(dict(label="+ Add new tag...", run=lambda _: start_add_tag(ent)))
-        return actions
     if isinstance(target, dict) and 'component' in target:
         ent = target['entity']
         comp = target['component']
@@ -2044,7 +1957,7 @@ def context_actions(target):
             dict(label=f"Change type... ({type_name})", run=lambda t: open_change_type_menu(ent, comp)),
             dict(label=f"Delete '{comp}'", run=lambda t: delete_component(comp)),
             None,
-            dict(label="+ Add Component...", run=lambda t: open_add_component_menu()),
+            dict(label="+ Add Item...", run=lambda t: open_add_item_menu()),
         ]
         from lbe import InheritedComponent
         if isinstance(item, InheritedComponent):
@@ -2062,24 +1975,13 @@ def context_actions(target):
                 dict(label=f"> Select Entity '{val_name}'", run=lambda _: select(val)),
                 dict(label=f"Inspect Entity '{val_name}'", run=lambda _: open_panel(target=val)),
                 dict(label=f"Rename Entity '{val_name}'...", run=lambda _: context_rename(val)),
-                dict(label=f"+ Add Component to '{val_name}'...", run=lambda _: (select(val), open_add_component_menu())),
+                dict(label=f"+ Add Item to '{val_name}'...", run=lambda _: (select(val), open_add_item_menu())),
                 dict(label=f"Add child to '{val_name}'", run=lambda _: context_add_child(val)),
                 dict(label=f"Duplicate Entity '{val_name}'", run=lambda _: (select(val), inspector_duplicate_entity())),
             ])
             protected = (state.app, state.background, state.viewport_panel, state.viewport, state.header, state.hierarchy, state.inspector)
             if val not in protected:
                 actions.append(dict(label=f"Delete Entity '{val_name}'", run=lambda _: (select(val), inspector_delete_entity())))
-        return actions
-    if isinstance(target, dict) and 'relation' in target:
-        ent = target['entity']
-        rel = target['relation']
-        tgt = ent.items.target(rel)
-        tgt_label = str(tgt.items.get_value('name', str(tgt.id)[:8])) if tgt else 'None'
-        actions = []
-        if tgt:
-            actions.append(dict(label=f"Select target ({tgt_label})", run=lambda t: select(tgt)))
-        actions.append(dict(label=f"Edit link '{rel}'...", run=lambda t: start_edit_link(rel)))
-        actions.append(dict(label=f"Unlink '{rel}'", run=lambda t: unlink_relation(rel)))
         return actions
 
     if not hasattr(target, "items") or not target.alive:
@@ -2093,7 +1995,7 @@ def context_actions(target):
         dict(label='Copy Entity reference', run=lambda e: state.window.set_clipboard_text(f'<|Entity:{e.id}|>')),
         dict(label='View affecting systems', run=lambda e: (inspect_entity(e), inspector_sync())),
         None,
-        dict(label="+ Add Component...", run=lambda e: (select(e), open_add_component_menu())),
+        dict(label="+ Add Item...", run=lambda e: (select(e), open_add_item_menu())),
     ]
 
     if target is state.hierarchy.items.target('view_root') and target.parent is not None:

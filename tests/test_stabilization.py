@@ -183,9 +183,9 @@ class EditorContracts(TestCase):
         from lbe.project import load_project
         ed = self.editor
         moving = ed.game.children[0]
-        self.click(ed.add_comp_menu_button)
+        self.click(ed.add_item_button)
         self.click(self.menu_item('+ Velocity'))
-        vx = next(field for _, field in ed.component_rows if field.visible and field.component_key == 'vx')
+        vx = next(field for _, field in ed.item_rows if field.visible and field.component_key == 'vx')
         self.type(vx, '2.0', commit=True)
         self.send(('click', ed.code.x + 90, ed.code.y + 90, 4, 0))
         self.click(self.menu_item('+ New system script'))
@@ -196,7 +196,7 @@ class EditorContracts(TestCase):
         self.send(('key', 'S', True, False))
         row = next(row for row in ed.hierarchy_rows if row.visible and row.items.target('target') is ed.game)
         self.send(('click', row.x + row.w / 2, row.y + row.h / 2, 1, 0, 2))
-        self.click(ed.add_comp_menu_button)
+        self.click(ed.add_item_button)
         self.click(self.menu_item('System /'))
         self.click(self.menu_item('physics'))
         self.assertIn('physics', ed.game.items.behaviour_dict('system'))
@@ -270,13 +270,13 @@ class EditorContracts(TestCase):
         entity = self.runtime.create(parent=ed.game, name='Clone', data=[1], a=1, b=99, precise=1.234567891)
         ed.select(entity)
         self.runtime.step(0)
-        label = next(label for label, field in ed.component_rows if field.visible and field.component_key == 'a')
+        label = next(label for label, field in ed.item_rows if field.visible and field.component_key == 'a')
         label.buffer = TextBuffer('b')
         label.renaming_key = 'a'
         with self.assertRaises(ValueError):
             ed.commit_component_key(label)
         self.assertEqual((entity.a, entity.b), (1, 99))
-        field = next(field for _, field in ed.component_rows if field.visible and field.component_key == 'precise')
+        field = next(field for _, field in ed.item_rows if field.visible and field.component_key == 'precise')
         ed.commit_component(field)
         self.assertEqual(entity.precise, 1.234567891)
         ed.inspector_duplicate_entity()
@@ -303,7 +303,7 @@ class EditorContracts(TestCase):
         from lbe.text import TextBuffer
         ed = self.editor
         target = ed.game.children[0]
-        label = next(label for label, field in ed.component_rows if field.visible and field.component_key == 'x')
+        label = next(label for label, field in ed.item_rows if field.visible and field.component_key == 'x')
         label.buffer = TextBuffer('position')
         label.renaming_key = 'x'
         before = dict(target.items.value_dict())

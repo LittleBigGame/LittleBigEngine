@@ -21,8 +21,9 @@ Named value/link helpers operate on those records, and `value_dict()` returns a
 disposable snapshot, not writable authoritative state. Engine UI, editor template
 and backend component consumers now use these native item operations. The older
 dynamic data attributes still exist at this intermediate checkpoint; their
-removal and unified item inspector are outstanding cutover
-work. `Entity.components`, `Entity.tags`, `Entity.relations`, `Entity.systems`
+removal is outstanding cutover work. The inspector now binds one ordered list
+directly to the actual item UUIDs, with editable names and type-coloured symbol
+badges. `Entity.components`, `Entity.tags`, `Entity.relations`, `Entity.systems`
 and `Entity.scripts`, their storage slots and their projection classes have been
 removed. Tags, links and behaviours are actual UUID records; named helpers mutate those
 records and maintain the disposable incoming-link index. `Runtime.create(items=...)`
@@ -86,9 +87,14 @@ project directory.
 The editor's architecture is decomposed into modular attached systems:
 - `hierarchy.py` attached to the hierarchy panel entity drives tree traversal,
   expansion toggles, and row recycling.
-- `inspector.py` attached to the inspector panel entity drives collapsible sections,
-  inline component renaming, quick-add preset menus, component type conversions,
-  and system/relation links.
+- `inspector.py` attached to the inspector panel entity drives one collapsible
+  UUID-item list. Component values, inherited patches, tags, relationships,
+  parent links, behaviours and custom dataclass data share the same row binding.
+  Item names and data edits target UUIDs; types have symbols and colours. A single
+  Add menu creates items, data rows open behaviour source or linked entities,
+  and type badges open UUID-selected item actions. Child navigation and affecting
+  behaviours remain derived views in the Entity identity menu, not fake owned
+  items. Former systems/link sections and their text-form controls are removed.
 - `code_editor.py` attached to the code panel provides syntax highlighting, diagnostics,
   bracket matching, and off-thread autocomplete and hover inspections.
 - `render.py` attached to the game entity renders the scene through the camera view.
@@ -206,4 +212,5 @@ script exceptions are caught at the backend boundary and emitted as
 `script.error` changes with source attribution. Editor templates consume those
 records to open the log panel. Persistence retains script UUIDs and source paths.
 The runtime does not schedule scripts automatically or add domain-specific
-rendering semantics. Legacy named system attachments remain compatible.
+rendering semantics. Behaviours are actual identified items; named lookup is a
+derived convenience over those records, not an authoritative attachment collection.

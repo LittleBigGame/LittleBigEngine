@@ -264,7 +264,7 @@ class AssetSystemTests(unittest.TestCase):
 
         # Inspector renders it as a chip button with icon + name
         self.runtime.step(0)
-        lbl, fld = next((lbl, fld) for (lbl, fld) in ed.component_rows if fld.visible and fld.component_key == "sprite")
+        lbl, fld = next((lbl, fld) for (lbl, fld) in ed.item_rows if fld.visible and fld.component_key == "sprite")
         self.assertIn("🖼️", fld.buffer.text)
         self.assertIn("player.png", fld.buffer.text)
 
@@ -459,12 +459,12 @@ class AssetSystemTests(unittest.TestCase):
         ed.inspect_entity(owner)
         self.runtime.step(0)
         data = dict(id=uid, name="enemy.py", path="enemy.py", type="system", icon="λ")
-        ed.app.items.require_value("on_asset_drop")(data, ("release", ed.inspector.x+30, ed.components_title.y+15, 0, 0))
+        ed.app.items.require_value("on_asset_drop")(data, ("release", ed.inspector.x+30, ed.items_title.y+15, 0, 0))
         self.assertIn("enemy", owner.items.behaviour_dict('system'))
         self.assertFalse(owner.items.has_value('enemy'))
         record = owner.items.component('source')
         ed.focus_item(owner, record.id)
-        _, field = next((name, field) for name, field in ed.component_rows if field.visible and field.item_id == record.id)
+        _, field = next((name, field) for name, field in ed.item_rows if field.visible and field.item_id == record.id)
         ed.app.items.require_value("on_asset_drop")(data, ("release", field.x+8, field.y+8, 0, 0))
         self.assertEqual(owner.items.component('source').id, record.id)
         self.assertIsInstance(owner.items.value(record.id), AssetRef)
@@ -503,7 +503,7 @@ class AssetSystemTests(unittest.TestCase):
         ed.select(parent_ent)
         self.runtime.step(0)
 
-        drop_insp = ("release", ed.inspector.x + 50, ed.components_title.y + 15, 0, 0)
+        drop_insp = ("release", ed.inspector.x + 50, ed.items_title.y + 15, 0, 0)
         ed.app.items.require_value("on_entity_drop")(ent_drag, drop_insp)
 
         self.assertIn("heronode", parent_ent.items.value_dict())
@@ -747,7 +747,7 @@ class AssetSystemTests(unittest.TestCase):
         self.assertIn("TargetEntity", ed.identity_label.text)
 
         # Drop onto TargetEntity's Inspector components section
-        drop_insp = ("release", ed.inspector.x + 50, ed.components_title.y + 15, 0, 0)
+        drop_insp = ("release", ed.inspector.x + 50, ed.items_title.y + 15, 0, 0)
         ed.app.items.require_value("on_entity_drop")(ent_drag, drop_insp)
         self.runtime.step(0)
 

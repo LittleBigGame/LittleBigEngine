@@ -43,14 +43,14 @@ def main():
                 return next(child for child in menu.children if text in child.items.get_value("text", ""))
 
             def component(key):
-                return next(field for _, field in editor.component_rows
+                return next(field for _, field in editor.item_rows
                             if field.visible and field.component_key == key)
 
             def code_menu():
                 return ("click", editor.code.x+90, editor.code.y+90, 4, 0)
 
             steps = [
-                lambda: [click(editor.add_comp_menu_button)],
+                lambda: [click(editor.add_item_button)],
                 lambda: [click(menu_item("+ Velocity"))],
                 lambda: enter(component("vx"), "3.0") + [("key", "ENTER", False, False)],
                 lambda: enter(component("vy"), "1.0") + [("key", "ENTER", False, False)],
@@ -63,7 +63,8 @@ def main():
                 lambda: [("key", "S", True, False)],
                 lambda: [("click", row.x+row.w/2, row.y+row.h/2, 1, 0, 2)
                          for row in editor.hierarchy_rows if row.visible and row.items.target("target") is editor.game],
-                lambda: [click(editor.add_system_button)],
+                lambda: [click(editor.add_item_button)],
+                lambda: [click(menu_item('System /'))],
                 lambda: [click(menu_item("physics"))],
             ]
             frame = 0

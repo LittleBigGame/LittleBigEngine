@@ -93,7 +93,7 @@ class EditorTests(unittest.TestCase):
         ed = self.editor
         target = ed.game.children[0]
         ed.select(target)
-        field = next(f for _,f in ed.component_rows if f.visible and f.items.get_value('component_key')=='x')
+        field = next(f for _,f in ed.item_rows if f.visible and f.items.get_value('component_key')=='x')
         before = target.x
         ed.ui.focus(field)
         field.buffer.anchor = 0
@@ -268,7 +268,7 @@ class EditorTests(unittest.TestCase):
                           if kwargs.get('key') == (ed.file_explorer.id,'border',0))
         self.assertEqual(top_border[1], group.tab_bar_rect[1]+group.tab_bar_rect[3])
         drawn = [args[0] for args,kwargs in self.graphics.texts
-                 if kwargs.get('key') == (ed.add_comp_menu_button.id,'text')]
+                 if kwargs.get('key') == (ed.add_item_button.id,'text')]
         self.assertEqual(drawn, ['+ Add'])
 
     def test_viewport_content_is_separate_from_tabs_and_hidden_rendering_stops(self):
@@ -334,7 +334,7 @@ class EditorTests(unittest.TestCase):
 
     def item_controls(self, owner, identity):
         self.editor.focus_item(owner, identity)
-        pair = next((name, data) for name, data in self.editor.component_rows
+        pair = next((name, data) for name, data in self.editor.item_rows
                     if data.visible and data.items.require_value('item_id') == identity)
         for control in pair:
             self.assertTrue(self.editor.ui.visible(control))
@@ -357,7 +357,7 @@ class EditorTests(unittest.TestCase):
         self.click(item)
 
     def add_item_menu(self, label):
-        self.click(self.editor.add_comp_menu_button)
+        self.click(self.editor.add_item_button)
         self.choose_menu(label)
 
     def send(self, *events, dt=0):
@@ -420,11 +420,11 @@ class EditorTests(unittest.TestCase):
 
     def test_live_component_editing_and_spatial_refresh(self):
         selected = self.editor.app.items.require_target("selection")
-        x_field = next(field for _, field in self.editor.component_rows if field.visible and field.component_key == "x")
+        x_field = next(field for _, field in self.editor.item_rows if field.visible and field.component_key == "x")
         self.type(x_field, "10.0", commit=True)
         self.assertEqual(selected.x, 10)
         self.assertIn(selected, self.runtime.services["space"].query(10, 0))
-        color = next(field for _, field in self.editor.component_rows if field.visible and field.component_key == "color")
+        color = next(field for _, field in self.editor.item_rows if field.visible and field.component_key == "color")
         self.type(color, "(255, 0, 128)", commit=True)
         self.assertEqual(selected.color, (255, 0, 128))
         self.assertIn((255, 0, 128), [kwargs["color"] for _, kwargs in self.graphics.rectangles if "color" in kwargs])
@@ -433,12 +433,12 @@ class EditorTests(unittest.TestCase):
         moving, still = self.editor.game.children
         original = moving.x, moving.y
         stationary = still.x, still.y
-        self.click(self.editor.add_comp_menu_button)
+        self.click(self.editor.add_item_button)
         menu = self.editor.app.items.target("context_menu")
         vel_item = next(c for c in menu.children if "+ Velocity" in c.items.get_value("text", ""))
         self.click(vel_item)
-        vx_field = next(fld for _, fld in self.editor.component_rows if fld.visible and fld.component_key == "vx")
-        vy_field = next(fld for _, fld in self.editor.component_rows if fld.visible and fld.component_key == "vy")
+        vx_field = next(fld for _, fld in self.editor.item_rows if fld.visible and fld.component_key == "vx")
+        vy_field = next(fld for _, fld in self.editor.item_rows if fld.visible and fld.component_key == "vy")
         self.type(vx_field, "2.0", commit=True)
         self.type(vy_field, "-1.0", commit=True)
         self.assertEqual((moving.vx, moving.vy), (2, -1))
@@ -520,7 +520,7 @@ class EditorTests(unittest.TestCase):
         self.editor.app.items.require_target("selection").items.clear_values()
         self.editor.app.items.require_target("selection").opaque = object()
         self.runtime.step(0)
-        field = next(field for _, field in self.editor.component_rows if field.visible)
+        field = next(field for _, field in self.editor.item_rows if field.visible)
         self.assertTrue(field.readonly)
         self.click(field)
         self.assertIsNot(self.editor.ui.focused, field)
@@ -539,7 +539,7 @@ class EditorTests(unittest.TestCase):
         self.assertEqual(self.editor.code.buffer.text, "def update(dt):\n    pass\n")
 
     def test_component_panel_and_save_preserve_cursor(self):
-        field = next(field for _, field in self.editor.component_rows if field.visible and field.component_key == "color")
+        field = next(field for _, field in self.editor.item_rows if field.visible and field.component_key == "color")
         self.send(("click", field.x+10, field.y+10, 4, 0))
         self.send(("key", "DOWN", False, False))
         self.send(("key", "ENTER", False, False))
@@ -845,12 +845,12 @@ class EditorTests(unittest.TestCase):
 
         # 1. Edit components on moving entity
         self.select(moving)
-        self.click(ed.add_comp_menu_button)
+        self.click(ed.add_item_button)
         menu = ed.app.items.target("context_menu")
         vel_item = next(c for c in menu.children if "+ Velocity" in c.items.get_value("text", ""))
         self.click(vel_item)
-        vx_field = next(fld for _, fld in ed.component_rows if fld.visible and fld.component_key == "vx")
-        vy_field = next(fld for _, fld in ed.component_rows if fld.visible and fld.component_key == "vy")
+        vx_field = next(fld for _, fld in ed.item_rows if fld.visible and fld.component_key == "vx")
+        vy_field = next(fld for _, fld in ed.item_rows if fld.visible and fld.component_key == "vy")
         self.type(vx_field, "2.0", commit=True)
         self.type(vy_field, "-1.0", commit=True)
         self.assertEqual((moving.vx, moving.vy), (2, -1))
@@ -1260,9 +1260,9 @@ class EditorTests(unittest.TestCase):
         count = len(ed.code.children)
         self.assertGreater(count, 20)
         self.assertIn(f"{count} derived children", ed.metadata.text)
-        self.assertFalse(any(b.visible for b in ed.child_rows))
+        self.assertFalse(hasattr(ed, 'child_rows'))
         # Child navigation is derived hierarchy, not fabricated owned item rows.
-        visible = [(label, data) for label, data in ed.component_rows if data.visible]
+        visible = [(label, data) for label, data in ed.item_rows if data.visible]
         self.assertLessEqual(len(visible), ed.inspector.capacity)
         stored = tuple(ed.code.items)
         self.assertEqual([data.item_id for _, data in visible],
@@ -1271,11 +1271,11 @@ class EditorTests(unittest.TestCase):
             for control in (label, data):
                 self.assertGreaterEqual(control.x, ed.inspector.x)
                 self.assertLessEqual(control.x + control.w, ed.inspector.x + ed.inspector.w)
-                self.assertGreaterEqual(control.y, ed.components_title.y + ed.components_title.h)
+                self.assertGreaterEqual(control.y, ed.items_title.y + ed.items_title.h)
                 self.assertLessEqual(control.y + control.h, ed.metadata.y)
         self.assertTrue(ed.divider_identity.visible)
-        self.assertFalse(ed.system_label.visible)
-        self.assertFalse(ed.links_header.visible)
+        self.assertFalse(hasattr(ed, 'system_label'))
+        self.assertFalse(hasattr(ed, 'links_header'))
         self.click(ed.identity_label)
         menu = ed.app.items.require_target('context_menu')
         child_entries = [c for c in menu.children if c.items.get_value('text', '').startswith('Child → ')]
@@ -1395,31 +1395,31 @@ class EditorTests(unittest.TestCase):
         self.runtime.step(0)
 
         # 1. Quick presets via '+ Add' dropdown menu: + Pos, + Size, + Vel, + Color
-        self.click(ed.add_comp_menu_button)
+        self.click(ed.add_item_button)
         menu = ed.app.items.target("context_menu")
         self.click(next(c for c in menu.children if "+ Transform" in c.items.get_value("text", "")))
         self.assertIn("x", bare.items.value_dict())
         self.assertIn("y", bare.items.value_dict())
 
-        self.click(ed.add_comp_menu_button)
+        self.click(ed.add_item_button)
         menu = ed.app.items.target("context_menu")
         self.click(next(c for c in menu.children if "+ Size" in c.items.get_value("text", "")))
         self.assertIn("w", bare.items.value_dict())
         self.assertIn("h", bare.items.value_dict())
 
-        self.click(ed.add_comp_menu_button)
+        self.click(ed.add_item_button)
         menu = ed.app.items.target("context_menu")
         self.click(next(c for c in menu.children if "+ Velocity" in c.items.get_value("text", "")))
         self.assertIn("vx", bare.items.value_dict())
         self.assertIn("vy", bare.items.value_dict())
 
-        self.click(ed.add_comp_menu_button)
+        self.click(ed.add_item_button)
         menu = ed.app.items.target("context_menu")
         self.click(next(c for c in menu.children if "+ Color" in c.items.get_value("text", "")))
         self.assertIn("color", bare.items.value_dict())
 
         # 2. Component deletion via right-click context menu
-        lbl, fld = next((lbl, fld) for (lbl, fld) in ed.component_rows if fld.visible and fld.component_key == "color")
+        lbl, fld = next((lbl, fld) for (lbl, fld) in ed.item_rows if fld.visible and fld.component_key == "color")
         self.send(("click", fld.x + 10, fld.y + 10, 4, 0))
         menu = ed.app.items.target("context_menu")
         self.assertIsNotNone(menu)
@@ -1479,12 +1479,12 @@ class EditorTests(unittest.TestCase):
         self.select(ent)
         self.runtime.step(0)
 
-        # 1. Context menu on entity provides unified + Add Component...
+        # 1. Context menu on entity provides unified + Add Item...
         self.send(("click", ed.identity_label.x + 10, ed.identity_label.y + 5, 4, 0))
         menu = ed.app.items.target("context_menu")
         self.assertIsNotNone(menu)
 
-        add_item = next(c for c in menu.children if "+ Add Component" in c.items.get_value("text", ""))
+        add_item = next(c for c in menu.children if "+ Add Item" in c.items.get_value("text", ""))
         self.click(add_item)
         menu = ed.app.items.target("context_menu")
         self.assertIsNotNone(menu)
@@ -1496,17 +1496,17 @@ class EditorTests(unittest.TestCase):
         # 2. Context menu '+ Custom Component...' focuses add_name
         self.send(("click", ed.identity_label.x + 10, ed.identity_label.y + 5, 4, 0))
         menu = ed.app.items.target("context_menu")
-        add_item = next(c for c in menu.children if "+ Add Component" in c.items.get_value("text", ""))
+        add_item = next(c for c in menu.children if "+ Add Item" in c.items.get_value("text", ""))
         self.click(add_item)
         menu = ed.app.items.target("context_menu")
         custom_item = next(c for c in menu.children if "+ Custom Component..." in c.items.get_value("text", ""))
         self.click(custom_item)
-        custom_lbl = next(l for l, _ in ed.component_rows if l.visible and l.component_key == "custom_component")
+        custom_lbl = next(l for l, _ in ed.item_rows if l.visible and l.component_key == "custom_component")
         self.assertIs(ed.ui.focused, custom_lbl)
 
         # 3. Dedicated '+ Component' button opens preset menu
-        self.assertTrue(ed.add_comp_menu_button.visible)
-        self.click(ed.add_comp_menu_button)
+        self.assertTrue(ed.add_item_button.visible)
+        self.click(ed.add_item_button)
         menu = ed.app.items.target("context_menu")
         self.assertIsNotNone(menu)
         color_item = next(c for c in menu.children if "+ Color" in c.items.get_value("text", ""))
@@ -1555,10 +1555,10 @@ class EditorTests(unittest.TestCase):
         self.assertFalse(ed.delete_button.visible)
 
         # Check section header COMPONENTS and divider
-        self.assertTrue(ed.components_title.visible)
-        self.assertIn("ITEMS", ed.components_title.items.get_value("text"))
-        self.assertTrue(ed.add_comp_menu_button.visible)
-        self.assertLess(ed.divider_identity.y, ed.components_title.y)
+        self.assertTrue(ed.items_title.visible)
+        self.assertIn("ITEMS", ed.items_title.items.get_value("text"))
+        self.assertTrue(ed.add_item_button.visible)
+        self.assertLess(ed.divider_identity.y, ed.items_title.y)
 
 
 
@@ -2153,8 +2153,8 @@ class EditorTests(unittest.TestCase):
         owner = self.runtime.create(parent=ed.game, name="ActorEntity")
         ed.inspect_entity(owner)
         self.runtime.step(0)
-        self.assertIn('ITEMS', ed.components_title.text)
-        self.assertFalse(ed.system_label.visible)
+        self.assertIn('ITEMS', ed.items_title.text)
+        self.assertFalse(hasattr(ed, 'system_label'))
         self.add_item_menu("λ System / ▶ Script")
         menu = ed.app.items.require_target('context_menu')
         render_item = next(c for c in menu.children if "render" in c.items.get_value("text", ""))
@@ -2180,11 +2180,11 @@ class EditorTests(unittest.TestCase):
         self.runtime.step(0)
 
         # Check y field text is formatted cleanly
-        y_fld = next(fld for lbl, fld in ed.component_rows if fld.visible and fld.component_key == "y")
+        y_fld = next(fld for lbl, fld in ed.item_rows if fld.visible and fld.component_key == "y")
         self.assertEqual(y_fld.buffer.text, "-103.77")
 
         # Check coords tuple is formatted cleanly
-        coords_fld = next(fld for lbl, fld in ed.component_rows if fld.visible and fld.component_key == "coords")
+        coords_fld = next(fld for lbl, fld in ed.item_rows if fld.visible and fld.component_key == "coords")
         self.assertEqual(coords_fld.buffer.text, "(0.0, -103.77)")
 
     def test_quick_component_bar_and_renaming(self):
@@ -2195,7 +2195,7 @@ class EditorTests(unittest.TestCase):
         self.runtime.step(0)
 
         # 1. Preset via + Add button focuses value with highlight
-        self.click(ed.add_comp_menu_button)
+        self.click(ed.add_item_button)
         menu = ed.app.items.target("context_menu")
         self.assertIsNotNone(menu)
         pos_item = next(c for c in menu.children if "+ Transform" in c.items.get_value("text", ""))
@@ -2203,12 +2203,12 @@ class EditorTests(unittest.TestCase):
         self.assertIn("x", ent.items.value_dict())
         self.assertIn("y", ent.items.value_dict())
         # Value field is focused with text highlighted
-        x_fld = next(fld for _, fld in ed.component_rows if fld.visible and fld.component_key == "x")
+        x_fld = next(fld for _, fld in ed.item_rows if fld.visible and fld.component_key == "x")
         self.assertIs(ed.ui.focused, x_fld)
         self.assertEqual(x_fld.buffer.selection, (0, len(x_fld.buffer.text)))
 
         # 2. Right-click 'y' component to rename inline
-        lbl, y_fld = next((lbl, fld) for (lbl, fld) in ed.component_rows if fld.visible and fld.component_key == "y")
+        lbl, y_fld = next((lbl, fld) for (lbl, fld) in ed.item_rows if fld.visible and fld.component_key == "y")
         self.send(("click", y_fld.x + 10, y_fld.y + 10, 4, 0))
         menu = ed.app.items.target("context_menu")
         self.assertIsNotNone(menu)
@@ -2226,12 +2226,12 @@ class EditorTests(unittest.TestCase):
         self.assertIn("pos_y", ent.items.value_dict())
 
         # 3. Add Custom Component automatically focuses name field with highlight
-        self.click(ed.add_comp_menu_button)
+        self.click(ed.add_item_button)
         menu = ed.app.items.target("context_menu")
         custom_item = next(c for c in menu.children if "Custom Component" in c.items.get_value("text", ""))
         self.click(custom_item)
         self.assertIn("custom_component", ent.items.value_dict())
-        custom_lbl = next(l for l, _ in ed.component_rows if l.visible and l.component_key == "custom_component")
+        custom_lbl = next(l for l, _ in ed.item_rows if l.visible and l.component_key == "custom_component")
         self.assertIs(ed.ui.focused, custom_lbl)
         self.assertEqual(custom_lbl.buffer.selection, (0, len("custom_component")))
 
@@ -2243,19 +2243,19 @@ class EditorTests(unittest.TestCase):
         self.runtime.step(0)
 
         # Components are visible initially, as is divider
-        visible_comps = [fld for lbl, fld in ed.component_rows if fld.visible]
+        visible_comps = [fld for lbl, fld in ed.item_rows if fld.visible]
         self.assertGreater(len(visible_comps), 0)
         self.assertTrue(ed.divider_identity.visible)
 
         # The single canonical item list collapses as one section.
-        self.click(ed.components_title)
-        visible_comps_after = [fld for lbl, fld in ed.component_rows if fld.visible]
+        self.click(ed.items_title)
+        visible_comps_after = [fld for lbl, fld in ed.item_rows if fld.visible]
         self.assertEqual(len(visible_comps_after), 0)
         self.assertFalse(any(b.visible for b in ed.item_type_buttons))
 
         # Click COMPONENTS header again to re-expand
-        self.click(ed.components_title)
-        visible_comps_reexpanded = [fld for lbl, fld in ed.component_rows if fld.visible]
+        self.click(ed.items_title)
+        visible_comps_reexpanded = [fld for lbl, fld in ed.item_rows if fld.visible]
         self.assertGreater(len(visible_comps_reexpanded), 0)
         self.assertTrue(any(b.visible for b in ed.item_type_buttons))
 
@@ -2422,7 +2422,7 @@ class EditorTests(unittest.TestCase):
         self.runtime.step(0)
 
         # Right-click score component
-        _, score_fld = next((lbl, fld) for (lbl, fld) in ed.component_rows if fld.visible and fld.component_key == "score")
+        _, score_fld = next((lbl, fld) for (lbl, fld) in ed.item_rows if fld.visible and fld.component_key == "score")
         self.send(("click", score_fld.x + 10, score_fld.y + 10, 4, 0))
         menu = ed.app.items.target("context_menu")
         self.assertIsNotNone(menu)
@@ -2443,7 +2443,7 @@ class EditorTests(unittest.TestCase):
         self.assertIsInstance(ent.items.require_value("score"), int)
 
         # Change to bool
-        _, score_fld = next((lbl, fld) for (lbl, fld) in ed.component_rows if fld.visible and fld.component_key == "score")
+        _, score_fld = next((lbl, fld) for (lbl, fld) in ed.item_rows if fld.visible and fld.component_key == "score")
         self.send(("click", score_fld.x + 10, score_fld.y + 10, 4, 0))
         menu = ed.app.items.target("context_menu")
         change_item = next(c for c in menu.children if "Change type" in c.items.get_value("text", ""))
@@ -2455,7 +2455,7 @@ class EditorTests(unittest.TestCase):
         self.assertIsInstance(ent.items.require_value("score"), bool)
 
         # Change to str
-        _, score_fld = next((lbl, fld) for (lbl, fld) in ed.component_rows if fld.visible and fld.component_key == "score")
+        _, score_fld = next((lbl, fld) for (lbl, fld) in ed.item_rows if fld.visible and fld.component_key == "score")
         self.send(("click", score_fld.x + 10, score_fld.y + 10, 4, 0))
         menu = ed.app.items.target("context_menu")
         change_item = next(c for c in menu.children if "Change type" in c.items.get_value("text", ""))
@@ -2475,7 +2475,7 @@ class EditorTests(unittest.TestCase):
         self.runtime.step(0)
 
         # Right-click target_entity component row
-        _, tgt_fld = next((lbl, fld) for (lbl, fld) in ed.component_rows if fld.visible and fld.component_key == "target_entity")
+        _, tgt_fld = next((lbl, fld) for (lbl, fld) in ed.item_rows if fld.visible and fld.component_key == "target_entity")
         self.send(("click", tgt_fld.x + 10, tgt_fld.y + 10, 4, 0))
         menu = ed.app.items.target("context_menu")
         self.assertIsNotNone(menu)
@@ -2490,7 +2490,7 @@ class EditorTests(unittest.TestCase):
         self.assertTrue(any("Select Entity 'BossShip'" in t for t in texts))
         self.assertTrue(any("Inspect Entity 'BossShip'" in t for t in texts))
         self.assertTrue(any("Rename Entity 'BossShip'" in t for t in texts))
-        self.assertTrue(any("Add Component to 'BossShip'" in t for t in texts))
+        self.assertTrue(any("Add Item to 'BossShip'" in t for t in texts))
 
         # Clicking select entity selects BossShip
         select_item = next(c for c in menu.children if "Select Entity 'BossShip'" in c.items.get_value("text", ""))
@@ -2498,7 +2498,7 @@ class EditorTests(unittest.TestCase):
         self.assertIs(ed.app.items.target("selection"), target_ent)
 
     def test_add_component_context_menu_unification(self):
-        """Issue #65: Viewport, hierarchy, and inspector context menus all offer unified + Add Component... expanding presets."""
+        """Issue #65: Viewport, hierarchy, and inspector context menus all offer unified + Add Item... expanding presets."""
         ed = self.editor
         unit = self.runtime.create(parent=ed.game, name="UnifiedUnit", x=0.0, y=0.0, w=2.0, h=2.0)
         self.select(unit)
@@ -2510,11 +2510,11 @@ class EditorTests(unittest.TestCase):
         vp_menu = ed.app.items.target("context_menu")
         self.assertIsNotNone(vp_menu)
         vp_texts = [c.items.get_value("text", "") for c in vp_menu.children if c.items.has_value("text")]
-        self.assertIn("+ Add Component...", vp_texts)
+        self.assertIn("+ Add Item...", vp_texts)
         self.assertNotIn("+ Add Pos (x, y)", vp_texts)  # Inlined items removed
 
-        # Click + Add Component... and verify presets expand
-        add_btn = next(c for c in vp_menu.children if c.items.get_value("text") == "+ Add Component...")
+        # Click + Add Item... and verify presets expand
+        add_btn = next(c for c in vp_menu.children if c.items.get_value("text") == "+ Add Item...")
         self.click(add_btn)
         vp_submenu = ed.app.items.target("context_menu")
         self.assertIsNotNone(vp_submenu)
@@ -2530,7 +2530,7 @@ class EditorTests(unittest.TestCase):
         h_menu = ed.app.items.target("context_menu")
         self.assertIsNotNone(h_menu)
         h_texts = [c.items.get_value("text", "") for c in h_menu.children if c.items.has_value("text")]
-        self.assertIn("+ Add Component...", h_texts)
+        self.assertIn("+ Add Item...", h_texts)
         self.assertNotIn("+ Add Pos (x, y)", h_texts)
 
     def test_code_editor_path_field_readonly_and_toolbar_hidden(self):
