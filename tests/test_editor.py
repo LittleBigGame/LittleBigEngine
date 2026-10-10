@@ -263,8 +263,8 @@ class EditorTests(unittest.TestCase):
                           if kwargs.get('key') == (ed.file_explorer.id,'border',0))
         self.assertEqual(top_border[1], group.tab_bar_rect[1]+group.tab_bar_rect[3])
         drawn = [args[0] for args,kwargs in self.graphics.texts
-                 if kwargs.get('key') == (ed.add_system_button.id,'text')]
-        self.assertEqual(drawn, ['+ Attach'])
+                 if kwargs.get('key') == (ed.add_comp_menu_button.id,'text')]
+        self.assertEqual(drawn, ['+ Add'])
 
     def test_viewport_content_is_separate_from_tabs_and_hidden_rendering_stops(self):
         ed = self.editor
@@ -1577,7 +1577,7 @@ class EditorTests(unittest.TestCase):
 
         # Check section header COMPONENTS and divider
         self.assertTrue(ed.components_title.visible)
-        self.assertIn("COMPONENTS", ed.components_title.items.get_value("text"))
+        self.assertIn("ITEMS", ed.components_title.items.get_value("text"))
         self.assertTrue(ed.add_comp_menu_button.visible)
         self.assertLess(ed.divider_identity.y, ed.components_title.y)
 

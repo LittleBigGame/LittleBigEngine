@@ -434,7 +434,7 @@ def initialize():
     state.quick_speed_btn = state.ui.button(state.inspector, 'QuickSpeedBtn', 'speed', quick_add_speed, color=PANEL, hover_color=(45, 60, 80))
     state.quick_preset_chips = [state.quick_pos_btn, state.quick_size_btn, state.quick_vel_btn, state.quick_color_btn, state.quick_speed_btn]
     state.quick_add_chip_btn = state.ui.button(state.inspector, 'QuickAddChip', '+', open_add_chip_menu, color=PANEL, hover_color=(45, 60, 80))
-    state.components_title = state.ui.button(state.inspector, 'ComponentsTitle', '▼ COMPONENTS', lambda: toggle_section('components'), color=PANEL, hover_color=(38, 50, 66))
+    state.components_title = state.ui.button(state.inspector, 'ItemsTitle', '▼ ITEMS', lambda: toggle_section('items'), color=PANEL, hover_color=(38, 50, 66))
     state.add_comp_menu_button = state.ui.button(state.inspector, 'AddCompMenuBtn', '+ Add', open_add_component_menu)
     state.divider_identity = state.ui.create(state.inspector, 'DividerIdentity', 'rect', color=(38, 48, 62), layer=2)
     state.divider_components = state.ui.create(state.inspector, 'DividerComponents', 'rect', color=(38, 48, 62), layer=2)
@@ -1244,11 +1244,14 @@ def on_asset_drop(asset_drag, event):
 
     # 4. Dropped on Inspector
     if hasattr(state, "inspector") and contains(state.inspector, mx, my):
-        tgt = selected()
+        tgt = inspected()
         if tgt:
-            sys_y = getattr(getattr(state, "system_label", None), "y", state.inspector.y + state.inspector.h / 2)
-            target_area = "systems" if my >= sys_y else "components"
-            apply_asset_to_entity(tgt, asset_drag, target_area=target_area)
+            component_identity = None
+            for label, field in state.component_rows:
+                if field.visible and contains(field, mx, my) and field.items.get_value('component_key'):
+                    component_identity = field.items.require_value('item_id')
+                    break
+            apply_asset_to_entity(tgt, asset_drag, component_identity=component_identity)
         return
 
     # 5. Dropped on File Explorer
@@ -1342,15 +1345,27 @@ def on_entity_drop(entity_drag, event):
         return
 
 
-def apply_asset_to_entity(tgt, asset_drag, target_area=None):
+def apply_asset_to_entity(tgt, asset_drag, component_identity=None):
     from lbe.assets import AssetRef
     atype = asset_drag.get("type")
     uid = asset_drag.get("id")
     name = asset_drag.get("name", "asset")
     path_str = asset_drag.get("path")
 
+    if component_identity is not None:
+        from dataclasses import replace
+        from lbe import InheritedComponent
+        record = tgt[component_identity]
+        value = AssetRef(id=uid, type=atype, name=name)
+        changed = (replace(record, patch=({'op': 'replace', 'value': value},))
+                   if isinstance(record, InheritedComponent) else replace(record, value=value))
+        tgt.items.replace(component_identity, changed)
+        save_editor_project()
+        inspector_sync()
+        return
+
     if atype == "system" and path_str:
-        if target_area == "systems" or target_area is None:
+        if path_str:
             path = (state.project / path_str).resolve()
             if path.exists():
                 definition = state.runtime.assets.system(path)
@@ -1362,14 +1377,6 @@ def apply_asset_to_entity(tgt, asset_drag, target_area=None):
                 inspector_sync()
                 message(f"Attached system '{path.stem}' to {tgt.items.get_value('name', tgt.id)}")
                 return
-        else:
-            ref = AssetRef(id=uid, type="system", name=name)
-            comp_name = Path(path_str).stem if path_str else "system"
-            tgt.items.set_value(comp_name, ref)
-            save_editor_project()
-            inspector_sync()
-            message(f"Added system component '{comp_name}' on {tgt.items.get_value('name', tgt.id)}")
-            return
 
     if atype == "image":
         ref = AssetRef(id=uid, type="image", name=name)
@@ -1594,7 +1601,7 @@ def bind_actions():
                             (state.quick_color_btn, lambda: apply_quick_preset("color")),
                             (state.quick_speed_btn, lambda: apply_quick_preset("speed")),
                             (state.quick_add_chip_btn, open_add_chip_menu),
-                            (state.components_title, lambda: toggle_section("components")),
+                            (state.components_title, lambda: toggle_section("items")),
                             (state.add_comp_menu_button, open_add_component_menu),
                             (state.system_label, lambda: toggle_section("systems")),
                             (state.add_system_button, open_attach_system_menu),
@@ -1611,11 +1618,6 @@ def bind_actions():
     state.inspector_scroll_thumb.on_drag = inspector_scroll_drag
     for row in state.hierarchy_rows:
         row.on_click = hierarchy_click
-    for label, field in state.component_rows:
-        label.on_commit = lambda lbl=label: commit_component_key(lbl)
-        label.on_click = component_click
-        field.on_commit = lambda field=field: commit_component(field)
-        field.on_click = component_click
     for button in state.system_rows:
         button.items.remove_value("system_key", None)
     for button in state.system_edit_buttons:
@@ -1782,6 +1784,8 @@ def context_target(control, event):
 
     if control.items.has_value('preset_key'):
         return dict(preset=control.items.require_value('preset_key'), control=control)
+    if control.items.has_value('item_id') and control.items.has_link('target'):
+        return dict(entity=control.items.require_target('target'), item=control.items.require_value('item_id'), control=control)
     if control.items.has_value('system_key'):
         owner_id, sys_name = control.items.require_value('system_key')
         owner = next((e for e in state.runtime.entities if e.id == owner_id), None)
@@ -1828,6 +1832,18 @@ def context_target(control, event):
 def context_actions(target):
     if target is None:
         return []
+    if isinstance(target, dict) and 'item' in target:
+        from lbe import Component, InheritedComponent
+        owner, identity = target['entity'], target['item']
+        item = owner[identity]
+        if isinstance(item, (Component, InheritedComponent)):
+            return context_actions(dict(entity=owner, component=item.name))
+        return [
+            dict(label=type(item).__name__ + ': ' + item.name, run=None),
+            dict(label='Rename item', run=lambda _: state.focus_item(owner, identity)),
+            dict(label='Item actions / target...', run=lambda _: state.open_item_menu(owner, identity, target['control'])),
+            dict(label='Copy item UUID', run=lambda _: state.window.set_clipboard_text(str(identity))),
+        ]
     if isinstance(target, dict) and target.get('deep'):
         stack = target.get('stack', [])
         leaf_ent = target.get('entity')

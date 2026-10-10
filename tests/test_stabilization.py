@@ -196,7 +196,8 @@ class EditorContracts(TestCase):
         self.send(('key', 'S', True, False))
         row = next(row for row in ed.hierarchy_rows if row.visible and row.items.target('target') is ed.game)
         self.send(('click', row.x + row.w / 2, row.y + row.h / 2, 1, 0, 2))
-        self.click(ed.add_system_button)
+        self.click(ed.add_comp_menu_button)
+        self.click(self.menu_item('System /'))
         self.click(self.menu_item('physics'))
         self.assertIn('physics', ed.game.items.behaviour_dict('system'))
         before = moving.x

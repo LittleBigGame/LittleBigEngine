@@ -4,7 +4,7 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-from lbe import InheritedComponent, Tag
+from lbe import Component, InheritedComponent, Tag, Relation, SystemDefinition
 from lbe.desktop import Input
 from lbe.project import load_project, template_path
 from lbe.text import TextBuffer
@@ -32,6 +32,93 @@ class KernelEditorTests(unittest.TestCase):
         app = self.editor.app.items.behaviour('app', kind='system').namespace
         action = next(a for a in app['context_actions'](self.editor.game) if a and a['label'] == 'Create walk-and-shoot demo')
         return action['run'](self.editor.game)
+
+    def test_inspector_lists_actual_items_in_canonical_uuid_order(self):
+        target = self.runtime.create(name='Typed', items=(Component('x', 2), Tag('player')))
+        target.items.connect('friend', self.editor.game)
+        behaviour = target.items.attach_system('movement', SystemDefinition('def update(dt): pass'))
+        self.editor.inspect_entity(target)
+        self.runtime.step(0)
+        rows = [(name, data) for name, data in self.editor.component_rows if data.visible]
+        self.assertEqual([data.item_id for _, data in rows], list(target.items))
+        self.assertEqual([name.buffer.text for name, _ in rows], [item.name for item in target.items.values()])
+        self.assertIn('ITEMS', self.editor.components_title.text)
+        self.assertFalse(self.editor.system_label.visible)
+        self.assertFalse(self.editor.links_header.visible)
+        badges = [b for b in self.editor.item_type_buttons if b.visible]
+        self.assertTrue(any('Tag' in b.text and '#' in b.text for b in badges))
+        self.assertTrue(any('System' in b.text and 'λ' in b.text for b in badges))
+        system_field = next(data for _, data in rows if data.item_id == behaviour.id)
+        self.assertTrue(system_field.readonly)
+
+    def test_inspector_tag_pill_renames_actual_uuid_item(self):
+        target = self.runtime.create(items=(Tag('player'),))
+        self.editor.inspect_entity(target)
+        self.runtime.step(0)
+        item = target.items.named(Tag, 'player')
+        name = next(name for name, data in self.editor.component_rows if data.visible and data.item_id == item.id)
+        name.buffer = TextBuffer('hero')
+        name.on_commit()
+        self.assertEqual(target[item.id].name, 'hero')
+        self.assertEqual(target.items.named(Tag, 'hero').id, item.id)
+
+    def test_add_menu_creates_native_tag_and_relationship(self):
+        self.editor.inspect_entity(self.editor.game.children[0])
+        self.editor.open_add_component_menu()
+        menu = self.editor.app.items.require_target('context_menu')
+        action = next(c for c in menu.children if c.items.get_value('text') == '# Tag')
+        self.editor.ui.dispatch(('click', action.x+4, action.y+4, 1))
+        owner = self.editor.inspected()
+        tag = owner.items.named(Tag, 'tag')
+        self.assertEqual(owner[tag.id].name, 'tag')
+        self.assertTrue(any(name.visible and name.item_id == tag.id for name, _ in self.editor.component_rows))
+
+    def test_inspector_uuid_value_edit_preserves_inheritance_and_undo(self):
+        source = self.runtime.create(speed=6.0)
+        target = self.runtime.create()
+        original = target.items.inherit_value('speed', source.items.component('speed').id)
+        self.editor.inspect_entity(target)
+        self.runtime.step(0)
+        field = next(data for _, data in self.editor.component_rows if data.visible and data.item_id == original.id)
+        field.buffer = TextBuffer('9.0')
+        field.on_commit()
+        self.assertEqual(target.items.value(original.id), 9.0)
+        self.assertEqual(source.items.require_value('speed'), 6.0)
+        self.editor.files.history.undo()
+        self.assertEqual(target[original.id], original)
+
+    def test_inspector_retains_missing_relationship_as_visible_item(self):
+        from uuid import uuid4
+        target = self.runtime.create()
+        record = Relation('missing', uuid4())
+        target.items._put(record)
+        self.editor.inspect_entity(target)
+        self.runtime.step(0)
+        field = next(data for _, data in self.editor.component_rows if data.visible and data.item_id == record.id)
+        self.assertIn('Missing Entity', field.buffer.text)
+        self.assertIs(target[record.id], record)
+
+    def test_custom_typed_data_edits_same_uuid_without_core_special_case(self):
+        from dataclasses import dataclass, field
+        from uuid import uuid4
+        @dataclass(frozen=True)
+        class Inventory:
+            name: str
+            contents: tuple
+            capacity: int
+            id: object = field(default_factory=uuid4)
+        original = Inventory('bag', ('key',), 4)
+        target = self.runtime.create(items=(original,))
+        self.editor.inspect_entity(target)
+        self.runtime.step(0)
+        field_control = next(data for _, data in self.editor.component_rows if data.visible and data.item_id == original.id)
+        field_control.buffer = TextBuffer("{'contents': ('key', 'apple'), 'capacity': 5}")
+        field_control.on_commit()
+        self.assertIsInstance(target[original.id], Inventory)
+        self.assertEqual(target[original.id].contents, ('key', 'apple'))
+        self.assertEqual(target[original.id].capacity, 5)
+        self.editor.files.history.undo()
+        self.assertEqual(target[original.id], original)
 
     def test_gui_demo_moves_shoots_expires_and_reopens_with_identity(self):
         player = self.create_demo()
