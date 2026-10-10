@@ -78,11 +78,11 @@ def build_file_tree(project_dir, expanded_folders, view_root=None):
 
 
 def file_view_root():
-    relative = entity.components.get("view_root", "systems/game")
+    relative = entity.items.get_value("view_root", "systems/game")
     root = (state.project / relative).resolve()
     if not root.is_relative_to(state.project) or not root.is_dir():
         root = state.project
-        entity.components["view_root"] = "."
+        entity.items.set_value("view_root", ".")
     return root
 
 
@@ -90,10 +90,10 @@ def set_file_root(path):
     path = Path(path).resolve()
     if not path.is_relative_to(state.project) or not path.is_dir():
         return
-    entity.components["view_root"] = path.relative_to(state.project).as_posix()
-    entity.components["selected_file"] = path.relative_to(state.project).as_posix()
-    entity.components.setdefault("expanded", set()).add(path.relative_to(state.project).as_posix())
-    entity.components["scroll"] = 0
+    entity.items.set_value("view_root", path.relative_to(state.project).as_posix())
+    entity.items.set_value("selected_file", path.relative_to(state.project).as_posix())
+    entity.items.ensure_value("expanded", set()).add(path.relative_to(state.project).as_posix())
+    entity.items.set_value("scroll", 0)
     state.file_tree_key = None
     file_explorer_sync()
 
@@ -105,22 +105,22 @@ def reveal_file(path):
     root = file_view_root()
     while not path.is_relative_to(root) and root != state.project:
         root = root.parent
-    entity.components["view_root"] = root.relative_to(state.project).as_posix()
-    expanded = entity.components.setdefault("expanded", set())
+    entity.items.set_value("view_root", root.relative_to(state.project).as_posix())
+    expanded = entity.items.ensure_value("expanded", set())
     parent = path if path.is_dir() else path.parent
     while parent.is_relative_to(root):
         expanded.add(parent.relative_to(state.project).as_posix())
         if parent == root:
             break
         parent = parent.parent
-    entity.components["selected_file"] = path.relative_to(state.project).as_posix()
-    entity.components["scroll"] = 0
+    entity.items.set_value("selected_file", path.relative_to(state.project).as_posix())
+    entity.items.set_value("scroll", 0)
     state.file_tree_key = None
 
 
 def file_explorer_sync():
     fe = getattr(state, "file_explorer", None)
-    if fe is None or not fe.components.get("visible", True):
+    if fe is None or not fe.items.get_value("visible", True):
         for row in getattr(state, "file_explorer_rows", []):
             put(row, visible=False)
         track = getattr(state, "file_scroll_track", None)
@@ -131,10 +131,10 @@ def file_explorer_sync():
             put(thumb, visible=False)
         return
 
-    expanded = fe.components.setdefault("expanded", set())
-    selection = fe.components.get('selected_file')
-    if selection and fe.components.get('revealed_selection') != selection:
-        fe.components['revealed_selection'] = selection
+    expanded = fe.items.ensure_value("expanded", set())
+    selection = fe.items.get_value('selected_file')
+    if selection and fe.items.get_value('revealed_selection') != selection:
+        fe.items.set_value('revealed_selection', selection)
         reveal_file(state.project / selection)
     root = file_view_root()
     expanded.add(root.relative_to(state.project).as_posix())
@@ -143,16 +143,16 @@ def file_explorer_sync():
         state.file_tree_items = build_file_tree(state.project, expanded, root)
         state.file_tree_key = key
     visible_items = state.file_tree_items
-    fe.components["visible_items"] = visible_items
+    fe.items.set_value("visible_items", visible_items)
 
     capacity = int(max(0, (fe.h - 34)) // 22)
     max_scroll = max(0, len(visible_items) - capacity)
-    if selection and fe.components.get('scrolled_selection') != selection:
-        fe.components['scrolled_selection'] = selection
+    if selection and fe.items.get_value('scrolled_selection') != selection:
+        fe.items.set_value('scrolled_selection', selection)
         index = next((i for i,item in enumerate(visible_items) if item['rel_path'] == selection),0)
         fe.scroll = max(0,index-capacity+1)
 
-    fe.scroll = max(0, min(fe.components.get("scroll", 0), max_scroll))
+    fe.scroll = max(0, min(fe.items.get_value("scroll", 0), max_scroll))
 
     rows = getattr(state, "file_explorer_rows", None)
     if rows is None:
@@ -179,7 +179,7 @@ def file_explorer_sync():
             continue
 
         item = visible_items[source]
-        row.components["file_item"] = item
+        row.items.set_value("file_item", item)
 
         indent = item["depth"] * 14
         arrow = ("▼ " if item["expanded"] else "▶ ") if item["is_dir"] else "  "
@@ -192,7 +192,7 @@ def file_explorer_sync():
             if rx <= mx <= rx + row_w and ry <= my <= ry + 20:
                 is_hovered = True
 
-        selected_file = fe.components.get("selected_file")
+        selected_file = fe.items.get_value("selected_file")
         is_selected = (selected_file == item["rel_path"])
         normal_col = (45, 95, 125) if is_selected else PANEL
         hover_col = (55, 105, 135) if is_selected else (35, 48, 65)
@@ -224,7 +224,7 @@ def file_row_click(row, event):
     if len(event) > 3 and event[3] in (2, 4):
         return False
 
-    item = row.components.get("file_item")
+    item = row.items.get_value("file_item")
     if not item:
         return True
 
@@ -240,7 +240,7 @@ def file_row_click(row, event):
         return True
 
     click_count = event[5] if len(event) >= 6 else 1
-    fe.components["selected_file"] = item["rel_path"]
+    fe.items.set_value("selected_file", item["rel_path"])
     if click_count >= 2:
         if item["type"] in ("system","script"):
             # Open in code editor
@@ -257,9 +257,9 @@ def file_row_click(row, event):
 
 def file_row_drag(row, event):
     """Initiate drag of asset from File Explorer."""
-    if state.app.components.get("asset_drag") is not None:
+    if state.app.items.get_value("asset_drag") is not None:
         return True
-    item = row.components.get("file_item")
+    item = row.items.get_value("file_item")
     if not item or item["is_dir"]:
         return False
 
@@ -269,19 +269,19 @@ def file_row_drag(row, event):
         asset_id = reg.register(item["path"])
         item["asset_id"] = asset_id
 
-    state.app.components["asset_drag"] = {
+    state.app.items.set_value("asset_drag", {
         "id": asset_id,
         "name": item["name"],
         "path": item["rel_path"],
         "type": item["type"],
         "icon": item["icon"],
-    }
+    })
     return True
 
 
 def file_scroll_drag(thumb, event):
     fe = state.file_explorer
-    items = fe.components.get("visible_items", [])
+    items = fe.items.get_value("visible_items", [])
     capacity = int((fe.h - 34) // 22)
     max_scroll = max(0, len(items) - capacity)
     if max_scroll <= 0:
@@ -299,7 +299,7 @@ def file_scroll_drag(thumb, event):
 
 def file_track_click(track, event):
     fe = state.file_explorer
-    items = fe.components.get("visible_items", [])
+    items = fe.items.get_value("visible_items", [])
     capacity = int((fe.h - 34) // 22)
     max_scroll = max(0, len(items) - capacity)
     if max_scroll <= 0 or len(event) < 3:

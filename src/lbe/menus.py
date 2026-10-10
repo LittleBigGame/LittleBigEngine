@@ -5,7 +5,7 @@ from .core import Entity
 
 
 def close_menu(ui):
-    menu = ui.root.relations.pop("context_menu", None)
+    menu = ui.root.items.disconnect("context_menu", None)
     if menu is not None:
         ui.runtime.destroy(menu)
 
@@ -21,7 +21,7 @@ def open_menu(ui, target, x, y, actions=None):
         actions = []
         owners = (ui.root,) if target is ui.root else (ui.root, target)
         for owner in owners:
-            provider = getattr(owner, "components", {}).get("context_actions")
+            provider = owner.items.get_value("context_actions") if isinstance(owner, Entity) else None
             if provider:
                 actions.extend(provider(target))
     actions = [dict(a, enabled=a.get('enabled', True) and callable(a.get('run'))) if a is not None else None
@@ -30,13 +30,13 @@ def open_menu(ui, target, x, y, actions=None):
         return None
     width = min(ui.window.width, max(160, max(len(a["label"]) * ui.pitch + 24 for a in actions if a) if any(actions) else 160))
     height = min(ui.window.height, 8 + sum(8 if a is None else 28 for a in actions))
-    layer = max((e.components.get("layer", 2) for e in ui.controls()), default=2) + 10
+    layer = max((e.items.get_value("layer", 2) for e in ui.controls()), default=2) + 10
     menu = ui.create(ui.root, "ContextMenu", "panel", w=width, h=height,
                      x=max(0, min(x, ui.window.width-width)),
                      y=max(0, min(y, ui.window.height-height)), layer=layer,
                      context_target=target, active=-1, padding=4, gap=0,
                      ignore_layout=True, modal=True, offset=0)
-    ui.root.relations["context_menu"] = menu
+    ui.root.items.connect("context_menu", menu)
     for action in actions:
         if action is None:
             ui.create(menu, "Separator", "rect", h=8, w=width-8, layer=layer+1)
@@ -72,13 +72,13 @@ def _activate(ui, menu, item):
 
 def dispatch_menu(ui, event):
     """Capture popup input before application callbacks and normal controls."""
-    menu = ui.root.relations.get("context_menu")
+    menu = ui.root.items.target("context_menu")
     kind = event[0]
     if menu is not None:
         if isinstance(menu.context_target, Entity) and not menu.context_target.alive:
             close_menu(ui)
             return True
-        items = [c for c in menu.children if "menu_action" in c.components]
+        items = [c for c in menu.children if c.items.has_value("menu_action")]
         if kind == "motion":
             menu.active = next((i for i, item in enumerate(items)
                                 if item.visible and contains(item, event[1], event[2])
@@ -120,7 +120,7 @@ def dispatch_menu(ui, event):
     controls.reverse()
     controls.sort(key=lambda c: (c.layer, c.depth), reverse=True)
     target = controls[0] if controls else ui.root
-    resolver = ui.root.components.get("context_target")
+    resolver = ui.root.items.get_value("context_target")
     if resolver:
         target = resolver(target, event)
     open_menu(ui, target, event[1], event[2])

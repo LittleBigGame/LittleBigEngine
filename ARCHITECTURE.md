@@ -10,6 +10,55 @@ Entities provide identity, arbitrary components, tags, relations and hierarchy.
 Components are normally flat values, accessible through attributes or a mapping.
 Component storage remains the source of truth for derived indexes and views.
 
+### UUID-keyed item storage and linking
+
+The native mutation boundary is `entity.items`: UUID-selected add/remove,
+replacement, rename, behaviour reload and ordering update the actual records
+and their lifecycle/change observations. Application-defined typed records are
+accepted without adding Entity fields. Type/MRO indexes are disposable views
+rebuilt from the UUID dictionary; they retain canonical record order after edits.
+Named value/link helpers operate on those records, and `value_dict()` returns a
+disposable snapshot, not writable authoritative state. Engine UI, editor template
+and backend component consumers now use these native item operations. The older
+dynamic data attributes still exist at this intermediate checkpoint; their
+removal is outstanding cutover work. The inspector now binds one ordered list
+directly to the actual item UUIDs, with editable names and type-coloured symbol
+badges. `Entity.components`, `Entity.tags`, `Entity.relations`, `Entity.systems`
+and `Entity.scripts`, their storage slots and their projection classes have been
+removed. Tags, links and behaviours are actual UUID records; named helpers mutate those
+records and maintain the disposable incoming-link index. `Runtime.create(items=...)`
+accepts actual typed UUID records; the old `components=` argument is rejected.
+
+On `codex/uuid-kernel-gui`, entity data is owned by one UUID-keyed `Items` store.
+Named behaviour queries return disposable snapshots, not mutable collections.
+Attachment/removal, reload, source relocation and file-history recovery use
+item UUIDs at the mutation boundary. Execution namespaces no longer inject a
+mutable `systems` collection. Source-asset identity is distinct from attachment
+identity; script name edits do not invalidate UUID or source-asset bindings.
+Runtime entity resolution accepts exact UUIDs only. Friendly-name search belongs
+to authoring/editor navigation, not identity resolution; names cannot shadow
+another object's UUID, and unresolved lookup never creates a blank entity.
+Components, inherited declarations, tags, relation/parent links and
+behavior attachments have persistent UUIDs; links store target UUIDs. Name/type
+indexes and ordered child adjacency are derived runtime state.
+
+Inherited declarations retain a source UUID plus explicit operations; resolved
+values are derived private copies. The linker maintains object/dependency indexes
+and runtime-scoped slot/generation handles, not another authoritative model.
+Project v4 contains only Entity UUIDs and UUID-keyed typed item dictionaries.
+There are no named collection projections, migration functions, or separate
+pending parent/relation/system/script dictionaries. Unresolved links remain
+actual identified items; unresolved behaviours contain a `StoredSource`
+authoring declaration until compilation can succeed. Restoration retains
+diagnostics only. Registered application dataclasses can use native item codecs
+without extending Entity or Core. Restore registers all objects before linking,
+compiles all available sources, initializes all behaviours, then starts them.
+Older project formats are explicitly rejected before template installation,
+recovery, user-state changes or saves; existing project files are not converted.
+`<|Type:uuid|>` source references are lexically lowered outside strings/comments.
+The editor displays typed reference pills, identity menus and inheritance controls.
+See [UUID kernel guide](docs/UUID_KERNEL_GUIDE.md) for APIs, GUI usage and limits.
+
 ## Hierarchy and queries
 
 Hierarchy organizes entities and establishes query boundaries. It does not imply
@@ -38,9 +87,14 @@ project directory.
 The editor's architecture is decomposed into modular attached systems:
 - `hierarchy.py` attached to the hierarchy panel entity drives tree traversal,
   expansion toggles, and row recycling.
-- `inspector.py` attached to the inspector panel entity drives collapsible sections,
-  inline component renaming, quick-add preset menus, component type conversions,
-  and system/relation links.
+- `inspector.py` attached to the inspector panel entity drives one collapsible
+  UUID-item list. Component values, inherited patches, tags, relationships,
+  parent links, behaviours and custom dataclass data share the same row binding.
+  Item names and data edits target UUIDs; types have symbols and colours. A single
+  Add menu creates items, data rows open behaviour source or linked entities,
+  and type badges open UUID-selected item actions. Child navigation and affecting
+  behaviours remain derived views in the Entity identity menu, not fake owned
+  items. Former systems/link sections and their text-form controls are removed.
 - `code_editor.py` attached to the code panel provides syntax highlighting, diagnostics,
   bracket matching, and off-thread autocomplete and hover inspections.
 - `render.py` attached to the game entity renders the scene through the camera view.
@@ -158,4 +212,5 @@ script exceptions are caught at the backend boundary and emitted as
 `script.error` changes with source attribution. Editor templates consume those
 records to open the log panel. Persistence retains script UUIDs and source paths.
 The runtime does not schedule scripts automatically or add domain-specific
-rendering semantics. Legacy named system attachments remain compatible.
+rendering semantics. Behaviours are actual identified items; named lookup is a
+derived convenience over those records, not an authoritative attachment collection.

@@ -9,9 +9,11 @@ from time import monotonic
 from .syntax import slice_spans
 from .text import TextBuffer
 
-ASSET_PATTERN = re.compile(
+_LEGACY_ASSET_PATTERN = re.compile(
     r'(?:asset|resolve)\(\s*["\']([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})["\']\s*\)|assets\[\s*["\']([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})["\']\s*\]'
 )
+from .references import REFERENCE_PATTERN, source_references, reference_label
+ASSET_PATTERN = re.compile(_LEGACY_ASSET_PATTERN.pattern + '|' + REFERENCE_PATTERN.pattern)
 
 def reference_matches(text):
     """Recognize reference calls only in Python code, never inside comments or strings."""
@@ -25,6 +27,7 @@ def reference_matches(text):
                 names.add(offsets[token.start[0] - 1] + token.start[1])
     except (tokenize.TokenError, IndentationError):
         pass
+    names.update(reference.start for reference in source_references(text))
     return tuple(match for match in ASSET_PATTERN.finditer(text) if match.start() in names)
 
 
@@ -50,8 +53,8 @@ STACK_COLORS = [
 def put(entity, **values):
     """Set changed scalar/control properties without redundant notifications."""
     for key, value in values.items():
-        if entity.components.get(key) != value:
-            entity.components[key] = value
+        if entity.items.get_value(key) != value:
+            entity.items.set_value(key, value)
 
 
 def bind_callbacks(system, target, callbacks):
@@ -69,9 +72,9 @@ def bind_callbacks(system, target, callbacks):
             if getattr(target, name, None) is callback:
                 delattr(target, name)
         for control in (system.entity,) + system.entity.descendants:
-            for key, callback in tuple(control.components.items()):
+            for key, callback in tuple(control.items.value_dict().items()):
                 if callable(callback) and getattr(callback, "__globals__", None) is system.namespace:
-                    del control.components[key]
+                    control.items.remove_value(key)
     return release
 
 
@@ -105,7 +108,7 @@ def parse_box(value, default=0):
 
 def content_rect(entity):
     """Return the content bounding box (x, y, w, h) of an entity inside its padding."""
-    top, right, bottom, left = parse_box(entity.components.get("padding", 0) if hasattr(entity, "components") else 0)
+    top, right, bottom, left = parse_box(entity.items.get_value("padding", 0) if hasattr(entity, "items") else 0)
     x = entity.x + left
     y = entity.y + top
     w = max(0, entity.w - left - right)
@@ -118,7 +121,7 @@ def stack(parent, children=None, *, axis="y", gap=None, padding=None, align=None
     if axis not in ("x", "y"):
         raise ValueError("axis must be x or y")
     if children is None:
-        children = [c for c in parent.children if c.components.get("visible", True) and not c.components.get("ignore_layout", False)]
+        children = [c for c in parent.children if c.items.get_value("visible", True) and not c.items.get_value("ignore_layout", False)]
     else:
         children = list(children)
     if not children:
@@ -126,30 +129,30 @@ def stack(parent, children=None, *, axis="y", gap=None, padding=None, align=None
 
     if padding is not None:
         pad_top, pad_right, pad_bottom, pad_left = parse_box(padding)
-    elif hasattr(parent, "components") and "padding" in parent.components:
-        pad_top, pad_right, pad_bottom, pad_left = parse_box(parent.components["padding"])
+    elif hasattr(parent, "items") and parent.items.has_value("padding"):
+        pad_top, pad_right, pad_bottom, pad_left = parse_box(parent.items.require_value("padding"))
     else:
         pad_top, pad_right, pad_bottom, pad_left = parse_box(8)
 
-    gap_val = gap if gap is not None else (parent.components.get("gap", 8) if hasattr(parent, "components") else 8)
+    gap_val = gap if gap is not None else (parent.items.get_value("gap", 8) if hasattr(parent, "items") else 8)
 
     parent_w = getattr(parent, "w", 0)
     parent_h = getattr(parent, "h", 0)
     content_w = max(0, parent_w - pad_left - pad_right)
     content_h = max(0, parent_h - pad_top - pad_bottom)
 
-    flex_children = [c for c in children if hasattr(c, "components") and c.components.get("flex", 0) > 0]
+    flex_children = [c for c in children if hasattr(c, "items") and c.items.get_value("flex", 0) > 0]
     if flex_children:
-        total_flex = sum(c.components.get("flex", 1) for c in flex_children)
+        total_flex = sum(c.items.get_value("flex", 1) for c in flex_children)
         if total_flex > 0:
             if axis == "x" and content_w > 0:
-                fixed = sum(c.w + parse_box(c.components.get("margin", 0))[3] + parse_box(c.components.get("margin", 0))[1]
+                fixed = sum(c.w + parse_box(c.items.get_value("margin", 0))[3] + parse_box(c.items.get_value("margin", 0))[1]
                             for c in children if c not in flex_children)
                 total_gaps = (len(children) - 1) * gap_val
-                flex_margins = sum(parse_box(c.components.get("margin", 0))[3] + parse_box(c.components.get("margin", 0))[1]
+                flex_margins = sum(parse_box(c.items.get_value("margin", 0))[3] + parse_box(c.items.get_value("margin", 0))[1]
                                    for c in flex_children)
                 rem = max(0, content_w - fixed - total_gaps - flex_margins)
-                weights = [c.components.get("flex", 1) for c in flex_children]
+                weights = [c.items.get_value("flex", 1) for c in flex_children]
                 exact = [rem * w / total_flex for w in weights]
                 base = [int(s) for s in exact]
                 leftover = rem - sum(base)
@@ -159,13 +162,13 @@ def stack(parent, children=None, *, axis="y", gap=None, padding=None, align=None
                 for c, size in zip(flex_children, base):
                     put(c, w=max(0, size))
             elif axis == "y" and content_h > 0:
-                fixed = sum(c.h + parse_box(c.components.get("margin", 0))[0] + parse_box(c.components.get("margin", 0))[2]
+                fixed = sum(c.h + parse_box(c.items.get_value("margin", 0))[0] + parse_box(c.items.get_value("margin", 0))[2]
                             for c in children if c not in flex_children)
                 total_gaps = (len(children) - 1) * gap_val
-                flex_margins = sum(parse_box(c.components.get("margin", 0))[0] + parse_box(c.components.get("margin", 0))[2]
+                flex_margins = sum(parse_box(c.items.get_value("margin", 0))[0] + parse_box(c.items.get_value("margin", 0))[2]
                                    for c in flex_children)
                 rem = max(0, content_h - fixed - total_gaps - flex_margins)
-                weights = [c.components.get("flex", 1) for c in flex_children]
+                weights = [c.items.get_value("flex", 1) for c in flex_children]
                 exact = [rem * w / total_flex for w in weights]
                 base = [int(s) for s in exact]
                 leftover = rem - sum(base)
@@ -177,8 +180,8 @@ def stack(parent, children=None, *, axis="y", gap=None, padding=None, align=None
 
     offset = pad_left if axis == "x" else pad_top
     for child in children:
-        m_top, m_right, m_bottom, m_left = parse_box(child.components.get("margin", 0) if hasattr(child, "components") else 0)
-        c_align = child.components.get("align", align) if hasattr(child, "components") else align
+        m_top, m_right, m_bottom, m_left = parse_box(child.items.get_value("margin", 0) if hasattr(child, "items") else 0)
+        c_align = child.items.get_value("align", align) if hasattr(child, "items") else align
 
         if axis == "x":
             child_x = parent.x + offset + m_left
@@ -233,12 +236,12 @@ def column(parent, children=None, *, gap=None, padding=None, align=None):
 def dock(parent, children=None, *, padding=None):
     """Arrange child entities by docking edges (top, bottom, left, right, fill, float/none)."""
     if children is None:
-        children = [c for c in parent.children if c.components.get("visible", True) and not c.components.get("ignore_layout", False)]
+        children = [c for c in parent.children if c.items.get_value("visible", True) and not c.items.get_value("ignore_layout", False)]
     else:
         children = list(children)
 
     pad_top, pad_right, pad_bottom, pad_left = parse_box(
-        padding if padding is not None else parent.components.get("padding", 0) if hasattr(parent, "components") else 0
+        padding if padding is not None else parent.items.get_value("padding", 0) if hasattr(parent, "items") else 0
     )
 
     cur_x = parent.x + pad_left
@@ -247,33 +250,33 @@ def dock(parent, children=None, *, padding=None):
     cur_h = max(0, parent.h - pad_top - pad_bottom)
 
     for child in children:
-        mode = child.components.get("dock") if hasattr(child, "components") else None
+        mode = child.items.get_value("dock") if hasattr(child, "items") else None
         if mode in ("float", "none", None):
-            if hasattr(child, "components") and "rel_x" in child.components and "rel_y" in child.components:
-                put(child, x=parent.x + child.components["rel_x"], y=parent.y + child.components["rel_y"])
+            if hasattr(child, "items") and child.items.has_value("rel_x") and child.items.has_value("rel_y"):
+                put(child, x=parent.x + child.items.require_value("rel_x"), y=parent.y + child.items.require_value("rel_y"))
             continue
 
-        m_top, m_right, m_bottom, m_left = parse_box(child.components.get("margin", 0) if hasattr(child, "components") else 0)
+        m_top, m_right, m_bottom, m_left = parse_box(child.items.get_value("margin", 0) if hasattr(child, "items") else 0)
 
         if mode == "top":
-            h = child.components.get("h", child.h)
+            h = child.items.get_value("h", child.h)
             put(child, x=cur_x + m_left, y=cur_y + m_top, w=max(0, cur_w - m_left - m_right), h=h)
             advance = h + m_top + m_bottom
             cur_y += advance
             cur_h = max(0, cur_h - advance)
         elif mode == "bottom":
-            h = child.components.get("h", child.h)
+            h = child.items.get_value("h", child.h)
             advance = h + m_top + m_bottom
             cur_h = max(0, cur_h - advance)
             put(child, x=cur_x + m_left, y=cur_y + cur_h + m_top, w=max(0, cur_w - m_left - m_right), h=h)
         elif mode == "left":
-            w = child.components.get("w", child.w)
+            w = child.items.get_value("w", child.w)
             put(child, x=cur_x + m_left, y=cur_y + m_top, w=w, h=max(0, cur_h - m_top - m_bottom))
             advance = w + m_left + m_right
             cur_x += advance
             cur_w = max(0, cur_w - advance)
         elif mode == "right":
-            w = child.components.get("w", child.w)
+            w = child.items.get_value("w", child.w)
             advance = w + m_left + m_right
             cur_w = max(0, cur_w - advance)
             put(child, x=cur_x + cur_w + m_left, y=cur_y + m_top, w=w, h=max(0, cur_h - m_top - m_bottom))
@@ -283,7 +286,7 @@ def dock(parent, children=None, *, padding=None):
 
 def apply_layout(entity, recursive=False):
     """Apply layout to entity based on its layout component ('dock', 'column', 'row', etc.)."""
-    mode = entity.components.get("layout") if hasattr(entity, "components") else None
+    mode = entity.items.get_value("layout") if hasattr(entity, "items") else None
     if mode == "dock":
         dock(entity)
     elif mode in ("column", "stack", "stack_y"):
@@ -293,7 +296,7 @@ def apply_layout(entity, recursive=False):
 
     if recursive:
         for child in entity.children:
-            if hasattr(child, "components") and "layout" in child.components:
+            if hasattr(child, "items") and child.items.has_value("layout"):
                 apply_layout(child, recursive=True)
 
 
@@ -307,7 +310,7 @@ class Layout:
 
     def install(self, name="layout"):
         from .systems import SystemDefinition
-        return self.entity.systems.attach(name, SystemDefinition(
+        return self.entity.items.attach_system(name, SystemDefinition(
             'from lbe.ui import apply_layout\ndef update(dt):\n    apply_layout(entity, recursive=True)\n',
             '<layout>'))
 
@@ -334,19 +337,19 @@ class UI:
         self.line_height = line_height
 
     def install(self, name="ui", definition=None):
-        self.root.components["ui"] = self
+        self.root.items.set_value("ui", self)
         definition = definition or self.runtime.assets.system(Path(__file__).parent / "scripts" / "ui.py")
-        return self.root.systems.attach(name, definition)
+        return self.root.items.attach_system(name, definition)
 
     @property
     def focused(self):
-        return self.root.relations.get("focus")
+        return self.root.items.target("focus")
 
     def focus(self, control=None):
         if control is None:
-            self.root.relations.pop("focus", None)
+            self.root.items.disconnect("focus", None)
         else:
-            self.root.relations["focus"] = control
+            self.root.items.connect("focus", control)
 
     def controls(self):
         if not getattr(self.root, "alive", False):
@@ -354,7 +357,7 @@ class UI:
         return self.root.query(tags="ui", recursive=True)
 
     def visible(self, control):
-        return all(e.components.get("visible", True) for e in (control,)+control.ancestors)
+        return all(e.items.get_value("visible", True) for e in (control,)+control.ancestors)
 
     def create(self, parent, name, kind, **values):
         defaults = dict(name=name, x=0, y=0, w=0, h=0, visible=True, layer=2, color=PANEL)
@@ -400,8 +403,8 @@ class UI:
         values.setdefault("line_height", self.line_height)
         control = self.create(parent, name, "multiline", **values)
         bundled = Path(__file__).parent / "scripts" / "text_area.py"
-        if bundled.exists() and "text_area" not in control.systems:
-            control.systems.attach("text_area", self.runtime.assets.system(bundled))
+        if bundled.exists() and not control.items.has_behaviour("text_area", kind='system'):
+            control.items.attach_system("text_area", self.runtime.assets.system(bundled))
         return control
 
     def set_text(self, field, text):
@@ -420,9 +423,9 @@ class UI:
                 if not getattr(self.root, "alive", False):
                     return
                 message = f"{type(error).__name__}: {error}"
-                self.root.components["ui_error"] = message
+                self.root.items.set_value("ui_error", message)
                 self.runtime.events.emit('ui.error', message)
-                callback = self.root.components.get("on_ui_error")
+                callback = self.root.items.get_value("on_ui_error")
                 if callback:
                     callback(message)
             if not getattr(self.root, "alive", False):
@@ -430,11 +433,11 @@ class UI:
         if not getattr(self.root, "alive", False):
             return
         # Continuous selection drag autoscroll when mouse is held outside multiline control
-        text_drag = self.root.relations.get("text_drag")
+        text_drag = self.root.items.target("text_drag")
         if text_drag is not None and self.visible(text_drag) and hasattr(self, "mouse_pos"):
             mx, my = self.mouse_pos
-            pitch = text_drag.components.get("pitch", self.pitch)
-            line = text_drag.components.get("line_height", self.line_height)
+            pitch = text_drag.items.get_value("pitch", self.pitch)
+            line = text_drag.items.get_value("line_height", self.line_height)
             rows = max(1, int((text_drag.h - 12) // line))
             cols = max(1, int((text_drag.w - 64) // pitch))
             lines_count = len(text_drag.buffer.lines)
@@ -449,20 +452,20 @@ class UI:
                 changed = True
             if changed:
                 text_drag.buffer.reveal(rows, cols)
-                text_drag.components.touch("buffer")
+                text_drag.items.touch_value("buffer")
         for control in tuple(self.controls()):
             if not getattr(self.root, "alive", False):
                 return
-            if "multiline" in control.tags and self.visible(control):
+            if control.items.has_tag("multiline") and self.visible(control):
                 try:
                     self._sync_text(control)
                 except Exception as error:
                     if not getattr(self.root, "alive", False):
                         return
                     message = f"{type(error).__name__}: {error}"
-                    self.root.components["ui_error"] = message
+                    self.root.items.set_value("ui_error", message)
                     self.runtime.events.emit('ui.error', message)
-                    callback = self.root.components.get("on_ui_error")
+                    callback = self.root.items.get_value("on_ui_error")
                     if callback:
                         callback(message)
 
@@ -501,76 +504,76 @@ class UI:
 
         if dispatch_menu(self, event):
             if kind == 'release':
-                self.root.relations.pop('text_drag', None)
+                self.root.items.disconnect('text_drag', None)
                 for name in ('entity_drag', 'asset_drag', 'dock_drag'):
-                    self.root.components.pop(name, None)
-                active_drag = self.root.relations.pop('active_drag', None)
+                    self.root.items.remove_value(name, None)
+                active_drag = self.root.items.disconnect('active_drag', None)
                 if active_drag is not None:
-                    if any(tag in active_drag.tags for tag in ('splitter', 'scrollbar_thumb', 'button', 'chip')):
-                        normal = active_drag.components.get('normal_color', active_drag.components.get('color', FIELD))
+                    if any(active_drag.items.has_tag(tag) for tag in ('splitter', 'scrollbar_thumb', 'button', 'chip')):
+                        normal = active_drag.items.get_value('normal_color', active_drag.items.get_value('color', FIELD))
                         put(active_drag, color=normal)
-                    callback = active_drag.components.get('on_release')
+                    callback = active_drag.items.get_value('on_release')
                     if callback:
                         callback(active_drag, event)
             return
         if kind == "motion":
             mx, my = event[1], event[2]
             for control in self.controls():
-                if ("splitter" in control.tags or "scrollbar_thumb" in control.tags or "button" in control.tags or "chip" in control.tags or "hoverable" in control.tags) and self.visible(control):
-                    active = self.root.relations.get("active_drag")
+                if (control.items.has_tag("splitter") or control.items.has_tag("scrollbar_thumb") or control.items.has_tag("button") or control.items.has_tag("chip") or control.items.has_tag("hoverable")) and self.visible(control):
+                    active = self.root.items.target("active_drag")
                     hovered = (active is control) or (active is None and contains(control, mx, my))
-                    normal = control.components.get("normal_color")
+                    normal = control.items.get_value("normal_color")
                     if normal is None:
-                        normal = control.components.get("color", FIELD)
-                        control.components["normal_color"] = normal
-                    target_color = control.components.get("hover_color", ACCENT) if hovered else normal
+                        normal = control.items.get_value("color", FIELD)
+                        control.items.set_value("normal_color", normal)
+                    target_color = control.items.get_value("hover_color", ACCENT) if hovered else normal
                     if control.color != target_color:
                         control.color = target_color
             return
         if kind == "release":
-            self.root.relations.pop("text_drag", None)
-            entity_drag = self.root.components.pop("entity_drag", None)
+            self.root.items.disconnect("text_drag", None)
+            entity_drag = self.root.items.remove_value("entity_drag", None)
             if entity_drag is not None:
-                cb = self.root.components.get("on_entity_drop")
+                cb = self.root.items.get_value("on_entity_drop")
                 if cb:
                     cb(entity_drag, event)
                 return
-            asset_drag = self.root.components.pop("asset_drag", None)
+            asset_drag = self.root.items.remove_value("asset_drag", None)
             if asset_drag is not None:
-                cb = self.root.components.get("on_asset_drop")
+                cb = self.root.items.get_value("on_asset_drop")
                 if cb:
                     cb(asset_drag, event)
                 return
-            dock_drag = self.root.components.pop("dock_drag", None)
+            dock_drag = self.root.items.remove_value("dock_drag", None)
             if dock_drag is not None:
-                cb = self.root.components.get("on_dock_drop")
+                cb = self.root.items.get_value("on_dock_drop")
                 if cb:
                     cb(dock_drag, event)
                 return
-            active_drag = self.root.relations.pop("active_drag", None)
+            active_drag = self.root.items.disconnect("active_drag", None)
             if active_drag is not None:
-                if "splitter" in active_drag.tags or "scrollbar_thumb" in active_drag.tags or "button" in active_drag.tags or "chip" in active_drag.tags:
-                    normal = active_drag.components.get("normal_color", active_drag.components.get("color", FIELD))
+                if active_drag.items.has_tag("splitter") or active_drag.items.has_tag("scrollbar_thumb") or active_drag.items.has_tag("button") or active_drag.items.has_tag("chip"):
+                    normal = active_drag.items.get_value("normal_color", active_drag.items.get_value("color", FIELD))
                     if active_drag.color != normal:
                         active_drag.color = normal
-                cb = active_drag.components.get("on_release")
+                cb = active_drag.items.get_value("on_release")
                 if cb:
                     cb(active_drag, event)
             return
         if kind == "drag":
-            if self.root.components.get("asset_drag") is not None or self.root.components.get("entity_drag") is not None:
+            if self.root.items.get_value("asset_drag") is not None or self.root.items.get_value("entity_drag") is not None:
                 return
-            dock_drag = self.root.components.get("dock_drag")
+            dock_drag = self.root.items.get_value("dock_drag")
             if dock_drag is not None:
-                cb = self.root.components.get("on_dock_drag")
+                cb = self.root.items.get_value("on_dock_drag")
                 if cb:
                     cb(dock_drag, event)
                 return
-            text_drag = self.root.relations.get("text_drag")
+            text_drag = self.root.items.target("text_drag")
             if text_drag is not None and self.visible(text_drag) and event[3] & 1:
                 mx, my = event[1], event[2]
-                pitch = text_drag.components.get("pitch", self.pitch)
-                line = text_drag.components.get("line_height", self.line_height)
+                pitch = text_drag.items.get_value("pitch", self.pitch)
+                line = text_drag.items.get_value("line_height", self.line_height)
                 rows = max(1, int((text_drag.h - 12) // line))
                 cols = max(1, int((text_drag.w - 64) // pitch))
 
@@ -585,29 +588,29 @@ class UI:
 
                 text_drag.buffer.cursor = self.text_index(text_drag, mx, my)
                 text_drag.buffer.reveal(rows, cols)
-                text_drag.components.touch("buffer")
+                text_drag.items.touch_value("buffer")
                 return
-            active_drag = self.root.relations.get("active_drag")
+            active_drag = self.root.items.target("active_drag")
             if active_drag is not None and self.visible(active_drag):
-                cb = active_drag.components.get("on_drag")
+                cb = active_drag.items.get_value("on_drag")
                 if cb:
                     if cb(active_drag, event) is not False:
                         return
             controls = [e for e in self.controls() if self.visible(e) and contains(e, event[1], event[2])]
-            controls.sort(key=lambda e: (e.components.get("layer", 2), e.depth), reverse=True)
+            controls.sort(key=lambda e: (e.items.get_value("layer", 2), e.depth), reverse=True)
             for control in controls:
-                if "splitter" in control.tags or "scrollbar_thumb" in control.tags:
+                if control.items.has_tag("splitter") or control.items.has_tag("scrollbar_thumb"):
                     continue  # Splitters and scrollbars must be directly clicked/pressed to initiate dragging
-                cb = control.components.get("on_drag")
+                cb = control.items.get_value("on_drag")
                 if cb:
                     if cb(control, event) is not False:
                         return
-                if control.components.get('modal', False):
+                if control.items.get_value('modal', False):
                     return
             return
         if kind in ("click", "scroll"):
             if kind == "click":
-                self.root.relations.pop("text_drag", None)
+                self.root.items.disconnect("text_drag", None)
                 mx, my = event[1], event[2]
                 now = monotonic()
                 last_time, last_x, last_y, last_count, last_ctl = getattr(self, "_click_state", (0, 0, 0, 0, None))
@@ -620,32 +623,32 @@ class UI:
                 self._click_state = (now, mx, my, click_count, None)
                 if len(event) < 6:
                     event = (*event, click_count)
-            self.root.relations.pop("active_drag", None)
+            self.root.items.disconnect("active_drag", None)
             controls = [e for e in self.controls() if self.visible(e) and contains(e, event[1], event[2])]
-            controls.sort(key=lambda e: (e.components.get("layer", 2), e.depth), reverse=True)
+            controls.sort(key=lambda e: (e.items.get_value("layer", 2), e.depth), reverse=True)
             for control in controls:
-                if kind == 'click' and event[3] == 1 and ("splitter" in control.tags or "scrollbar_thumb" in control.tags):
-                    self.root.relations["active_drag"] = control
-                    control.color = control.components.get("hover_color", ACCENT)
-                callback = control.components.get("on_"+kind)
+                if kind == 'click' and event[3] == 1 and (control.items.has_tag("splitter") or control.items.has_tag("scrollbar_thumb")):
+                    self.root.items.connect("active_drag", control)
+                    control.color = control.items.get_value("hover_color", ACCENT)
+                callback = control.items.get_value("on_"+kind)
                 if callback:
                     if callback(control, event) is not False:
                         return
                 if kind == "scroll":
-                    if "multiline" in control.tags:
+                    if control.items.has_tag("multiline"):
                         control.buffer.scroll = max(0, control.buffer.scroll-int(event[4])*3)
-                        control.components.touch("buffer")
+                        control.items.touch_value("buffer")
                         return
                     continue
-                if "button" in control.tags:
+                if control.items.has_tag("button"):
                     self.runtime.events.emit('ui.action', control, getattr(control.action, '__qualname__', type(control.action).__name__))
                     control.action()
                     return
-                if "field" in control.tags and not control.components.get("readonly", False):
+                if control.items.has_tag("field") and not control.items.get_value("readonly", False):
                     self.focus(control)
                     control.buffer.cursor = control.buffer.anchor = len(control.buffer.text)
                     return
-                if "multiline" in control.tags:
+                if control.items.has_tag("multiline"):
                     self.focus(control)
                     click_count = event[5]
                     idx = self.text_index(control, mx, my)
@@ -679,31 +682,31 @@ class UI:
                         if not event[4] & 1:
                             control.buffer.anchor = control.buffer.cursor
                         if event[3] == 1:
-                            self.root.relations["text_drag"] = control
-                    control.components.touch("buffer")
-                    pitch = control.components.get("pitch", self.pitch)
-                    line = control.components.get("line_height", self.line_height)
+                            self.root.items.connect("text_drag", control)
+                    control.items.touch_value("buffer")
+                    pitch = control.items.get_value("pitch", self.pitch)
+                    line = control.items.get_value("line_height", self.line_height)
                     control.buffer.reveal(max(1, int((control.h-12)//line)), max(1, int((control.w-64)//pitch)))
                     return
-                if control.components.get("modal", False):
+                if control.items.get_value("modal", False):
                     return
             return
-        callback = self.root.components.get("on_key")
+        callback = self.root.items.get_value("on_key")
         if kind == "key" and callback and callback(event):
             return
         control = self.focused
-        if control is None or not self.visible(control) or "buffer" not in control.components:
+        if control is None or not self.visible(control) or not control.items.has_value("buffer"):
             return
         if kind == "key":
-            on_key = control.components.get("on_key")
+            on_key = control.items.get_value("on_key")
             if on_key and on_key(control, event):
                 return
         elif kind == "text":
-            on_text = control.components.get("on_text")
+            on_text = control.items.get_value("on_text")
             if on_text and on_text(control, event):
                 return
         buffer = control.buffer
-        multiline = "multiline" in control.tags
+        multiline = control.items.has_tag("multiline")
         if kind == "text":
             if multiline:
                 for m in self.references(control):
@@ -776,14 +779,14 @@ class UI:
             elif key in ("ENTER", "RETURN", "NUM_ENTER"):
                 if multiline:
                     buffer.newline()
-                elif "on_commit" in control.components:
+                elif control.items.has_value("on_commit"):
                     control.on_commit()
                     self.focus()
             elif key == "TAB":
                 if multiline:
                     buffer.indent(dedent=shift)
                 else:
-                    fields = [e for e in self.controls() if "field" in e.tags and self.visible(e) and not e.components.get("readonly", False)]
+                    fields = [e for e in self.controls() if e.items.has_tag("field") and self.visible(e) and not e.items.get_value("readonly", False)]
                     self.focus(fields[(fields.index(control)+(-1 if shift else 1)) % len(fields)])
             elif ctrl and key in ("SLASH", "/"):
                 if multiline and hasattr(buffer, "toggle_comment"):
@@ -791,28 +794,28 @@ class UI:
             elif key == "ESCAPE":
                 self.focus()
         if control.alive:
-            control.components.touch("buffer")
+            control.items.touch_value("buffer")
             if multiline:
-                pitch = control.components.get("pitch", self.pitch)
-                line = control.components.get("line_height", self.line_height)
+                pitch = control.items.get_value("pitch", self.pitch)
+                line = control.items.get_value("line_height", self.line_height)
                 buffer.reveal(max(1, int((control.h-12)//line)), max(1, int((control.w-64)//pitch)))
 
     def text_index(self, control, x=None, y=None):
         if y is None and x is not None:
             control, x, y = self, control, x
-            ui = getattr(control, "root", control).components.get("ui") if hasattr(control, "components") else None
+            ui = getattr(control, "root", control).items.get_value("ui") if hasattr(control, "items") else None
             pitch = getattr(ui, "pitch", PITCH)
             line = getattr(ui, "line_height", LINE)
         else:
-            pitch = control.components.get("pitch", getattr(self, "pitch", PITCH))
-            line = control.components.get("line_height", getattr(self, "line_height", LINE))
+            pitch = control.items.get_value("pitch", getattr(self, "pitch", PITCH))
+            line = control.items.get_value("line_height", getattr(self, "line_height", LINE))
         buffer = control.buffer
         row = max(0, int((y-control.y-6)//line))+buffer.scroll
         column = max(0, round((x-control.x-48)/pitch))+buffer.horizontal
         lines = buffer.lines
         if row < len(lines):
             line_str = lines[row]
-            for m in reference_matches(line_str) if control.components.get("inline_references") else ():
+            for m in reference_matches(line_str) if control.items.get_value("inline_references") else ():
                 s, e = m.span()
                 if s < column < e:
                     column = s if (column - s) < (e - column) else e
@@ -820,18 +823,18 @@ class UI:
         return buffer.index(row, column)
 
     def references(self, control):
-        if not control.components.get("inline_references"):
+        if not control.items.get_value("inline_references"):
             return ()
         text = control.buffer.text
-        cached = control.components.get("reference_cache")
+        cached = control.items.get_value("reference_cache")
         if cached is None or cached[0] != text:
             cached = (text, reference_matches(text))
-            control.components["reference_cache"] = cached
+            control.items.set_value("reference_cache", cached)
         return cached[1]
 
     def _sync_text(self, control):
-        pitch = control.components.get("pitch", self.pitch)
-        line_height = control.components.get("line_height", self.line_height)
+        pitch = control.items.get_value("pitch", self.pitch)
+        line_height = control.items.get_value("line_height", self.line_height)
         buffer = control.buffer
         rows = max(1, int((control.h-12)//line_height))
         columns = max(1, int((control.w-64)//pitch))
@@ -840,10 +843,10 @@ class UI:
         max_col = max((len(l) for l in lines), default=0)
         buffer.horizontal = max(0, min(buffer.horizontal, max(0, max_col-columns)))
         cursor_state = (buffer.text, buffer.cursor)
-        if self.focused is control and control.components.get("_view_cursor") != cursor_state:
+        if self.focused is control and control.items.get_value("_view_cursor") != cursor_state:
             buffer.reveal(rows, columns)
         put(control, _view_cursor=cursor_state)
-        children = {child.components.get("part"): child for child in control.children}
+        children = {child.items.get_value("part"): child for child in control.children}
 
         def part(name, kind, **values):
             if name not in children:
@@ -853,16 +856,16 @@ class UI:
         caret = part("cursor", "rect", color=ACCENT, layer=control.layer+3)
         scroll_track = part("scroll_track", "scrollbar_track", color=(28, 36, 48), layer=control.layer+3)
         scrollbar = part("scrollbar", "scrollbar_thumb", color=(55, 75, 95), hover_color=(75, 115, 155), layer=control.layer+4)
-        scrollbar.tags.add("scrollbar_thumb")
-        scroll_track.tags.add("scrollbar_track")
+        scrollbar.items.add_tag("scrollbar_thumb")
+        scroll_track.items.add_tag("scrollbar_track")
         selection_start, selection_end = buffer.selection
         offset = sum(len(line)+1 for line in lines[:buffer.scroll])
         used = {"cursor", "scrollbar", "scroll_track"}
         reference_starts = {match.start() for match in self.references(control)}
-        line_spans = control.components.get("line_spans")
-        diag = control.components.get("diagnostic")
+        line_spans = control.items.get_value("line_spans")
+        diag = control.items.get_value("diagnostic")
         err_row = (diag.get("line", 0) - 1) if diag else -1
-        matching_brackets = control.components.get("matching_brackets")
+        matching_brackets = control.items.get_value("matching_brackets")
         for index in range(rows):
             row = index+buffer.scroll
             if row >= len(lines):
@@ -897,10 +900,15 @@ class UI:
 
             pill_index = 0
             for m in matches:
-                uid_str = m.group(1) or m.group(2)
+                uid_str = m.group(1) or m.group(2) or m.group(4)
+                reference_kind = m.group(3)
+                valid_reference = True
                 reg = getattr(self.runtime.assets, "registry", None) if hasattr(self.runtime, "assets") else None
                 entry = reg.get(uid_str) if reg else None
-                if entry:
+                if reference_kind:
+                    label, valid_reference = reference_label(self.runtime, reference_kind, uid_str)
+                    pill_label = f" {label} "
+                elif entry:
                     etype = entry.get("type", "asset")
                     if etype in ("system", "script"):
                         pill_label = f" {reg.icon(uid_str)} {entry['name']} "
@@ -924,7 +932,7 @@ class UI:
                             except Exception:
                                 pass
                     if resolved_ent is not None:
-                        ename = resolved_ent.components.get("name") or str(resolved_ent.id)[:8]
+                        ename = resolved_ent.items.get_value("name") or str(resolved_ent.id)[:8]
                         pill_label = f" 🔷 Entity: {ename} "
                     elif m.group(0).startswith(("entity", "resolve", "entity_ref")):
                         pill_label = f" 🔷 Entity: {uid_str[:8]} "
@@ -941,33 +949,36 @@ class UI:
                 pill_index += 1
                 used.add(pill_part_name)
                 pill = part(pill_part_name, "button", layer=control.layer+3)
-                pill.tags.add("asset_pill")
+                pill.items.add_tag("asset_pill")
                 if c_vis_end > c_vis_start and (col_start >= buffer.horizontal or col_end > buffer.horizontal):
                     pill_x = line.x + c_vis_start * pitch
                     span_w = (c_vis_end - c_vis_start) * pitch
                     pill_w = min(max(span_w, len(pill_label) * pitch + 16), control.x + control.w - pill_x - 12)
-                    pill.components["asset_id"] = uid_str
-                    pill.components["asset_token"] = m.group(0)
-                    pill.components["asset_name"] = entry["name"] if entry else pill_label.strip()
-                    pill.components["asset_row"] = row
-                    pill.components["asset_span"] = (col_start, col_end)
-                    pill.components["text_control"] = control
+                    pill.items.set_value("asset_id", uid_str)
+                    pill.items.set_value("reference_kind", reference_kind)
+                    pill.items.set_value("asset_token", m.group(0))
+                    pill.items.set_value("asset_name", entry["name"] if entry else pill_label.strip())
+                    pill.items.set_value("asset_row", row)
+                    pill.items.set_value("asset_span", (col_start, col_end))
+                    pill.items.set_value("text_control", control)
 
-                    if "on_click" not in pill.components:
+                    if not pill.items.has_value("on_click"):
                         def on_pill_click(control, event=None):
-                            target = control.components["text_control"]
+                            target = control.items.require_value("text_control")
                             self.focus(target)
-                            start, end = control.components["asset_span"]
+                            start, end = control.items.require_value("asset_span")
                             column = start if event and event[1] < control.x + control.w / 2 else end
-                            target.buffer.cursor = target.buffer.anchor = target.buffer.index(control.components["asset_row"], column)
-                            target.components.touch("buffer")
-                        pill.components["action"] = on_pill_click
-                        pill.components["on_click"] = on_pill_click
+                            target.buffer.cursor = target.buffer.anchor = target.buffer.index(control.items.require_value("asset_row"), column)
+                            target.items.touch_value("buffer")
+                        pill.items.set_value("action", on_pill_click)
+                        pill.items.set_value("on_click", on_pill_click)
 
                     pill_selected = (selection_start < offset + col_end and selection_end > offset + col_start)
                     pill_col = (60, 110, 165) if pill_selected else (35, 55, 75)
                     pill_hover = (75, 130, 190) if pill_selected else (50, 80, 110)
                     pill_ink = (255, 255, 255, 255) if pill_selected else (230, 245, 255)
+                    if not valid_reference:
+                        pill_col, pill_hover, pill_ink = (75, 30, 35), (110, 40, 45), ERROR
 
                     put(pill, visible=True, x=pill_x, y=y + 1, w=pill_w, h=line_height - 2,
                         text=pill_label, color=pill_col, normal_color=pill_col, hover_color=pill_hover,
@@ -1005,7 +1016,7 @@ class UI:
             else:
                 put(b_part, visible=False)
         for name, child in children.items():
-            if child.components.get("text_part") and name not in used:
+            if child.items.get_value("text_part") and name not in used:
                 put(child, visible=False)
         row, column = buffer.position
         caret_visible = (self.focused is control and
@@ -1030,13 +1041,13 @@ class UI:
                 rel_y = max(0, min(travel, ev[2] - track_y - thumb_h / 2))
                 ratio = rel_y / travel
                 control.buffer.scroll = int(round(ratio * max_scroll))
-                control.components.touch("buffer")
+                control.items.touch_value("buffer")
 
             def on_track_click(tr, ev):
                 click_y = ev[2]
                 curr_thumb_y = thumb_y
                 for c in tr.parent.children:
-                    if c.components.get("part") == "scrollbar":
+                    if c.items.get_value("part") == "scrollbar":
                         curr_thumb_y = c.y
                         break
                 if click_y < curr_thumb_y:
@@ -1045,10 +1056,10 @@ class UI:
                     control.buffer.scroll = min(max_scroll, control.buffer.scroll + rows)
                 else:
                     return
-                control.components.touch("buffer")
+                control.items.touch_value("buffer")
 
-            scrollbar.components["on_drag"] = on_thumb_drag
-            scroll_track.components["on_click"] = on_track_click
+            scrollbar.items.set_value("on_drag", on_thumb_drag)
+            scroll_track.items.set_value("on_click", on_track_click)
             put(scroll_track, visible=True, x=track_x, y=track_y, w=sb_w, h=track_h)
             put(scrollbar, visible=True, x=track_x, y=thumb_y, w=sb_w, h=thumb_h)
         else:
@@ -1061,20 +1072,20 @@ class UI:
             try:
                 if not self.visible(control):
                     continue
-                layer = control.components.get("layer", 2)
-                if "label" not in control.tags:
+                layer = control.items.get_value("layer", 2)
+                if not control.items.has_tag("label"):
                     graphics.rect(control.x, control.y, control.w, control.h, control.color, key=control.id, layer=layer)
-                    framed = any(tag in control.tags for tag in ('panel', 'field')) or ('button' in control.tags and control.color != PANEL)
-                    if control.components.get('bevel', framed):
+                    framed = any(control.items.has_tag(tag) for tag in ('panel', 'field')) or (control.items.has_tag('button') and control.color != PANEL)
+                    if control.items.get_value('bevel', framed):
                         graphics.rect(control.x, control.y, control.w, 1, (*INK[:3], 35), key=(control.id, 'bevel_top'), layer=layer+1)
                         graphics.rect(control.x, control.y+control.h-1, control.w, 1, (*BG, 180), key=(control.id, 'bevel_bottom'), layer=layer+1)
-                    accent = control.components.get('accent_color')
-                    border = control.components.get('border_color')
+                    accent = control.items.get_value('accent_color')
+                    border = control.items.get_value('border_color')
                     if border is not None:
-                        top,right,bottom,left = parse_box(control.components.get('border_inset', 0))
+                        top,right,bottom,left = parse_box(control.items.get_value('border_inset', 0))
                         bx,by = control.x+left,control.y+top
                         bw,bh = max(0,control.w-left-right),max(0,control.h-top-bottom)
-                        thickness = max(1, control.components.get('border_width', 1))
+                        thickness = max(1, control.items.get_value('border_width', 1))
                         if bw and bh:
                             thickness = min(thickness,bw,bh)
                             for edge, (x,y,w,h) in enumerate(((bx,by,bw,thickness),
@@ -1084,8 +1095,8 @@ class UI:
                                 graphics.rect(x,y,w,h,border,key=(control.id,'border',edge),layer=layer+1)
                     if accent is not None:
                         graphics.rect(control.x, control.y+control.h-2, control.w, 2, accent, key=(control.id, 'accent'), layer=layer+1)
-                if "field" in control.tags:
-                    pitch = control.components.get("pitch", self.pitch)
+                if control.items.has_tag("field"):
+                    pitch = control.items.get_value("pitch", self.pitch)
                     buffer = control.buffer
                     width = max(1, int((control.w-12)//pitch))
                     if self.focused is control:
@@ -1099,14 +1110,14 @@ class UI:
                         graphics.rect(control.x+6+(buffer.cursor-buffer.horizontal)*pitch, control.y+4, 1, control.h-8,
                                        ACCENT, key=(control.id, "caret"), layer=layer+2)
                     text = buffer.text.replace("\n", " ")[buffer.horizontal:buffer.horizontal+width]
-                    text = text or control.components.get("hint", "")[:width]
-                    ink = INK if self.focused is control else control.components.get("ink", INK)
+                    text = text or control.items.get_value("hint", "")[:width]
+                    ink = INK if self.focused is control else control.items.get_value("ink", INK)
                     graphics.text(text, control.x+6, control.y+5, color=ink, key=(control.id, "text"), layer=layer+2)
-                elif "text" in control.components:
-                    pitch = control.components.get("pitch", self.pitch)
-                    inset = 8 if "panel" in control.tags or "button" in control.tags else 0
+                elif control.items.has_value("text"):
+                    pitch = control.items.get_value("pitch", self.pitch)
+                    inset = 8 if control.items.has_tag("panel") or control.items.has_tag("button") else 0
                     width = max(1, int((control.w-inset*2)//pitch))
-                    spans = control.components.get("spans")
+                    spans = control.items.get_value("spans")
                     if spans:
                         x_cursor = control.x + inset
                         col = 0
@@ -1114,24 +1125,24 @@ class UI:
                             if col >= width:
                                 break
                             chunk_str = str(chunk)[:width - col]
-                            graphics.text(chunk_str, x_cursor, control.y+(8 if "panel" in control.tags else 4),
+                            graphics.text(chunk_str, x_cursor, control.y+(8 if control.items.has_tag("panel") else 4),
                                           color=ink, key=(control.id, "span", span_idx), layer=layer+1)
                             x_cursor += len(chunk_str) * pitch
                             col += len(chunk_str)
                     else:
-                        graphics.text(str(control.text)[:width], control.x+inset, control.y+(8 if "panel" in control.tags else 4),
-                                      color=control.components.get("ink", INK), key=(control.id, "text"), layer=layer+1)
+                        graphics.text(str(control.text)[:width], control.x+inset, control.y+(8 if control.items.has_tag("panel") else 4),
+                                      color=control.items.get_value("ink", INK), key=(control.id, "text"), layer=layer+1)
             except Exception as error:
                 message = f"{type(error).__name__} in UI.draw: {error}"
-                self.root.components["ui_error"] = message
-                callback = self.root.components.get("on_ui_error")
+                self.root.items.set_value("ui_error", message)
+                callback = self.root.items.get_value("on_ui_error")
                 if callback:
                     callback(message)
 
         is_ctrl = bool(getattr(self.input, "ctrl", False) or getattr(self, "ctrl_held", False))
         if is_ctrl:
             mx, my = getattr(self, "mouse_pos", (getattr(self.input, "x", 0), getattr(self.input, "y", 0)))
-            provider = self.root.components.get("highlight_provider")
+            provider = self.root.items.get_value("highlight_provider")
             if provider:
                 stack = provider(mx, my)
             else:
@@ -1139,7 +1150,7 @@ class UI:
                 stack = []
                 if hits:
                     hits.reverse()
-                    hits.sort(key=lambda c: (c.components.get("layer", 2), c.depth), reverse=True)
+                    hits.sort(key=lambda c: (c.items.get_value("layer", 2), c.depth), reverse=True)
                     leaf = hits[0]
                     curr = leaf
                     idx = 0
@@ -1158,7 +1169,7 @@ class UI:
                 graphics.rect(rx, ry, outline_w, rh, color, key=("ctrl_hl", item_key, "left"), layer=layer)
                 graphics.rect(rx + rw - outline_w, ry, outline_w, rh, color, key=("ctrl_hl", item_key, "right"), layer=layer)
 
-        active_drag = self.root.components.get("entity_drag") or self.root.components.get("asset_drag")
+        active_drag = self.root.items.get_value("entity_drag") or self.root.items.get_value("asset_drag")
         if active_drag and hasattr(self, "mouse_pos"):
             mx, my = self.mouse_pos
             if "entity" in active_drag or active_drag.get("type") == "entity":
@@ -1176,7 +1187,7 @@ class UI:
             graphics.rect(mx + 12, my + 12, chip_w, 1, (88, 166, 255, 200), key="active_drag_top", layer=31)
             graphics.text(label_text, mx + 16, my + 16, color=(240, 248, 255, 255), key="active_drag_txt", layer=32)
 
-        dock_drag = self.root.components.get("dock_drag")
+        dock_drag = self.root.items.get_value("dock_drag")
         if dock_drag and hasattr(self, "mouse_pos"):
             mx, my = self.mouse_pos
             target_rect = dock_drag.get("target_rect")

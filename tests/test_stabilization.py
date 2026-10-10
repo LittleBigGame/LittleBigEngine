@@ -24,8 +24,8 @@ class PersistenceContracts(TestCase):
             b = runtime.create(parent=root, name='B')
             root.move_child(b, 0)
             a.link = b
-            a.relations['peer'] = b
-            root.systems.attach('inspect', runtime.assets.system(folder / 'inspect.py'))
+            a.items.connect('peer', b)
+            root.items.attach_system('inspect', runtime.assets.system(folder / 'inspect.py'))
             identities = root.id, a.id, b.id
             for _ in range(3):
                 save_project(folder, entities=runtime.entities)
@@ -36,7 +36,7 @@ class PersistenceContracts(TestCase):
                 self.assertEqual(root.children, (b, a))
                 self.assertEqual(root.seen, ['B', 'A'])
                 self.assertIs(a.link, b)
-                self.assertIs(a.relations['peer'], b)
+                self.assertIs(a.items.require_target('peer'), b)
                 self.assertIsNone(a.nullable)
                 self.assertEqual(a.settings, {'__type__': 'tuple', 'values': [1, 2]})
             runtime.close()
@@ -45,14 +45,16 @@ class PersistenceContracts(TestCase):
         with TemporaryDirectory() as folder:
             folder = Path(folder)
             identity, absent = uuid4(), uuid4()
-            data = [dict(id=str(identity), components={'target': {'__type__': 'entity', 'id': str(absent)}},
-                         relations={'target': str(absent)}, systems={'late': {'path': 'late.py'}})]
+            data = [dict(id=str(identity), items={
+                str(uuid4()): {'type': 'Component', 'name': 'target', 'value': {'__type__': 'entity', 'id': str(absent)}},
+                str(uuid4()): {'type': 'Relation', 'name': 'target', 'target': str(absent)},
+                str(uuid4()): {'type': 'System', 'name': 'late', 'definition': {'path': 'late.py', 'asset_id': None}},
+            })]
             runtime = Runtime()
             entity = deserialize_entities(data, runtime, project_dir=folder)[identity]
             self.assertIsInstance(entity.target, EntityRef)
             saved = serialize_entities(runtime.entities, project_dir=folder)
-            self.assertEqual(saved[0]['systems'], data[0]['systems'])
-            self.assertEqual(saved[0]['relations'], data[0]['relations'])
+            self.assertEqual(saved[0]['items'], data[0]['items'])
             (folder / 'late.py').write_text('def start():\n    entity.started = True\n')
             activate_entities([entity], runtime, project_dir=folder)
             self.assertTrue(entity.started)
@@ -78,12 +80,12 @@ class PersistenceContracts(TestCase):
     def test_deferred_activation_sees_application_links_and_inline_source_survives(self):
         runtime = Runtime()
         entity = runtime.create()
-        entity.systems.attach('inline', SystemDefinition('def start():\n    entity.ready = "camera" in entity.relations\n'))
+        entity.items.attach_system('inline', SystemDefinition('def start():\n    entity.ready = entity.items.has_link("camera")\n'))
         data = serialize_entities([entity])
         other = Runtime()
         restored = deserialize_entities(data, other, activate=False)[entity.id]
         camera = other.create()
-        restored.relations['camera'] = camera
+        restored.items.connect('camera', camera)
         activate_entities([restored], other)
         self.assertTrue(restored.ready)
         runtime.close()
@@ -94,7 +96,7 @@ class PersistenceContracts(TestCase):
         self.assertEqual(deserialize_value(serialize_value(value)), value)
         runtime = Runtime()
         entity = runtime.create(nullable=None, unsupported=object())
-        self.assertEqual(serialize_entities([entity], on_unsupported='skip')[0]['components'], {'nullable': None})
+        self.assertEqual([item['name'] for item in serialize_entities([entity], on_unsupported='skip')[0]['items'].values()], ['nullable'])
         runtime.close()
 
 
@@ -131,7 +133,7 @@ class AssetContracts(TestCase):
         runtime = Runtime()
         target = runtime.create()
         owner = runtime.create(settings={'target': target, 'values': []})
-        with owner.components.edit('settings') as copy:
+        with owner.items.edit_value('settings') as copy:
             self.assertIs(copy['target'], target)
             copy['values'].append(1)
         self.assertEqual(owner.settings['values'], [1])
@@ -157,9 +159,9 @@ class EditorContracts(TestCase):
     def send(self, *events):
         self.input.pending.extend(events)
         self.runtime.step(0)
-        self.assertNotIn('ui_error', self.editor.app.components)
+        self.assertNotIn('ui_error', self.editor.app.items.value_dict())
         for entity in self.runtime.entities:
-            for instance in entity.systems.values():
+            for instance in entity.items.behaviour_dict('system').values():
                 self.assertFalse(instance.errors, list(instance.errors))
 
     def click(self, control):
@@ -167,23 +169,23 @@ class EditorContracts(TestCase):
         self.send(('click', control.x + control.w / 2, control.y + control.h / 2, 1, 0))
 
     def type(self, control, text, *, commit=False):
-        self.assertFalse(control.components.get('readonly', False))
+        self.assertFalse(control.items.get_value('readonly', False))
         self.click(control)
         self.send(('key', 'A', True, False), ('text', text))
         if commit:
             self.send(('key', 'ENTER', False, False))
 
     def menu_item(self, text):
-        menu = self.editor.app.relations['context_menu']
-        return next(child for child in menu.children if text in child.components.get('text', ''))
+        menu = self.editor.app.items.require_target('context_menu')
+        return next(child for child in menu.children if text in child.items.get_value('text', ''))
 
     def test_visible_authoring_workflow_and_restart(self):
         from lbe.project import load_project
         ed = self.editor
         moving = ed.game.children[0]
-        self.click(ed.add_comp_menu_button)
+        self.click(ed.add_item_button)
         self.click(self.menu_item('+ Velocity'))
-        vx = next(field for _, field in ed.component_rows if field.visible and field.component_key == 'vx')
+        vx = next(field for _, field in ed.item_rows if field.visible and field.component_key == 'vx')
         self.type(vx, '2.0', commit=True)
         self.send(('click', ed.code.x + 90, ed.code.y + 90, 4, 0))
         self.click(self.menu_item('+ New system script'))
@@ -192,11 +194,12 @@ class EditorContracts(TestCase):
         self.type(ed.path_field, 'physics.py', commit=True)
         self.type(ed.code, 'def update(dt):\n    for child in query("x", "vx"):\n        child.x += child.vx * dt\n')
         self.send(('key', 'S', True, False))
-        row = next(row for row in ed.hierarchy_rows if row.visible and row.relations.get('target') is ed.game)
+        row = next(row for row in ed.hierarchy_rows if row.visible and row.items.target('target') is ed.game)
         self.send(('click', row.x + row.w / 2, row.y + row.h / 2, 1, 0, 2))
-        self.click(ed.add_system_button)
+        self.click(ed.add_item_button)
+        self.click(self.menu_item('System /'))
         self.click(self.menu_item('physics'))
-        self.assertIn('physics', ed.game.systems)
+        self.assertIn('physics', ed.game.items.behaviour_dict('system'))
         before = moving.x
         self.runtime.step(0.5)
         self.assertEqual(moving.x, before + 1)
@@ -213,17 +216,17 @@ class EditorContracts(TestCase):
     def test_panel_detach_stops_retained_behavior_and_reload_rebinds_once(self):
         ed = self.editor
         original = ed.identity_label.text
-        definition = ed.inspector.systems['inspector'].definition
-        del ed.inspector.systems['inspector']
+        definition = ed.inspector.items.behaviour('inspector', kind='system').definition
+        ed.inspector.items.remove(ed.inspector.items.behaviour('inspector', kind='system').id)
         ed.game.children[0].name = 'ChangedWhileDetached'
         self.runtime.step(0)
         self.assertEqual(ed.identity_label.text, original)
         self.assertFalse(hasattr(ed, 'inspector_sync'))
-        ed.inspector.systems.attach('inspector', definition)
+        ed.inspector.items.attach_system('inspector', definition)
         self.runtime.step(0)
         self.assertIn('ChangedWhileDetached', ed.identity_label.text)
         before = ed.inspector_sync
-        ed.inspector.systems.reload('inspector', definition)
+        ed.inspector.items.reload(ed.inspector.items.behaviour('inspector', kind='system').id, definition)
         self.assertIsNot(before, ed.inspector_sync)
         self.send()
 
@@ -243,21 +246,21 @@ class EditorContracts(TestCase):
         other = ed.project / 'other.py'
         other.write_text('def update(dt):\n    entity.marker = "other"\n')
         entity = self.runtime.create(parent=ed.game, label='render')
-        instance = entity.systems.attach('render', self.runtime.assets.system(other))
+        instance = entity.items.attach_system('render', self.runtime.assets.system(other))
         ed.code.buffer.insert('# dirty\n')
         dirty = ed.code.buffer.text
         original = (ed.project / 'render.py').read_text()
-        game_instance = ed.game.systems['render']
+        game_instance = ed.game.items.behaviour('render', kind='system')
         destination = ed.rename_file('renamed.py')
-        self.assertIs(entity.systems['render'], instance)
+        self.assertIs(entity.items.behaviour('render', kind='system'), instance)
         self.assertEqual(entity.label, 'render')
-        self.assertIs(ed.game.systems['renamed'], game_instance)
+        self.assertIs(ed.game.items.behaviour('renamed', kind='system'), game_instance)
         self.assertEqual(destination.read_text(), original)
         self.assertEqual(ed.code.buffer.text, dirty)
         self.assertNotEqual(ed._saved_source[1], dirty)
         folder = ed.project / 'folder'
         folder.mkdir()
-        ed.app.systems['app'].namespace['move_file_or_folder'](destination, folder)
+        ed.app.items.behaviour('app', kind='system').namespace['move_file_or_folder'](destination, folder)
         self.assertEqual(ed.path_field.buffer.text, 'folder/renamed.py')
         self.assertNotEqual(ed._saved_source[1], dirty)
 
@@ -267,17 +270,17 @@ class EditorContracts(TestCase):
         entity = self.runtime.create(parent=ed.game, name='Clone', data=[1], a=1, b=99, precise=1.234567891)
         ed.select(entity)
         self.runtime.step(0)
-        label = next(label for label, field in ed.component_rows if field.visible and field.component_key == 'a')
+        label = next(label for label, field in ed.item_rows if field.visible and field.component_key == 'a')
         label.buffer = TextBuffer('b')
         label.renaming_key = 'a'
         with self.assertRaises(ValueError):
             ed.commit_component_key(label)
         self.assertEqual((entity.a, entity.b), (1, 99))
-        field = next(field for _, field in ed.component_rows if field.visible and field.component_key == 'precise')
+        field = next(field for _, field in ed.item_rows if field.visible and field.component_key == 'precise')
         ed.commit_component(field)
         self.assertEqual(entity.precise, 1.234567891)
         ed.inspector_duplicate_entity()
-        duplicate = ed.app.relations['inspected']
+        duplicate = ed.app.items.require_target('inspected')
         duplicate.data.append(2)
         self.assertEqual(entity.data, [1])
 
@@ -288,7 +291,7 @@ class EditorContracts(TestCase):
         registry = self.runtime.assets.registry
         identity = registry.register(path)
         original = self.editor.code.buffer.text
-        self.editor.app.systems['app'].globals['prompt_rename_file_item'](
+        self.editor.app.items.behaviour('app', kind='system').globals['prompt_rename_file_item'](
             {'type': 'image', 'name': path.name, 'path': path})
         self.type(self.editor.path_field, 'renamed.png', commit=True)
         self.assertEqual(registry.get_id('renamed.png'), identity)
@@ -300,10 +303,10 @@ class EditorContracts(TestCase):
         from lbe.text import TextBuffer
         ed = self.editor
         target = ed.game.children[0]
-        label = next(label for label, field in ed.component_rows if field.visible and field.component_key == 'x')
+        label = next(label for label, field in ed.item_rows if field.visible and field.component_key == 'x')
         label.buffer = TextBuffer('position')
         label.renaming_key = 'x'
-        before = dict(target.components)
+        before = dict(target.items.value_dict())
         original = ed.save_editor_project
         def fail():
             raise OSError('injected write failure')
@@ -313,7 +316,7 @@ class EditorContracts(TestCase):
                 ed.commit_component_key(label)
         finally:
             ed.save_editor_project = original
-        self.assertEqual(dict(target.components), before)
+        self.assertEqual(dict(target.items.value_dict()), before)
 
 
 class FileOperationContracts(TestCase):
@@ -328,7 +331,7 @@ class FileOperationContracts(TestCase):
             registry = runtime.assets.registry = AssetRegistry(folder)
             identity = registry.register(script)
             entity = runtime.create()
-            instance = entity.systems.attach('custom', runtime.assets.system(script))
+            instance = entity.items.attach_system('custom', runtime.assets.system(script))
             files = ProjectFiles(runtime, folder)
             save = lambda: save_project(folder, entities=runtime.entities, assets=registry)
             save()
@@ -344,7 +347,7 @@ class FileOperationContracts(TestCase):
             self.assertTrue(Path(instance.definition.path).samefile(script))
             files.relocate(folder / 'src', folder / 'lib', save=save)
             self.assertEqual(registry.get_id(folder / 'lib/a.py'), identity)
-            self.assertIs(entity.systems['custom'], instance)
+            self.assertIs(entity.items.behaviour('custom', kind='system'), instance)
             files.delete(folder / 'lib', save=save)
             self.assertEqual(registry.get_id(folder / 'lib/a.py'), identity)
             self.assertFalse((folder / 'lib').exists())
@@ -361,7 +364,7 @@ class ApplicationContracts(TestCase):
             runtime = load_project(SimpleNamespace(width=900, height=600), RecordingGraphics(), input_state,
                                    folder, template=template_path('demo'))
             self.addCleanup(runtime.close)
-            game = next(e for e in runtime.entities if e.components.get('name') == 'Game')
+            game = next(e for e in runtime.entities if e.items.get_value('name') == 'Game')
             player = game.children[0]
             x = player.x
             input_state.pending.extend([('key', 'RIGHT', False, False), ('key', 'F3', False, False)])
@@ -411,7 +414,7 @@ class ApplicationContracts(TestCase):
         self.assertNotIn('entities:', prelude)
         runtime = Runtime()
         entity = runtime.create()
-        instance = entity.systems.attach('api', SystemDefinition('assert runtime is entity.runtime\nassert callable(asset)\n'))
+        instance = entity.items.attach_system('api', SystemDefinition('assert runtime is entity.runtime\nassert callable(asset)\n'))
         self.assertFalse(instance.errors)
         runtime.close()
 
@@ -438,15 +441,16 @@ class RecoveryContracts(TestCase):
             folder = Path(directory)
             (folder / 'second.py').write_text('def update(dt):\n    pass\n')
             identity = uuid4()
-            data = [dict(id=str(identity), systems={'first': {'path': 'first.py'}, 'second': {'path': 'second.py'}})]
+            data = [dict(id=str(identity), items={str(uuid4()): {'type': 'System', 'name': name,
+                        'definition': {'path': name + '.py', 'asset_id': None}} for name in ('first', 'second')})]
             runtime = Runtime()
             self.addCleanup(runtime.close)
             entity = deserialize_entities(data, runtime, project_dir=folder)[identity]
             saved = serialize_entities([entity], project_dir=folder)
-            self.assertEqual(list(saved[0]['systems']), ['first', 'second'])
+            self.assertEqual([item['name'] for item in saved[0]['items'].values()], ['first', 'second'])
             (folder / 'first.py').write_text('def update(dt):\n    pass\n')
             activate_entities([entity], runtime, project_dir=folder)
-            self.assertEqual(list(entity.systems), ['first', 'second'])
+            self.assertEqual(list(entity.items.behaviour_dict('system')), ['first', 'second'])
 
     def test_inline_references_are_code_only_and_layout_is_attachable(self):
         from lbe.ui import Layout, reference_matches

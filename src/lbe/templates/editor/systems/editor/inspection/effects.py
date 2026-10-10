@@ -9,12 +9,12 @@ GREEN = (90, 195, 125)
 
 
 def highlight_system(identity):
-    state.app.components["highlight_system_asset"] = UUID(str(identity))
+    state.app.items.set_value("highlight_system_asset", UUID(str(identity)))
     state.message("System effects: queried blue, changed green")
 
 
 def affected_entities():
-    identity = state.app.components.get("highlight_system_asset")
+    identity = state.app.items.get_value("highlight_system_asset")
     if identity is None:
         return {}
     colours = {}
@@ -29,7 +29,7 @@ def affected_entities():
 
 
 def outline(target, colour, world=False):
-    values = target.components
+    values = target.items.value_dict()
     if not all(key in values for key in ("x", "y", "w", "h")):
         return
     x, y = world_position(target, state.game) if world else (target.x, target.y)

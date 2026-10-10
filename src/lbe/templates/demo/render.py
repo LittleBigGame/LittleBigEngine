@@ -2,12 +2,12 @@
 
 
 def draw():
-    with graphics.view(entity.relations["camera"], entity.relations["viewport"]):
-        camera = entity.relations.get("camera")
-        viewport = entity.relations.get("viewport")
+    with graphics.view(entity.items.require_target("camera"), entity.items.require_target("viewport")):
+        camera = entity.items.target("camera")
+        viewport = entity.items.target("viewport")
         zoom = getattr(camera, "zoom", 48.0) if camera else 48.0
-        cam_x = camera.components.get("x", 0.0) if camera else 0.0
-        cam_y = camera.components.get("y", 0.0) if camera else 0.0
+        cam_x = camera.items.get_value("x", 0.0) if camera else 0.0
+        cam_y = camera.items.get_value("y", 0.0) if camera else 0.0
 
         # Frustum culling bounds
         if camera and viewport and zoom > 0:
@@ -20,9 +20,9 @@ def draw():
             view_max_x = view_max_y = 1e9
 
         # Space partition debug overlay (F3)
-        show_debug = entity.components.get("show_spatial_debug")
+        show_debug = entity.items.get_value("show_spatial_debug")
         if not show_debug and hasattr(entity, "parent") and entity.parent:
-            show_debug = entity.parent.components.get("show_spatial_debug")
+            show_debug = entity.parent.items.get_value("show_spatial_debug")
         if show_debug and "space" in globals():
             cell_size = getattr(space, "cell_size", 16.0)
             cells = space.cells() if hasattr(space, "cells") else getattr(space, "_cells", {})
@@ -57,16 +57,16 @@ def draw():
 
         # Draw child entities (with viewport culling)
         def draw_tree(node, px=0.0, py=0.0):
-            x = px + node.components.get("x", 0.0)
-            y = py + node.components.get("y", 0.0)
-            color = node.components.get("color")
+            x = px + node.items.get_value("x", 0.0)
+            y = py + node.items.get_value("y", 0.0)
+            color = node.items.get_value("color")
             if color is not None:
-                w = node.components.get("w", 1.0)
-                h = node.components.get("h", 1.0)
+                w = node.items.get_value("w", 1.0)
+                h = node.items.get_value("h", 1.0)
                 if (max(x, x + w) >= view_min_x and min(x, x + w) <= view_max_x and
                     max(y, y + h) >= view_min_y and min(y, y + h) <= view_max_y):
                     graphics.rect(x, y, w, h,
-                                  color=color, key=node.id, layer=node.components.get("layer", 1))
+                                  color=color, key=node.id, layer=node.items.get_value("layer", 1))
             for child in node.children:
                 draw_tree(child, x, y)
 

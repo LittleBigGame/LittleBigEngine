@@ -6,8 +6,8 @@ from math import floor, isfinite
 def bounds(entity):
     try:
         x, y = entity.x, entity.y
-        w = entity.components.get("w", 0)
-        h = entity.components.get("h", 0)
+        w = entity.items.get_value("w", 0)
+        h = entity.items.get_value("h", 0)
         if any(not isinstance(v, (int, float)) or not isfinite(v) for v in (x, y, w, h)):
             return None
         return min(x, x + w), min(y, y + h), max(x, x + w), max(y, y + h)
@@ -20,10 +20,10 @@ def world_position(entity, root=None):
     x = y = 0.0
     current = entity
     while current is not None and current is not root:
-        if current is not entity and root is None and "root" in current.tags:
+        if current is not entity and root is None and current.items.has_tag("root"):
             break
-        x += current.components.get("x", 0.0)
-        y += current.components.get("y", 0.0)
+        x += current.items.get_value("x", 0.0)
+        y += current.items.get_value("y", 0.0)
         current = current.parent
     return x, y
 
@@ -192,7 +192,7 @@ class SpatialIndex:
         for other in candidates:
             if not getattr(other, "alive", True):
                 continue
-            if tag is not None and tag not in getattr(other, "tags", ()):
+            if tag is not None and not other.items.has_tag(tag):
                 continue
             obox = self._bounds.get(other)
             if obox is None:

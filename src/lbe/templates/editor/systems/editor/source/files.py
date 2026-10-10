@@ -46,12 +46,12 @@ def open_path():
     state.code.buffer = TextBuffer(text)
     state._saved_source = (state.path_field.buffer.text, text)
     state.code.source_path = str(path)
-    state.code.components['system_name'] = path.stem
+    state.code.items.set_value('system_name', path.stem)
     sel = selected()
-    if sel and path.stem in sel.systems:
-        state.code.relations['owner'] = sel
+    if sel and sel.items.has_behaviour(path.stem, kind='system'):
+        state.code.items.connect('owner', sel)
     else:
-        state.code.relations.pop('owner', None)
+        state.code.items.disconnect('owner', None)
     message(f'Opened {path.name}')
 
 def open_specific_file(path):
@@ -67,12 +67,12 @@ def open_specific_file(path):
     state.code.buffer = TextBuffer(text)
     state._saved_source = (rel_name, text)
     state.code.source_path = str(path)
-    state.code.components['system_name'] = path.stem
+    state.code.items.set_value('system_name', path.stem)
     sel = selected()
-    if sel and path.stem in sel.systems:
-        state.code.relations['owner'] = sel
+    if sel and sel.items.has_behaviour(path.stem, kind='system'):
+        state.code.items.connect('owner', sel)
     else:
-        state.code.relations.pop('owner', None)
+        state.code.items.disconnect('owner', None)
     state.reveal_file(path)
     message(f"Opened {rel_name}")
     return True
@@ -118,8 +118,8 @@ def show_source_panel():
 
 def prompt_rename_file():
     show_source_panel()
-    state.path_field.components["readonly"] = False
-    state.path_field.components["ink"] = INK
+    state.path_field.items.set_value("readonly", False)
+    state.path_field.items.set_value("ink", INK)
     state.ui.focus(state.path_field)
     state.path_field.buffer.anchor = 0
     state.path_field.buffer.cursor = len(state.path_field.buffer.text)
@@ -128,8 +128,8 @@ def prompt_rename_file():
 
 def commit_rename_file():
     new_name = state.path_field.buffer.text.strip()
-    state.path_field.components["readonly"] = True
-    state.path_field.components["ink"] = (160, 180, 205)
+    state.path_field.items.set_value("readonly", True)
+    state.path_field.items.set_value("ink", (160, 180, 205))
     state.path_field.on_commit = None
     old_text = state._saved_source[0] if state._saved_source else state.path_field.buffer.text
     if not new_name or new_name == old_text:
@@ -161,7 +161,7 @@ def rename_file(new_name, old_name=None):
     return destination
 
 def update_open_source_location(source, destination):
-    open_path = Path(state.code.components.get("source_path", source_path())).resolve()
+    open_path = Path(state.code.items.get_value("source_path", source_path())).resolve()
     if open_path == source or open_path.is_relative_to(source):
         new_path = destination / open_path.relative_to(source) if open_path != source else destination
         relative = new_path.relative_to(state.project).as_posix()
@@ -169,13 +169,13 @@ def update_open_source_location(source, destination):
         if state._saved_source:
             state._saved_source = (relative, state._saved_source[1])
         state.code.source_path = str(new_path)
-        if state.code.components.get("system_name") == open_path.stem:
+        if state.code.items.get_value("system_name") == open_path.stem:
             state.code.system_name = new_path.stem
 
 def open_system(owner, name):
     if not confirm_discard((owner.id, name)):
         return
-    instance = owner.systems.get(name) or owner.scripts[name]
+    instance = owner.items.get_behaviour(name, kind='system') or owner.items.behaviour(name, kind='script')
     path = Path(instance.definition.path)
     if path.is_relative_to(state.project):
         state.path_field.buffer = TextBuffer(str(path.relative_to(state.project)))
@@ -184,7 +184,7 @@ def open_system(owner, name):
     state.code.buffer = TextBuffer(instance.definition.source)
     state._saved_source = (state.path_field.buffer.text, state.code.buffer.text)
     state.code.system_name = name
-    state.code.relations['owner'] = owner
+    state.code.items.connect('owner', owner)
     if getattr(state, 'ready', False) and path.is_relative_to(state.project):
         state.reveal_file(path)
     message(f"{name} | {('running' if instance.running else 'stopped')} | {', '.join(instance.lifecycle)}")
@@ -209,10 +209,10 @@ def save():
     definition = state.runtime.assets.system(path)
     count = 0
     for entity in state.runtime.entities:
-        for collection in (entity.systems, entity.scripts):
+        for collection in (entity.items.behaviour_dict('system'), entity.items.behaviour_dict('script')):
             for name, instance in tuple(collection.items()):
                 if Path(instance.definition.path) == path:
-                    updated = collection.reload(name, definition)
+                    updated = entity.items.reload(instance.id, definition)
                     if updated.definition is not definition or not updated.running:
                         raise RuntimeError(f"{name}: {(updated.errors[-1].message if updated.errors else 'reload failed')}")
                     count += 1
@@ -223,23 +223,23 @@ def attach():
     save()
     path = source_path()
     definition = state.runtime.assets.system(path)
-    owner = state.code.relations.get('owner') or selected()
+    owner = state.code.items.target('owner') or selected()
     if owner is None:
         owner = state.game
-    if path.stem in owner.systems:
-        instance = owner.systems.reload(path.stem, definition)
-    elif path.stem in owner.scripts:
-        instance = owner.scripts.reload(path.stem, definition)
+    if owner.items.has_behaviour(path.stem, kind='system'):
+        instance = owner.items.reload(owner.items.behaviour(path.stem, kind='system').id, definition)
+    elif owner.items.has_behaviour(path.stem, kind='script'):
+        instance = owner.items.reload(owner.items.behaviour(path.stem, kind='script').id, definition)
     else:
-        instance = owner.systems.attach(path.stem, definition)
+        instance = owner.items.attach_system(path.stem, definition)
     if not instance.running:
         err = instance.errors[-1].message if instance.errors else "Attachment failed"
         raise RuntimeError(err)
     state.code.system_name = path.stem
-    state.code.relations['owner'] = owner
+    state.code.items.connect('owner', owner)
     save_editor_project()
     inspector_sync()
-    message(f"Attached {path.stem} to {owner.components.get('name', owner.id)}")
+    message(f"Attached {path.stem} to {owner.items.get_value('name', owner.id)}")
 
 def refresh_project_files():
     reg = getattr(state.runtime.assets, "registry", None)
@@ -268,7 +268,7 @@ def new_source_in_dir(folder_path, *, kind="system"):
     state.code.buffer = TextBuffer(text)
     state._saved_source = (new_name, state.code.buffer.text)
     state.code.source_path = str(state.project / new_name)
-    state.code.components["system_name"] = f"{kind}_{i}"
+    state.code.items.set_value("system_name", f"{kind}_{i}")
     save()
     state.files.record_create(f_path / f"{kind}_{i}.py", save=save_editor_project)
     state.reveal_file(f_path / f"{kind}_{i}.py")
@@ -307,11 +307,11 @@ def delete_file_item(item):
     for owner in state.runtime.entities:
         if owner is state.game or state.game in owner.ancestors:
             continue
-        for instance in tuple(owner.systems.values())+tuple(owner.scripts.values()):
+        for instance in tuple(owner.items.behaviour_dict('system').values())+tuple(owner.items.behaviour_dict('script').values()):
             required = Path(instance.definition.path).resolve() if instance.definition.path else None
             if required is not None and (required == path or required.is_relative_to(path)):
                 raise ValueError(f"Required editor source cannot be deleted: {required.name}")
-    open_path = Path(state.code.components.get("source_path", source_path())).resolve()
+    open_path = Path(state.code.items.get_value("source_path", source_path())).resolve()
     is_open = open_path == path or open_path.is_relative_to(path)
     if is_open and not confirm_discard(('delete', str(path))):
         return
@@ -321,13 +321,13 @@ def delete_file_item(item):
         state.code.buffer = TextBuffer('def update(dt):\n    pass\n')
         state.code.source_path = str(state.project / 'new_system.py')
         state._saved_source = None
-        state.code.components.pop('system_name', None)
-        state.code.relations.pop('owner', None)
+        state.code.items.remove_value('system_name', None)
+        state.code.items.disconnect('owner', None)
     refresh_project_files()
     message(f"Deleted '{path.name}'; references remain recoverable")
 
 def create_new_folder(parent_dir=None):
-    pdir = Path(parent_dir).resolve() if parent_dir else (state.project / state.file_explorer.components.get('view_root','systems/game')).resolve()
+    pdir = Path(parent_dir).resolve() if parent_dir else (state.project / state.file_explorer.items.get_value('view_root', 'systems/game')).resolve()
     if not pdir.is_relative_to(state.project) or not pdir.is_dir():
         raise ValueError('Choose an existing folder inside the project')
     base_name = "New Folder"

@@ -8,12 +8,13 @@ class CoreTests(unittest.TestCase):
         self.runtime = Runtime()
 
     def test_arbitrary_components_and_reserved_names(self):
-        entity = self.runtime.create(x=1, custom={"a": [1]}, components={"id": "data"})
+        from lbe import Component
+        entity = self.runtime.create(x=1, custom={"a": [1]}, items=(Component("id", "data"),))
         identity = entity.id
         self.assertEqual(entity.x, 1)
         entity.x = 4
-        self.assertEqual(entity.components["x"], 4)
-        self.assertEqual(entity.components["id"], "data")
+        self.assertEqual(entity.items.require_value("x"), 4)
+        self.assertEqual(entity.items.require_value("id"), "data")
         with self.assertRaises(AttributeError):
             entity.id = "replacement"
         self.assertEqual(entity.id, identity)
@@ -26,18 +27,18 @@ class CoreTests(unittest.TestCase):
         entity = self.runtime.create(settings={"items": [1]})
         observed = []
         self.runtime.changes.subscribe(observed.append)
-        with entity.components.edit("settings") as value:
+        with entity.items.edit_value("settings") as value:
             value["items"].append(2)
         self.assertEqual(entity.settings, {"items": [1, 2]})
         self.assertEqual(len(observed), 1)
         with self.assertRaises(ValueError):
-            with entity.components.edit("settings") as value:
+            with entity.items.edit_value("settings") as value:
                 value.clear()
                 raise ValueError("cancel")
         self.assertEqual(entity.settings, {"items": [1, 2]})
         self.assertEqual(len(observed), 1)
         entity.settings["items"].append(3)
-        entity.components.touch("settings")
+        entity.items.touch_value("settings")
         self.assertEqual(observed[-1].kind, "component.mutate")
 
     def test_invalid_create_does_not_leave_partial_entity(self):
@@ -88,7 +89,7 @@ class CoreTests(unittest.TestCase):
         a.vx = 2
         self.assertEqual(tuple(query), (a,))
         self.assertEqual(tuple(parent.query("x", recursive=True)), (a, b))
-        a.tags.add("moving")
+        a.items.add_tag("moving")
         self.assertEqual(tuple(parent.query(tags="moving")), (a,))
         a.parent = other
         self.assertEqual(tuple(query), ())
@@ -111,17 +112,17 @@ class CoreTests(unittest.TestCase):
         parent = self.runtime.create()
         child = self.runtime.create(parent=parent)
         survivor = self.runtime.create()
-        survivor.relations["target"] = child
+        survivor.items.connect("target", child)
         parent.destroy()
         self.assertEqual(self.runtime.entities, (survivor,))
-        self.assertEqual(dict(survivor.relations), {})
+        self.assertEqual(dict(survivor.items.link_dict()), {})
         self.assertFalse(child.alive)
         with self.assertRaises(ReferenceError):
             child.x = 1
         with self.assertRaises(KeyError):
             self.runtime.resolve(child.id)
         with self.assertRaises(ValueError):
-            survivor.relations["outside"] = Runtime().create()
+            survivor.items.connect("outside", Runtime().create())
 
     def test_changes_and_listener_failure_do_not_break_mutation(self):
         entity = self.runtime.create()
@@ -130,9 +131,9 @@ class CoreTests(unittest.TestCase):
             raise ValueError("listener failed")
         self.runtime.changes.subscribe(broken)
         unsubscribe = self.runtime.changes.subscribe(seen.append)
-        entity.tags.add("a")
-        entity.tags.add("a")
-        entity.tags.discard("a")
+        entity.items.add_tag("a")
+        entity.items.add_tag("a")
+        entity.items.remove_tag("a")
         entity.x = 1
         del entity.x
         unsubscribe()
@@ -162,29 +163,29 @@ class CoreTests(unittest.TestCase):
         # Component names
         for bad in ("", 123, None):
             with self.assertRaises(ValueError):
-                entity.components[bad] = 1
+                entity.items.set_value(bad, 1)
         with self.assertRaises(ValueError):
             self.runtime.create(**{"": 1})
 
         # Tag names
         for bad in ("", 123, None):
             with self.assertRaises(ValueError):
-                entity.tags.add(bad)
+                entity.items.add_tag(bad)
         with self.assertRaises(ValueError):
             self.runtime.create(tags=[""])
 
         # Relation names
         for bad in ("", 123, None):
             with self.assertRaises(ValueError):
-                entity.relations[bad] = target
+                entity.items.connect(bad, target)
 
         # Collection lengths
-        entity.components["a"] = 1
-        entity.tags.add("t1")
-        entity.relations["r1"] = target
-        self.assertEqual(len(entity.components), 1)
-        self.assertEqual(len(entity.tags), 1)
-        self.assertEqual(len(entity.relations), 1)
+        entity.items.set_value("a", 1)
+        entity.items.add_tag("t1")
+        entity.items.connect("r1", target)
+        self.assertEqual(len(entity.items.value_dict()), 1)
+        self.assertEqual(len(set(entity.items.tag_names())), 1)
+        self.assertEqual(len(entity.items.link_dict()), 1)
 
     def test_core_invariants_and_error_handling(self):
         parent = self.runtime.create()
@@ -209,11 +210,11 @@ class CoreTests(unittest.TestCase):
         from lbe import SystemDefinition
         updated = []
         self.runtime.services["updated"] = updated
-        inst = child.systems.attach("worker", SystemDefinition("def update(dt): updated.append(dt)"))
+        inst = child.items.attach_system("worker", SystemDefinition("def update(dt): updated.append(dt)"))
         inst.start()
         self.runtime.step(0.1)
         self.assertEqual(len(updated), 1)
-        parent.tags.add("paused")
+        parent.items.add_tag("paused")
         self.runtime.step(0.1)
         self.assertEqual(len(updated), 1)  # Skipped because ancestor has paused tag
 

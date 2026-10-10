@@ -3,11 +3,11 @@
 
 def update(dt):
     """Maintain scroll clamping and reveal caret for text area."""
-    buffer = entity.components.get("buffer")
-    if buffer is None or not entity.components.get("visible", True):
+    buffer = entity.items.get_value("buffer")
+    if buffer is None or not entity.items.get_value("visible", True):
         return
-    pitch = entity.components.get("pitch", 8)
-    line = entity.components.get("line_height", 20)
+    pitch = entity.items.get_value("pitch", 8)
+    line = entity.items.get_value("line_height", 20)
     rows = max(1, int((entity.h - 12) // line))
     cols = max(1, int((entity.w - 64) // pitch))
     lines = buffer.lines

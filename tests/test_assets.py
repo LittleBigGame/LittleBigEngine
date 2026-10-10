@@ -58,12 +58,12 @@ class AssetSystemTests(unittest.TestCase):
                                       get_clipboard_text=lambda: self.clipboard)
         self.runtime = load_project(self.window, self.graphics, self.input, self.project_path, template=template_path("editor"))
         self.addCleanup(self.runtime.close)
-        self.editor = self.runtime.entities[0].components["application_state"]
+        self.editor = self.runtime.entities[0].items.require_value("application_state")
         self.runtime.step(0)
         self.assert_healthy()
 
     def assert_healthy(self):
-        instance = self.editor.app.systems["app"]
+        instance = self.editor.app.items.behaviour("app", kind='system')
         self.assertTrue(instance.running, list(instance.errors))
         self.assertEqual(list(instance.errors), [])
 
@@ -73,17 +73,17 @@ class AssetSystemTests(unittest.TestCase):
         self.assert_healthy()
 
     def click(self, entity):
-        if hasattr(entity, "components") and not entity.components.get("visible", True):
+        if hasattr(entity, "items") and not entity.items.get_value("visible", True):
             if callable(getattr(entity, "action", None)):
                 try:
                     entity.action()
                 except Exception as error:
                     msg = f"{type(error).__name__}: {error}"
-                    cb = getattr(self.editor.app, "components", {}).get("on_ui_error")
+                    cb = self.editor.app.items.get_value("on_ui_error")
                     if cb:
                         cb(msg)
                 return
-            on_click = entity.components.get("on_click")
+            on_click = entity.items.get_value("on_click")
             if callable(on_click):
                 on_click(entity, ("click", entity.x, entity.y, 1, 0))
                 return
@@ -159,11 +159,11 @@ class AssetSystemTests(unittest.TestCase):
             "type": "image",
             "icon": "🖼️",
         }
-        ed.app.components["asset_drag"] = drag_data
+        ed.app.items.set_value("asset_drag", drag_data)
 
         # Drop onto Code Editor
         drop_event = ("release", ed.code.x + 50, ed.code.y + 50, 0, 0)
-        self.editor.app.components["on_asset_drop"](drag_data, drop_event)
+        self.editor.app.items.require_value("on_asset_drop")(drag_data, drop_event)
 
         # Token inserted into buffer
         expected_token = f'asset("{player_id}")'
@@ -173,10 +173,10 @@ class AssetSystemTests(unittest.TestCase):
         self.runtime.step(0)
 
         # Find the inline asset pill control
-        pills = [c for c in ed.ui.controls() if "asset_pill" in c.tags and c.visible]
+        pills = [c for c in ed.ui.controls() if c.items.has_tag("asset_pill") and c.visible]
         self.assertTrue(len(pills) >= 1)
         pill = pills[0]
-        self.assertEqual(pill.components.get("asset_id"), str(player_id))
+        self.assertEqual(pill.items.get_value("asset_id"), str(player_id))
         self.assertIn("player.png", pill.text)
         self.assertIn("🖼️", pill.text)
 
@@ -191,45 +191,45 @@ class AssetSystemTests(unittest.TestCase):
         ed.code.buffer.text = f'snd = asset("{jump_id}")\n'
         self.runtime.step(0)
 
-        pills = [c for c in ed.ui.controls() if "asset_pill" in c.tags and c.visible]
+        pills = [c for c in ed.ui.controls() if c.items.has_tag("asset_pill") and c.visible]
         self.assertTrue(len(pills) >= 1)
         pill = pills[0]
 
         # Right-click the pill
         self.send(("click", pill.x + 5, pill.y + 5, 4, 0))
-        menu = ed.app.relations.get("context_menu")
+        menu = ed.app.items.target("context_menu")
         self.assertIsNotNone(menu)
 
         # Verify Locate in Project Files
-        locate_item = next(c for c in menu.children if "Locate" in c.components.get("text", ""))
+        locate_item = next(c for c in menu.children if "Locate" in c.items.get_value("text", ""))
         self.click(locate_item)
         self.assertEqual(ed.active_left_tab, "files")
         self.assertIn("audio", ed.file_explorer.expanded)
 
         # Verify Copy Asset UUID
         self.send(("click", pill.x + 5, pill.y + 5, 4, 0))
-        menu = ed.app.relations.get("context_menu")
-        copy_item = next(c for c in menu.children if "Copy Asset UUID" in c.components.get("text", ""))
+        menu = ed.app.items.target("context_menu")
+        copy_item = next(c for c in menu.children if "Copy Asset UUID" in c.items.get_value("text", ""))
         self.click(copy_item)
         self.assertEqual(self.clipboard, str(jump_id))
 
         # Verify Replace reference
         self.send(("click", pill.x + 5, pill.y + 5, 4, 0))
-        menu = ed.app.relations.get("context_menu")
-        replace_item = next(c for c in menu.children if "Replace" in c.components.get("text", ""))
+        menu = ed.app.items.target("context_menu")
+        replace_item = next(c for c in menu.children if "Replace" in c.items.get_value("text", ""))
         self.click(replace_item)
-        picker_menu = ed.app.relations.get("context_menu")
+        picker_menu = ed.app.items.target("context_menu")
         self.assertIsNotNone(picker_menu)
-        player_picker_item = next(c for c in picker_menu.children if "player.png" in c.components.get("text", ""))
+        player_picker_item = next(c for c in picker_menu.children if "player.png" in c.items.get_value("text", ""))
         self.click(player_picker_item)
         self.assertIn(f'asset("{player_id}")', ed.code.buffer.text)
 
         # Verify Remove reference
         self.runtime.step(0)
-        new_pill = next(c for c in ed.ui.controls() if "asset_pill" in c.tags and c.visible)
+        new_pill = next(c for c in ed.ui.controls() if c.items.has_tag("asset_pill") and c.visible)
         self.send(("click", new_pill.x + 5, new_pill.y + 5, 4, 0))
-        menu = ed.app.relations.get("context_menu")
-        remove_item = next(c for c in menu.children if "Remove reference" in c.components.get("text", ""))
+        menu = ed.app.items.target("context_menu")
+        remove_item = next(c for c in menu.children if "Remove reference" in c.items.get_value("text", ""))
         self.click(remove_item)
         self.assertNotIn('asset(', ed.code.buffer.text)
 
@@ -253,18 +253,18 @@ class AssetSystemTests(unittest.TestCase):
 
         # Drop onto Inspector
         drop_event = ("release", ed.inspector.x + 50, ed.inspector.y + 50, 0, 0)
-        self.editor.app.components["on_asset_drop"](drag_data, drop_event)
+        self.editor.app.items.require_value("on_asset_drop")(drag_data, drop_event)
 
         # Hero has sprite component of type AssetRef
-        self.assertIn("sprite", hero.components)
-        sprite_val = hero.components["sprite"]
+        self.assertIn("sprite", hero.items.value_dict())
+        sprite_val = hero.items.require_value("sprite")
         self.assertIsInstance(sprite_val, AssetRef)
         self.assertEqual(sprite_val.id, player_id)
         self.assertEqual(sprite_val.name, "player.png")
 
         # Inspector renders it as a chip button with icon + name
         self.runtime.step(0)
-        lbl, fld = next((lbl, fld) for (lbl, fld) in ed.component_rows if fld.visible and fld.component_key == "sprite")
+        lbl, fld = next((lbl, fld) for (lbl, fld) in ed.item_rows if fld.visible and fld.component_key == "sprite")
         self.assertIn("🖼️", fld.buffer.text)
         self.assertIn("player.png", fld.buffer.text)
 
@@ -280,7 +280,7 @@ class AssetSystemTests(unittest.TestCase):
         self.runtime.step(0)
 
         # Pill displays "player.png"
-        pill = next(c for c in ed.ui.controls() if "asset_pill" in c.tags and c.visible)
+        pill = next(c for c in ed.ui.controls() if c.items.has_tag("asset_pill") and c.visible)
         self.assertIn("player.png", pill.text)
 
         # Rename file on disk & in registry
@@ -295,7 +295,7 @@ class AssetSystemTests(unittest.TestCase):
         self.assertEqual(ed.code.buffer.text, raw_code)
 
         # 2. Inline pill automatically reflects the new name!
-        updated_pill = next(c for c in ed.ui.controls() if "asset_pill" in c.tags and c.visible)
+        updated_pill = next(c for c in ed.ui.controls() if c.items.has_tag("asset_pill") and c.visible)
         self.assertIn("hero_warrior.png", updated_pill.text)
 
     def test_atomic_pill_navigation_and_deletion(self):
@@ -352,7 +352,7 @@ class AssetSystemTests(unittest.TestCase):
             "type": "image",
             "icon": "🖼️",
         }
-        ed.app.components["asset_drag"] = drag_data
+        ed.app.items.set_value("asset_drag", drag_data)
 
         # Dragging across viewport does not pan camera
         vp = ed.viewport
@@ -367,7 +367,7 @@ class AssetSystemTests(unittest.TestCase):
 
     def test_folder_creation_and_file_moving_with_stable_uuid(self):
         """Folders can be created and files moved between folders while preserving asset UUID."""
-        app_ns = self.editor.app.systems["app"].namespace
+        app_ns = self.editor.app.items.behaviour("app", kind='system').namespace
         create_new_folder = app_ns["create_new_folder"]
         move_file_or_folder = app_ns["move_file_or_folder"]
         ed = self.editor
@@ -409,13 +409,13 @@ class AssetSystemTests(unittest.TestCase):
         player_id = reg.get_id(self.player_img)
 
         # 1. Asset drag preview
-        ed.app.components["asset_drag"] = {
+        ed.app.items.set_value("asset_drag", {
             "id": player_id,
             "name": "player.png",
             "path": "textures/player.png",
             "type": "image",
             "icon": "🖼️",
-        }
+        })
         # Send motion to move cursor
         self.send(("motion", 320, 240, 0))
         self.runtime.step(0)
@@ -432,14 +432,14 @@ class AssetSystemTests(unittest.TestCase):
         self.assertIn("player.png", txt_matches[-1][0][0])
 
         # 2. Entity drag preview
-        ed.app.components.pop("asset_drag", None)
+        ed.app.items.remove_value("asset_drag", None)
         hero = self.runtime.create(parent=ed.game, name="DragonBoss")
-        ed.app.components["entity_drag"] = {
+        ed.app.items.set_value("entity_drag", {
             "id": str(hero.id),
             "name": "DragonBoss",
             "type": "entity",
             "entity": hero,
-        }
+        })
         self.send(("motion", 450, 350, 0))
         self.runtime.step(0)
 
@@ -452,39 +452,24 @@ class AssetSystemTests(unittest.TestCase):
         self.assertIn("DragonBoss", txt_matches2[-1][0][0])
         self.assertIn("🔷", txt_matches2[-1][0][0])
 
-    def test_drag_system_into_inspector_components_vs_systems_area(self):
-        """Dragging system script into Components area adds it as component; into Systems area attaches it as system."""
+    def test_drag_source_attaches_behaviour_or_edits_exact_uuid_value_row(self):
         ed = self.editor
-        reg = self.runtime.assets.registry
-        enemy_id = reg.get_id(self.enemy_script)
-
-        hero = self.runtime.create(parent=ed.game, name="PlayerTarget")
-        ed.select(hero)
+        uid = self.runtime.assets.registry.get_id(self.enemy_script)
+        owner = self.runtime.create(parent=ed.game, name="PlayerTarget", source=None)
+        ed.inspect_entity(owner)
         self.runtime.step(0)
-
-        drag_data = {
-            "id": enemy_id,
-            "name": "enemy.py",
-            "path": "enemy.py",
-            "type": "system",
-            "icon": "⚡",
-        }
-
-        # Drop 1: Dropped onto Components area (above system_label)
-        comp_area_y = ed.components_title.y + 15
-        ed.app.components["on_asset_drop"](drag_data, ("release", ed.inspector.x + 30, comp_area_y, 0, 0))
-
-        # Should be added as component, NOT attached as a system
-        self.assertIn("enemy", hero.components)
-        self.assertIsInstance(hero.components["enemy"], AssetRef)
-        self.assertNotIn("enemy", hero.systems)
-
-        # Drop 2: Dropped onto Systems area (below system_label)
-        sys_area_y = ed.system_label.y + 15
-        ed.app.components["on_asset_drop"](drag_data, ("release", ed.inspector.x + 30, sys_area_y, 0, 0))
-
-        # Should now be attached as a system
-        self.assertIn("enemy", hero.systems)
+        data = dict(id=uid, name="enemy.py", path="enemy.py", type="system", icon="λ")
+        ed.app.items.require_value("on_asset_drop")(data, ("release", ed.inspector.x+30, ed.items_title.y+15, 0, 0))
+        self.assertIn("enemy", owner.items.behaviour_dict('system'))
+        self.assertFalse(owner.items.has_value('enemy'))
+        record = owner.items.component('source')
+        ed.focus_item(owner, record.id)
+        _, field = next((name, field) for name, field in ed.item_rows if field.visible and field.item_id == record.id)
+        ed.app.items.require_value("on_asset_drop")(data, ("release", field.x+8, field.y+8, 0, 0))
+        self.assertEqual(owner.items.component('source').id, record.id)
+        self.assertIsInstance(owner.items.value(record.id), AssetRef)
+        self.assertEqual(owner.items.value(record.id).id, uid)
+        self.assertIn('enemy', owner.items.behaviour_dict('system'))
 
     def test_drag_entity_from_hierarchy(self):
         """Dragging entity from hierarchy allows dropping into code editor, inspector, or reparenting."""
@@ -502,14 +487,14 @@ class AssetSystemTests(unittest.TestCase):
             "entity": child_ent,
         }
         drop_code = ("release", ed.code.x + 50, ed.code.y + 50, 0, 0)
-        ed.app.components["on_entity_drop"](ent_drag, drop_code)
+        ed.app.items.require_value("on_entity_drop")(ent_drag, drop_code)
 
         expected_token = f'resolve("{child_ent.id}")'
         self.assertIn(expected_token, ed.code.buffer.text)
 
         # Step to sync text and render inline pill
         self.runtime.step(0)
-        pills = [c for c in ed.ui.controls() if "asset_pill" in c.tags and c.visible]
+        pills = [c for c in ed.ui.controls() if c.items.has_tag("asset_pill") and c.visible]
         self.assertTrue(len(pills) >= 1)
         self.assertIn("HeroNode", pills[0].text)
         self.assertIn("🔷", pills[0].text)
@@ -518,17 +503,17 @@ class AssetSystemTests(unittest.TestCase):
         ed.select(parent_ent)
         self.runtime.step(0)
 
-        drop_insp = ("release", ed.inspector.x + 50, ed.components_title.y + 15, 0, 0)
-        ed.app.components["on_entity_drop"](ent_drag, drop_insp)
+        drop_insp = ("release", ed.inspector.x + 50, ed.items_title.y + 15, 0, 0)
+        ed.app.items.require_value("on_entity_drop")(ent_drag, drop_insp)
 
-        self.assertIn("heronode", parent_ent.components)
-        self.assertIs(parent_ent.components["heronode"], child_ent)
+        self.assertIn("heronode", parent_ent.items.value_dict())
+        self.assertIs(parent_ent.items.require_value("heronode"), child_ent)
 
         # 3. Dropping entity onto another entity row in Hierarchy reparents it
         # Find row for parent_ent
-        row = next(r for r in ed.hierarchy_rows if r.visible and r.relations.get("target") is parent_ent)
+        row = next(r for r in ed.hierarchy_rows if r.visible and r.items.target("target") is parent_ent)
         drop_hier = ("release", row.x + 20, row.y + 10, 0, 0)
-        ed.app.components["on_entity_drop"](ent_drag, drop_hier)
+        ed.app.items.require_value("on_entity_drop")(ent_drag, drop_hier)
 
         self.assertIs(child_ent.parent, parent_ent)
 
@@ -541,8 +526,8 @@ class AssetSystemTests(unittest.TestCase):
         self.runtime.step(0)
 
         # Drop asset at line 1, column 8 (after "x = ")
-        pitch = ed.code.components.get("pitch", 8)
-        line_h = ed.code.components.get("line_height", 20)
+        pitch = ed.code.items.get_value("pitch", 8)
+        line_h = ed.code.items.get_value("line_height", 20)
         # line 1 y is code.y + 6 + 1 * line_h + line_h / 2
         drop_x = ed.code.x + 48 + 8 * pitch
         drop_y = ed.code.y + 6 + 1 * line_h + 10
@@ -552,7 +537,7 @@ class AssetSystemTests(unittest.TestCase):
         asset_drag = dict(id=str(enemy_id), name="enemy.py", type="system", path="scripts/enemy.py")
 
         drop_event = ("release", drop_x, drop_y, 0, 0)
-        ed.app.components["on_asset_drop"](asset_drag, drop_event)
+        ed.app.items.require_value("on_asset_drop")(asset_drag, drop_event)
 
         expected_token = f'asset("{enemy_id}")'
         self.assertIn(f"x = {expected_token}1", ed.code.buffer.text)
@@ -565,8 +550,8 @@ class AssetSystemTests(unittest.TestCase):
         ed.ui.focus(ed.code)
         self.runtime.step(0)
 
-        pitch = ed.code.components.get("pitch", 8)
-        line_h = ed.code.components.get("line_height", 20)
+        pitch = ed.code.items.get_value("pitch", 8)
+        line_h = ed.code.items.get_value("line_height", 20)
 
         # 1. Drag selection
         # Click at line 0, col 5
@@ -591,7 +576,7 @@ class AssetSystemTests(unittest.TestCase):
         self.assertEqual(ed.code.buffer.cursor, 13)  # len("line one\n") = 9 + 4 = 13
 
         # Verify highlight rects are visible and on layer+1
-        sel_rects = [c for c in ed.code.children if c.name.startswith("selection:") and c.components.get("visible")]
+        sel_rects = [c for c in ed.code.children if c.name.startswith("selection:") and c.items.get_value("visible")]
         self.assertTrue(len(sel_rects) >= 2)
         for r in sel_rects:
             self.assertEqual(r.layer, ed.code.layer + 1)
@@ -616,7 +601,7 @@ class AssetSystemTests(unittest.TestCase):
         self.assertTrue(ed.code.buffer.has_selection)
 
         self.runtime.step(0)
-        sel_rects = [c for c in ed.code.children if c.name.startswith("selection:") and c.components.get("visible")]
+        sel_rects = [c for c in ed.code.children if c.name.startswith("selection:") and c.items.get_value("visible")]
         self.assertEqual(len(sel_rects), 1)
         self.assertEqual(sel_rects[0].layer, ed.code.layer + 1)
         self.assertEqual(sel_rects[0].color, (45, 85, 135))
@@ -631,21 +616,21 @@ class AssetSystemTests(unittest.TestCase):
 
         # Ensure a base file is open in editor
         ed.code.buffer.text = "# Original file\ndef original():\n    pass\n"
-        ed.code.components["source_path"] = self.project_path / "original.py"
+        ed.code.items.set_value("source_path", self.project_path / "original.py")
         ed._saved_source = ("original.py", ed.code.buffer.text)
         self.runtime.step(0)
 
         # Find enemy.py row in file explorer
         ed.reveal_file(self.enemy_script)
         ed.file_explorer_sync()
-        row = next(r for r in ed.file_explorer_rows if r.visible and "enemy.py" in r.components.get("text", ""))
+        row = next(r for r in ed.file_explorer_rows if r.visible and "enemy.py" in r.items.get_value("text", ""))
 
         # 1. Single click on enemy.py row
         self.send(("click", row.x + 20, row.y + 10, 1, 0))
         self.runtime.step(0)
 
         # Selected file in file explorer is updated
-        self.assertEqual(ed.file_explorer.components.get("selected_file"), "enemy.py")
+        self.assertEqual(ed.file_explorer.items.get_value("selected_file"), "enemy.py")
         # BUT code editor buffer is NOT overwritten (original file still open!)
         self.assertIn("def original():", ed.code.buffer.text)
 
@@ -674,13 +659,13 @@ class AssetSystemTests(unittest.TestCase):
         # Start dragging enemy.py from File Explorer
         ed.reveal_file(self.enemy_script)
         ed.file_explorer_sync()
-        row = next(r for r in ed.file_explorer_rows if r.visible and "enemy.py" in r.components.get("text", ""))
+        row = next(r for r in ed.file_explorer_rows if r.visible and "enemy.py" in r.items.get_value("text", ""))
         # Mouse press initiates drag on enemy.py
         self.send(("drag", row.x + 20, row.y + 10, 1, 0, 10, 0))
         self.runtime.step(0)
 
         # Active asset_drag is set for enemy.py
-        drag_data = ed.app.components.get("asset_drag")
+        drag_data = ed.app.items.get_value("asset_drag")
         self.assertIsNotNone(drag_data)
         self.assertEqual(drag_data["name"], "enemy.py")
 
@@ -689,7 +674,7 @@ class AssetSystemTests(unittest.TestCase):
 
         # Drop onto code editor
         drop_pos = ("release", ed.code.x + 50, ed.code.y + 50, 0, 0)
-        ed.app.components["on_asset_drop"](drag_data, drop_pos)
+        ed.app.items.require_value("on_asset_drop")(drag_data, drop_pos)
         self.runtime.step(0)
 
         # Main script now references enemy.py without having been overwritten!
@@ -703,7 +688,7 @@ class AssetSystemTests(unittest.TestCase):
         # Start by inspecting Game
         ed.select(ed.game)
         self.runtime.step(0)
-        self.assertEqual(ed.identity_label.text, "🔷 Entity: Game")
+        self.assertEqual(ed.identity_label.text, "◆ Entity: Game")
 
         # Create two entities
         ent_a = self.runtime.create(parent=ed.game, name="EntityAlpha")
@@ -716,14 +701,14 @@ class AssetSystemTests(unittest.TestCase):
         self.assertIn("EntityAlpha", ed.identity_label.text)
 
         # Find row for EntityBeta
-        row_b = next(r for r in ed.hierarchy_rows if r.visible and r.relations.get("target") is ent_b)
+        row_b = next(r for r in ed.hierarchy_rows if r.visible and r.items.target("target") is ent_b)
 
         # 1. Single click on EntityBeta row
         self.send(("click", row_b.x + 40, row_b.y + 10, 1, 0))
         self.runtime.step(0)
 
         # Selection relation is updated to EntityBeta (for hierarchy/viewport highlight)
-        self.assertIs(ed.app.relations.get("selection"), ent_b)
+        self.assertIs(ed.app.items.target("selection"), ent_b)
         # BUT Inspector STILL inspects EntityAlpha!
         self.assertIn("EntityAlpha", ed.identity_label.text)
 
@@ -749,12 +734,12 @@ class AssetSystemTests(unittest.TestCase):
         self.assertIn("TargetEntity", ed.identity_label.text)
 
         # Single-click/drag DraggedEntity from Hierarchy
-        row_drag = next(r for r in ed.hierarchy_rows if r.visible and r.relations.get("target") is dragged_ent)
+        row_drag = next(r for r in ed.hierarchy_rows if r.visible and r.items.target("target") is dragged_ent)
         self.send(("drag", row_drag.x + 40, row_drag.y + 10, 1, 0, 10, 0))
         self.runtime.step(0)
 
         # Active entity_drag is set
-        ent_drag = ed.app.components.get("entity_drag")
+        ent_drag = ed.app.items.get_value("entity_drag")
         self.assertIsNotNone(ent_drag)
         self.assertEqual(ent_drag["name"], "DraggedEntity")
 
@@ -762,13 +747,13 @@ class AssetSystemTests(unittest.TestCase):
         self.assertIn("TargetEntity", ed.identity_label.text)
 
         # Drop onto TargetEntity's Inspector components section
-        drop_insp = ("release", ed.inspector.x + 50, ed.components_title.y + 15, 0, 0)
-        ed.app.components["on_entity_drop"](ent_drag, drop_insp)
+        drop_insp = ("release", ed.inspector.x + 50, ed.items_title.y + 15, 0, 0)
+        ed.app.items.require_value("on_entity_drop")(ent_drag, drop_insp)
         self.runtime.step(0)
 
         # TargetEntity has component pointing to DraggedEntity
-        self.assertIn("draggedentity", target_ent.components)
-        self.assertIs(target_ent.components["draggedentity"], dragged_ent)
+        self.assertIn("draggedentity", target_ent.items.value_dict())
+        self.assertIs(target_ent.items.require_value("draggedentity"), dragged_ent)
         # Inspector remains on TargetEntity showing the new component
         self.assertIn("TargetEntity", ed.identity_label.text)
 

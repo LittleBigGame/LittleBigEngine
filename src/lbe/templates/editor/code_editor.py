@@ -17,7 +17,8 @@ def check_diagnostics(source):
     if not source:
         return None
     try:
-        ast.parse(source)
+        from lbe.references import lower_references
+        ast.parse(lower_references(source, "<editor>")[0])
         return None
     except SyntaxError as err:
         return {
@@ -155,12 +156,12 @@ VISIBLE_ITEMS = 8
 
 def start():
     """Attach input callbacks once at system start, not every frame."""
-    entity.components["inline_references"] = True
-    target = entity if "buffer" in entity.components else None
+    entity.items.set_value("inline_references", True)
+    target = entity if entity.items.has_value("buffer") else None
     if target is not None:
-        target.components["on_text"] = handle_editor_text
-        target.components["on_key"] = handle_editor_key
-        target.components["on_scroll"] = handle_editor_scroll
+        target.items.set_value("on_text", handle_editor_text)
+        target.items.set_value("on_key", handle_editor_key)
+        target.items.set_value("on_scroll", handle_editor_scroll)
 
 
 def find_open_bracket_indent(text, cursor, close_char):
@@ -185,12 +186,12 @@ def find_open_bracket_indent(text, cursor, close_char):
 
 
 def handle_editor_text(control, event):
-    hover_state = control.components.get("hover_state")
+    hover_state = control.items.get_value("hover_state")
     if hover_state:
         hover_state["active"] = False
 
     char = event[1]
-    control.components["completion_request"] = "auto" if len(char) == 1 and (char.isidentifier() or char == ".") else None
+    control.items.set_value("completion_request", "auto" if len(char) == 1 and (char.isidentifier() or char == ".") else None)
     buffer = control.buffer
     start, end = buffer.selection
 
@@ -201,7 +202,7 @@ def handle_editor_text(control, event):
         buffer.insert(char + selected + close_char)
         buffer.anchor = start + 1
         buffer.cursor = start + 1 + len(selected)
-        control.components.touch("buffer")
+        control.items.touch_value("buffer")
         return True
 
     # 2. Type-over or dedent closing delimiter
@@ -221,7 +222,7 @@ def handle_editor_text(control, event):
                     buffer.cursor = line_start + len(line_prefix)
                     buffer.insert(target_indent)
             buffer.move("RIGHT")
-            control.components.touch("buffer")
+            control.items.touch_value("buffer")
             return True
 
         # Dedent + insert for bracket closers on empty lines (not quotes)
@@ -232,7 +233,7 @@ def handle_editor_text(control, event):
                 buffer.cursor = line_start + len(line_prefix)
                 buffer.insert(target_indent)
             buffer.insert(char)
-            control.components.touch("buffer")
+            control.items.touch_value("buffer")
             return True
 
     # 3. Auto-close opening delimiter
@@ -247,33 +248,33 @@ def handle_editor_text(control, event):
         close_char = PAIRS[char]
         buffer.insert(char + close_char)
         buffer.cursor = buffer.anchor = start + 1
-        control.components.touch("buffer")
+        control.items.touch_value("buffer")
         return True
 
     return False
 
 
 def handle_editor_scroll(control, event):
-    hover_state = control.components.get("hover_state")
+    hover_state = control.items.get_value("hover_state")
     if hover_state:
         hover_state["active"] = False
 
-    ac_state = control.components.get("autocomplete_state")
+    ac_state = control.items.get_value("autocomplete_state")
     if ac_state and ac_state.get("active") and ac_state.get("matches"):
-        children = {c.components.get("part"): c for c in control.children}
+        children = {c.items.get_value("part"): c for c in control.children}
         popup = children.get("autocomplete_popup")
         if popup and popup.visible and contains(popup, event[1], event[2]):
             scroll = ac_state.get("scroll", 0)
             max_scroll = max(0, len(ac_state["matches"]) - VISIBLE_ITEMS)
             scroll_dy = event[4]
             ac_state["scroll"] = max(0, min(max_scroll, scroll - int(scroll_dy)))
-            control.components.touch("buffer")
+            control.items.touch_value("buffer")
             return True
     return False
 
 
 def handle_editor_key(control, event):
-    hover_state = control.components.get("hover_state")
+    hover_state = control.items.get_value("hover_state")
     if hover_state:
         hover_state["active"] = False
 
@@ -281,7 +282,7 @@ def handle_editor_key(control, event):
     buffer = control.buffer
     start, end = buffer.selection
 
-    ac_state = control.components.setdefault("autocomplete_state", {"active": False})
+    ac_state = control.items.ensure_value("autocomplete_state", {"active": False})
     if ctrl and key == "SPACE":
         control.completion_request = "explicit"
         return True
@@ -323,13 +324,13 @@ def handle_editor_key(control, event):
     # Ctrl+/ comment toggle
     if ctrl and key in ("SLASH", "/"):
         buffer.toggle_comment()
-        control.components.touch("buffer")
+        control.items.touch_value("buffer")
         return True
 
     # Tab / Shift+Tab indent and dedent
     if key == "TAB":
         buffer.indent(dedent=shift)
-        control.components.touch("buffer")
+        control.items.touch_value("buffer")
         return True
 
     # Backspace deleting empty pair
@@ -338,7 +339,7 @@ def handle_editor_key(control, event):
             pair = (buffer.text[buffer.cursor - 1], buffer.text[buffer.cursor])
             if pair in EMPTY_PAIRS:
                 buffer.replace(buffer.cursor - 1, buffer.cursor + 1, "")
-                control.components.touch("buffer")
+                control.items.touch_value("buffer")
                 return True
 
     return False
@@ -351,7 +352,7 @@ def dismiss_completion(control, state):
     future = state.pop("future", None)
     if future:
         future.cancel()
-    control.components["completion_request"] = None
+    control.items.set_value("completion_request", None)
 
 
 def accept_completion(control, state, index):
@@ -365,12 +366,12 @@ def accept_completion(control, state, index):
     while end < len(buffer.text) and (buffer.text[end].isalnum() or buffer.text[end] == "_"):
         end += 1
     buffer.replace(start, end, chosen)
-    control.components.touch("buffer")
+    control.items.touch_value("buffer")
     dismiss_completion(control, state)
 
 
 def sync_autocomplete_popup(target, ui, ac_state):
-    children = {c.components.get("part"): c for c in target.children}
+    children = {c.items.get_value("part"): c for c in target.children}
 
     def part(name, kind, **values):
         if name not in children:
@@ -395,8 +396,8 @@ def sync_autocomplete_popup(target, ui, ac_state):
     scroll = max(0, min(ac_state.get("scroll", 0), max(0, len(matches) - VISIBLE_ITEMS)))
     ac_state["scroll"] = scroll
 
-    pitch = target.components.get("pitch", 8)
-    line_height = target.components.get("line_height", 20)
+    pitch = target.items.get_value("pitch", 8)
+    line_height = target.items.get_value("line_height", 20)
     row, col = target.buffer.position
     caret_x = target.x + 48 + (col - target.buffer.horizontal) * pitch
     caret_y = target.y + 6 + (row - target.buffer.scroll) * line_height
@@ -450,7 +451,7 @@ MAX_HOVER_DOC_LINES = 6
 
 
 def sync_hover_tooltip(target, ui, hover_state):
-    children = {c.components.get("part"): c for c in target.children}
+    children = {c.items.get_value("part"): c for c in target.children}
 
     def part(name, kind, **values):
         if name not in children:
@@ -473,7 +474,7 @@ def sync_hover_tooltip(target, ui, hover_state):
 
     info = hover_state["info"]
     mx, my = hover_state.get("hover_pos", (target.x, target.y))
-    pitch = target.components.get("pitch", 8)
+    pitch = target.items.get_value("pitch", 8)
 
     title_text = info.get("description", info.get("name", ""))
     signatures = info.get("signatures", [])
@@ -536,7 +537,7 @@ def sync_hover_tooltip(target, ui, hover_state):
 
 def update(dt):
     """Specialized behaviors for code editing (synchronization, shortcuts, status)."""
-    target = entity if "buffer" in entity.components else None
+    target = entity if entity.items.has_value("buffer") else None
     if target is None:
         return
 
@@ -544,29 +545,29 @@ def update(dt):
     text = buffer.text
 
     # 1. Syntax highlighting
-    last_text = target.components.get("_last_highlight_text")
+    last_text = target.items.get_value("_last_highlight_text")
     if last_text != text:
-        target.components["line_spans"] = highlight_python_lines(text)
-        target.components["_last_highlight_text"] = text
+        target.items.set_value("line_spans", highlight_python_lines(text))
+        target.items.set_value("_last_highlight_text", text)
 
     # 2. Syntax / compile error diagnostics
-    last_diag_text = target.components.get("_last_diag_text")
+    last_diag_text = target.items.get_value("_last_diag_text")
     if last_diag_text != text:
-        target.components["diagnostic"] = check_diagnostics(text)
-        target.components["_last_diag_text"] = text
+        target.items.set_value("diagnostic", check_diagnostics(text))
+        target.items.set_value("_last_diag_text", text)
 
     # 3. Bracket matching (skip if text+cursor unchanged)
     bracket_key = (text, buffer.cursor)
-    if target.components.get("_last_bracket_key") != bracket_key:
-        target.components["matching_brackets"] = find_matching_brackets(text, buffer.cursor)
-        target.components["_last_bracket_key"] = bracket_key
+    if target.items.get_value("_last_bracket_key") != bracket_key:
+        target.items.set_value("matching_brackets", find_matching_brackets(text, buffer.cursor))
+        target.items.set_value("_last_bracket_key", bracket_key)
 
     # 4. Autocomplete
-    ui = target.root.components.get("ui")
-    ac_state = target.components.setdefault("autocomplete_state", {"active": False, "matches": [], "selected": 0, "scroll": 0, "prefix": ""})
+    ui = target.root.items.get_value("ui")
+    ac_state = target.items.ensure_value("autocomplete_state", {"active": False, "matches": [], "selected": 0, "scroll": 0, "prefix": ""})
 
     snapshot = (text, buffer.cursor, buffer.anchor)
-    request = target.components.pop("completion_request", None)
+    request = target.items.remove_value("completion_request", None)
     if not ui or ui.focused is not target or buffer.cursor != buffer.anchor:
         dismiss_completion(target, ac_state)
     else:
@@ -580,27 +581,27 @@ def update(dt):
                 ac_state["scheduled"] = monotonic() + (0.2 if request == "auto" else 0)
         if "scheduled" in ac_state and monotonic() >= ac_state["scheduled"]:
             ac_state.pop("scheduled")
-            context = target.components.get("completion_context")
+            context = target.items.get_value("completion_context")
             if context is None:
-                context = target.components.get("completion_components", ())
+                context = target.items.get_value("completion_components", ())
             ac_state["future"] = request_completion(text, buffer.cursor,
-                target.components.get("source_path", project / "untitled.py"),
+                target.items.get_value("source_path", project / "untitled.py"),
                 context)
         future = ac_state.get("future")
         if future is not None and future.done():
             ac_state.pop("future")
             try:
                 prefix, matches = future.result()
-                target.components.pop("completion_error", None)
+                target.items.remove_value("completion_error", None)
             except Exception as error:
-                target.components["completion_error"] = str(error)
+                target.items.set_value("completion_error", str(error))
                 prefix, matches = "", []
             if ac_state.get("snapshot") == snapshot:
                 ac_state.update(active=bool(matches), matches=matches, prefix=prefix, selected=0, scroll=0)
 
     # 5. Hover inspection
-    hover_state = target.components.setdefault("hover_state", {"active": False, "dwell_start": 0.0, "last_mouse": (-100, -100)})
-    hover_snapshot = (text, str(target.components.get("source_path")), target.components.get("completion_context"))
+    hover_state = target.items.ensure_value("hover_state", {"active": False, "dwell_start": 0.0, "last_mouse": (-100, -100)})
+    hover_snapshot = (text, str(target.items.get_value("source_path")), target.items.get_value("completion_context"))
     if hover_state.get("snapshot") != hover_snapshot:
         future = hover_state.pop("future", None)
         if future:
@@ -622,16 +623,16 @@ def update(dt):
         else:
             if not hover_state.get("active") and not hover_state.get("future") and not hover_state.get("resolved_empty"):
                 if monotonic() - hover_state.get("dwell_start", monotonic()) >= 0.35:
-                    pitch = target.components.get("pitch", 8)
-                    line_h = target.components.get("line_height", 20)
+                    pitch = target.items.get_value("pitch", 8)
+                    line_h = target.items.get_value("line_height", 20)
                     h_row = max(0, int((my - target.y - 6) // line_h)) + buffer.scroll
                     h_col = max(0, round((mx - target.x - 48) / pitch)) + buffer.horizontal
                     lines = text.split("\n")
                     if 0 <= h_row < len(lines) and h_col < len(lines[h_row]):
                         line_str = lines[h_row]
                         if line_str and (line_str[min(h_col, len(line_str) - 1)].isalnum() or line_str[min(h_col, len(line_str) - 1)] == "_"):
-                            context = target.components.get("completion_context") or target.components.get("completion_components", ())
-                            hover_state["future"] = request_hover(text, h_row, h_col, target.components.get("source_path", project / "untitled.py"), context)
+                            context = target.items.get_value("completion_context") or target.items.get_value("completion_components", ())
+                            hover_state["future"] = request_hover(text, h_row, h_col, target.items.get_value("source_path", project / "untitled.py"), context)
                             hover_state["hover_pos"] = (mx, my)
                         else:
                             hover_state["resolved_empty"] = True
@@ -663,24 +664,24 @@ def update(dt):
 
 
 def stop():
-    state = entity.components.get('autocomplete_state')
+    state = entity.items.get_value('autocomplete_state')
     if state is not None:
         dismiss_completion(entity, state)
-    hover_state = entity.components.get('hover_state')
+    hover_state = entity.items.get_value('hover_state')
     if hover_state:
         hover_state["active"] = False
         fut = hover_state.pop("future", None)
         if fut:
             fut.cancel()
     for key in ("on_key", "on_text", "on_scroll"):
-        callback = entity.components.get(key)
+        callback = entity.items.get_value(key)
         if getattr(callback, "__globals__", None) is globals():
-            entity.components.pop(key, None)
+            entity.items.remove_value(key, None)
     # Hide popup child entities so they don't linger after system stop
     popup_parts = ("autocomplete_popup", "ac_scroll_track", "ac_scroll_thumb",
                    "hover_panel", "hover_title", "hover_doc")
     for child in entity.children:
-        p = child.components.get("part", "")
+        p = child.items.get_value("part", "")
         if p in popup_parts or p.startswith("hover_line:") or p.startswith("ac_item:"):
             child.visible = False
 

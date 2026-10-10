@@ -14,7 +14,7 @@ from lbe.project import (
     serialize_entity,
     serialize_entities,
     deserialize_entities,
-    migrate_project_data,
+    validate_project_data,
     save_project,
     load_project_data,
     load_project,
@@ -83,7 +83,7 @@ class ProjectPersistenceTests(unittest.TestCase):
 
     def test_unsupported_component_on_entity_raises_type_error(self):
         entity = self.runtime.create()
-        entity.components["callback"] = lambda: None
+        entity.items.set_value("callback", lambda: None)
         with self.assertRaises(TypeError) as ctx:
             serialize_entity(entity)
         self.assertIn("cannot be serialized", str(ctx.exception))
@@ -93,8 +93,8 @@ class ProjectPersistenceTests(unittest.TestCase):
         child_id = uuid4()
         parent = self.runtime.create(identity=parent_id, tags=["root", "game"], name="GameRoot", level=1)
         child = self.runtime.create(identity=child_id, parent=parent, tags=["actor"], name="Player", hp=100)
-        parent.relations["player"] = child
-        child.relations["target"] = parent
+        parent.items.connect("player", child)
+        child.items.connect("target", parent)
 
         serialized = serialize_entities([parent, child])
         self.assertEqual(len(serialized), 2)
@@ -112,8 +112,8 @@ class ProjectPersistenceTests(unittest.TestCase):
 
         self.assertEqual(r_parent.id, parent_id)
         self.assertEqual(r_child.id, child_id)
-        self.assertEqual(set(r_parent.tags), {"root", "game"})
-        self.assertEqual(set(r_child.tags), {"actor"})
+        self.assertEqual(set(set(r_parent.items.tag_names())), {"root", "game"})
+        self.assertEqual(set(set(r_child.items.tag_names())), {"actor"})
         self.assertEqual(r_parent.name, "GameRoot")
         self.assertEqual(r_parent.level, 1)
         self.assertEqual(r_child.name, "Player")
@@ -124,8 +124,8 @@ class ProjectPersistenceTests(unittest.TestCase):
         self.assertEqual(r_parent.children, (r_child,))
 
         # Relations (reference integrity)
-        self.assertIs(r_parent.relations["player"], r_child)
-        self.assertIs(r_child.relations["target"], r_parent)
+        self.assertIs(r_parent.items.require_target("player"), r_child)
+        self.assertIs(r_child.items.require_target("target"), r_parent)
 
     def test_system_attachments_serialized_and_reconstructed_safely(self):
         project_dir = Path(self.directory.name)
@@ -134,11 +134,12 @@ class ProjectPersistenceTests(unittest.TestCase):
 
         entity = self.runtime.create(x=0.0)
         definition = self.runtime.assets.system(script_path)
-        entity.systems.attach("movement", definition)
+        entity.items.attach_system("movement", definition)
 
         serialized = serialize_entities([entity], project_dir=project_dir)
-        self.assertIn("movement", serialized[0]["systems"])
-        self.assertEqual(serialized[0]["systems"]["movement"]["path"], "movement.py")
+        movement = next(item for item in serialized[0]['items'].values() if item['name'] == 'movement')
+        self.assertEqual(movement['type'], 'System')
+        self.assertEqual(movement['definition']['path'], 'movement.py')
 
         # Restore into runtime2
         runtime2 = Runtime()
@@ -146,8 +147,8 @@ class ProjectPersistenceTests(unittest.TestCase):
         restored = deserialize_entities(serialized, runtime2, project_dir=project_dir)
         r_entity = restored[entity.id]
 
-        self.assertIn("movement", r_entity.systems)
-        self.assertTrue(r_entity.systems["movement"].running)
+        self.assertIn("movement", r_entity.items.behaviour_dict('system'))
+        self.assertTrue(r_entity.items.behaviour("movement", kind='system').running)
         runtime2.step(1.0)
         self.assertEqual(r_entity.x, 1.0)
 
@@ -155,11 +156,8 @@ class ProjectPersistenceTests(unittest.TestCase):
         project_dir = Path(self.directory.name)
         data = [{
             "id": str(uuid4()),
-            "parent": None,
-            "tags": [],
-            "components": {},
-            "relations": {},
-            "systems": {"nonexistent": {"path": "missing_script.py"}},
+            "items": {str(uuid4()): {'type': 'System', 'name': 'nonexistent',
+                                    'definition': {'path': 'missing_script.py'}}},
         }]
 
         runtime2 = Runtime()
@@ -179,11 +177,12 @@ class ProjectPersistenceTests(unittest.TestCase):
         self.assertIsNotNone(loaded_data)
         self.assertEqual(loaded_data["version"], CURRENT_VERSION)
         self.assertEqual(len(loaded_data["entities"]), 1)
-        self.assertEqual(loaded_data["entities"][0]["components"]["name"], "TestEntity")
+        name_item = next(item for item in loaded_data['entities'][0]['items'].values() if item['name'] == 'name')
+        self.assertEqual(name_item['value'], 'TestEntity')
         self.assertEqual(loaded_data["layout"]["left_column_w"], 400)
         self.assertEqual(loaded_data["layout"]["camera"]["zoom"], 64.0)
 
-    def test_migration_pipeline_v0_to_v1(self):
+    def test_unversioned_legacy_project_is_rejected(self):
         # v0 format without version, with list components and comma-separated tags string
         v0_data = {
             "entities": [
@@ -199,12 +198,9 @@ class ProjectPersistenceTests(unittest.TestCase):
             # layout missing
         }
 
-        migrated = migrate_project_data(v0_data)
-        self.assertEqual(migrated["version"], CURRENT_VERSION)
-        self.assertIn("layout", migrated)
-        e = migrated["entities"][0]
-        self.assertEqual(e["tags"], ["root", "game"])
-        self.assertEqual(e["components"], {"x": 10, "name": "LegacyGame"})
+        with self.assertRaises(ValueError):
+            validate_project_data(v0_data)
+        self.assertNotIn('version', v0_data)
 
     def test_migration_rejects_newer_version(self):
         future_data = {
@@ -212,8 +208,8 @@ class ProjectPersistenceTests(unittest.TestCase):
             "entities": [],
         }
         with self.assertRaises(ValueError) as ctx:
-            migrate_project_data(future_data)
-        self.assertIn("newer than supported version", str(ctx.exception))
+            validate_project_data(future_data)
+        self.assertIn("Unsupported project format", str(ctx.exception))
 
     def test_serialization_error_and_skip_modes(self):
         class Dummy:
@@ -250,8 +246,8 @@ class ProjectPersistenceTests(unittest.TestCase):
 
         app_entity = runtime.resolve(app_id)
         self.assertEqual(app_entity.id, app_id)
-        self.assertEqual(app_entity.components.get("name"), "Application")
-        self.assertIn("root", app_entity.tags)
+        self.assertEqual(app_entity.items.get_value("name"), "Application")
+        self.assertIn("root", set(app_entity.items.tag_names()))
 
     def test_system_script_resolves_application_entity_by_uuid_after_reload(self):
         project_dir = Path(self.directory.name)
@@ -265,10 +261,10 @@ class ProjectPersistenceTests(unittest.TestCase):
         app_entity = runtime.create(identity=app_id, name="Application", tags=["root"])
         game_entity = runtime.create(name="Game", tags=["game"], parent=app_entity)
         sys_def = runtime.assets.system(script_path)
-        game_entity.systems.attach("app_resolver", sys_def)
+        game_entity.items.attach_system("app_resolver", sys_def)
         runtime.step(0)
 
-        sys_inst = game_entity.systems["app_resolver"]
+        sys_inst = game_entity.items.behaviour("app_resolver", kind='system')
         self.assertTrue(sys_inst.running, list(sys_inst.errors))
         self.assertEqual(len(sys_inst.errors), 0)
         self.assertEqual(sys_inst.namespace["app"].id, app_id)
@@ -283,11 +279,11 @@ class ProjectPersistenceTests(unittest.TestCase):
         runtime2 = Runtime()
         self.addCleanup(runtime2.close)
         app2 = runtime2.create(identity=UUID(data["application_id"]), name="Application", tags=["root"])
-        restored = deserialize_entities(data["entities"], runtime2, default_parent=app2, project_dir=project_dir)
+        restored = deserialize_entities(data["entities"], runtime2, project_dir=project_dir)
         runtime2.step(0)
 
-        game2 = next(e for e in restored.values() if e.components.get("name") == "Game")
-        sys_inst2 = game2.systems["app_resolver"]
+        game2 = next(e for e in restored.values() if e.items.get_value("name") == "Game")
+        sys_inst2 = game2.items.behaviour("app_resolver", kind='system')
         self.assertTrue(sys_inst2.running, list(sys_inst2.errors))
         self.assertEqual(len(sys_inst2.errors), 0)
         self.assertEqual(sys_inst2.namespace["app"].id, app_id)
@@ -306,38 +302,38 @@ class ProjectPersistenceTests(unittest.TestCase):
 
         runtime = load_project(window, graphics, input_state, project_dir, template=template_path("editor"))
         runtime.step(0)
-        editor = runtime.entities[0].components["application_state"]
+        editor = runtime.entities[0].items.require_value("application_state")
         app_id = editor.app.id
 
         render_path = project_dir / "render.py"
         old_content = render_path.read_text(encoding="utf-8")
         render_path.write_text(f'app = resolve("{app_id}")\n' + old_content, encoding="utf-8")
 
-        editor.app.systems["app"].namespace["save_editor_project"]()
+        editor.app.items.behaviour("app", kind='system').namespace["save_editor_project"]()
         runtime.close()
 
         runtime2 = load_project(window, graphics, input_state, project_dir, template=template_path("editor"))
         self.addCleanup(runtime2.close)
         runtime2.step(0)
-        editor2 = runtime2.entities[0].components["application_state"]
+        editor2 = runtime2.entities[0].items.require_value("application_state")
 
         self.assertEqual(editor2.app.id, app_id)
 
-        render_sys = editor2.game.systems["render"]
+        render_sys = editor2.game.items.behaviour("render", kind='system')
         self.assertTrue(render_sys.running, list(render_sys.errors))
         self.assertEqual(len(render_sys.errors), 0)
         self.assertEqual(render_sys.namespace["app"].id, app_id)
 
         editor2.open_specific_file(render_path)
         runtime2.step(0)
-        pills = [e for e in runtime2.entities if "asset_pill" in e.tags]
-        app_pills = [p for p in pills if p.components.get("asset_id") == str(app_id)]
+        pills = [e for e in runtime2.entities if e.items.has_tag("asset_pill")]
+        app_pills = [p for p in pills if p.items.get_value("asset_id") == str(app_id)]
         self.assertTrue(len(app_pills) >= 1)
-        self.assertIn("Application", app_pills[0].components.get("asset_name", ""))
-        self.assertIn("Entity", app_pills[0].components.get("asset_name", ""))
-        self.assertNotIn("Asset", app_pills[0].components.get("asset_name", ""))
+        self.assertIn("Application", app_pills[0].items.get_value("asset_name", ""))
+        self.assertIn("Entity", app_pills[0].items.get_value("asset_name", ""))
+        self.assertNotIn("Asset", app_pills[0].items.get_value("asset_name", ""))
 
-    def test_system_script_resolves_entity_by_name(self):
+    def test_system_script_rejects_display_name_as_identity(self):
         project_dir = Path(self.directory.name)
         script_path = project_dir / "name_resolve_sys.py"
         script_path.write_text(
@@ -351,16 +347,19 @@ class ProjectPersistenceTests(unittest.TestCase):
         runtime = load_project(window, graphics, input_state, project_dir, template=template_path("demo"))
         self.addCleanup(runtime.close)
 
-        game = next(e for e in runtime.entities if e.components.get("name") == "Game")
+        game = next(e for e in runtime.entities if e.items.get_value("name") == "Game")
         sys_def = runtime.assets.system(script_path)
-        game.systems.attach("name_resolve_sys", sys_def)
+        before = runtime.entities
+        game.items.attach_system("name_resolve_sys", sys_def)
         runtime.step(0)
 
-        sys_inst = game.systems["name_resolve_sys"]
-        self.assertTrue(sys_inst.running, list(sys_inst.errors))
-        self.assertEqual(len(sys_inst.errors), 0)
-        self.assertEqual(sys_inst.namespace["app"].components.get("name"), "Application")
-        self.assertEqual(sys_inst.namespace["game"].components.get("name"), "Game")
+        sys_inst = game.items.behaviour("name_resolve_sys", kind='system')
+        self.assertFalse(sys_inst.running)
+        self.assertIn('Expected an entity UUID', sys_inst.errors[-1].message)
+        self.assertEqual(runtime.entities, before)
+        with self.assertRaises(KeyError):
+            runtime.resolve('Game')
+        self.assertIs(runtime.resolve(str(game.id)), game)
 
         with self.assertRaises(KeyError):
             runtime.resolve("NonExistentEntityName12345")
@@ -378,18 +377,18 @@ class ProjectPersistenceTests(unittest.TestCase):
         runtime2 = Runtime()
         self.addCleanup(runtime2.close)
         app2 = runtime2.create(identity=UUID(data["application_id"]), name="Application", tags=["root"])
-        restored = deserialize_entities(data["entities"], runtime2, default_parent=app2, project_dir=project_dir)
+        restored = deserialize_entities(data["entities"], runtime2, project_dir=project_dir)
 
-        player2 = next(e for e in restored.values() if e.components.get("name") == "Player")
-        self.assertIs(player2.components["app_ref"], app2)
-        self.assertEqual(player2.components["app_ref"].id, app_id)
+        player2 = next(e for e in restored.values() if e.items.get_value("name") == "Player")
+        self.assertIs(player2.items.require_value("app_ref"), app2)
+        self.assertEqual(player2.items.require_value("app_ref").id, app_id)
 
     def test_relation_referencing_application_entity_persists(self):
         project_dir = Path(self.directory.name)
         app_id = uuid4()
         app_entity = self.runtime.create(identity=app_id, name="Application", tags=["root"])
         game_entity = self.runtime.create(name="Game", tags=["game"])
-        game_entity.relations["app_root"] = app_entity
+        game_entity.items.connect("app_root", app_entity)
 
         save_project(project_dir, entities=[game_entity], application_id=app_id)
 
@@ -397,12 +396,12 @@ class ProjectPersistenceTests(unittest.TestCase):
         runtime2 = Runtime()
         self.addCleanup(runtime2.close)
         app2 = runtime2.create(identity=UUID(data["application_id"]), name="Application", tags=["root"])
-        restored = deserialize_entities(data["entities"], runtime2, default_parent=app2, project_dir=project_dir)
+        restored = deserialize_entities(data["entities"], runtime2, project_dir=project_dir)
 
-        game2 = next(e for e in restored.values() if e.components.get("name") == "Game")
-        self.assertIn("app_root", game2.relations)
-        self.assertIs(game2.relations["app_root"], app2)
-        self.assertEqual(game2.relations["app_root"].id, app_id)
+        game2 = next(e for e in restored.values() if e.items.get_value("name") == "Game")
+        self.assertIn("app_root", game2.items.link_dict())
+        self.assertIs(game2.items.require_target("app_root"), app2)
+        self.assertEqual(game2.items.require_target("app_root").id, app_id)
 
     def test_parent_hierarchy_under_application_entity_persists(self):
         project_dir = Path(self.directory.name)
@@ -416,9 +415,9 @@ class ProjectPersistenceTests(unittest.TestCase):
         runtime2 = Runtime()
         self.addCleanup(runtime2.close)
         app2 = runtime2.create(identity=UUID(data["application_id"]), name="Application", tags=["root"])
-        restored = deserialize_entities(data["entities"], runtime2, default_parent=app2, project_dir=project_dir)
+        restored = deserialize_entities(data["entities"], runtime2, project_dir=project_dir)
 
-        game2 = next(e for e in restored.values() if e.components.get("name") == "Game")
+        game2 = next(e for e in restored.values() if e.items.get_value("name") == "Game")
         self.assertIs(game2.parent, app2)
         self.assertEqual(game2.parent.id, app_id)
 
@@ -444,7 +443,7 @@ class ProjectPersistenceTests(unittest.TestCase):
         self.assertEqual(app1_id, expected_id)
         self.assertEqual(app2_id, expected_id)
 
-    def test_load_project_recovers_app_id_from_layout_selection_legacy(self):
+    def test_load_project_rejects_legacy_before_any_external_writes(self):
         project_dir = Path(self.directory.name)
         legacy_app_id = uuid4()
         data = {
@@ -468,12 +467,17 @@ class ProjectPersistenceTests(unittest.TestCase):
         window = SimpleNamespace(width=800, height=600)
         graphics = RecordingGraphics()
         input_state = Input()
-        runtime = load_project(window, graphics, input_state, project_dir)
-        self.addCleanup(runtime.close)
-
-        app_entity = runtime.resolve(legacy_app_id)
-        self.assertEqual(app_entity.id, legacy_app_id)
-        self.assertEqual(app_entity.components.get("name"), "Application")
+        before = {path.name: path.read_bytes() for path in project_dir.iterdir()}
+        from unittest.mock import patch
+        with patch('lbe.user_state.save_last_project') as remember, patch('lbe.project_templates.initialize_template') as initialize:
+            with self.assertRaises(ValueError):
+                load_project(window, graphics, input_state, project_dir, template=template_path('editor'))
+            remember.assert_not_called()
+            initialize.assert_not_called()
+        self.assertEqual({path.name: path.read_bytes() for path in project_dir.iterdir()}, before)
+        with self.assertRaises(ValueError):
+            save_project(project_dir, entities=[])
+        self.assertEqual({path.name: path.read_bytes() for path in project_dir.iterdir()}, before)
 
     def test_unresolved_entity_token_in_editor_displays_as_entity_not_asset(self):
         from lbe.ui import UI, TextBuffer
@@ -488,19 +492,19 @@ class ProjectPersistenceTests(unittest.TestCase):
         missing_id = uuid4()
         buf = TextBuffer(f'app = resolve("{missing_id}")\ntex = asset("{missing_id}")\n')
         control = fake_runtime.create(x=0, y=0, w=500, h=300, layer=0, buffer=buf, inline_references=True)
-        control.tags.add("multiline")
+        control.items.add_tag("multiline")
 
         ui._sync_text(control)
 
-        pills = [e for e in fake_runtime.entities if "asset_pill" in e.tags]
-        pill0 = next((p for p in pills if p.components.get("asset_row") == 0), None)
+        pills = [e for e in fake_runtime.entities if e.items.has_tag("asset_pill")]
+        pill0 = next((p for p in pills if p.items.get_value("asset_row") == 0), None)
         self.assertIsNotNone(pill0)
-        self.assertIn("Entity", pill0.components.get("asset_name", ""))
-        self.assertNotIn("Asset", pill0.components.get("asset_name", ""))
+        self.assertIn("Entity", pill0.items.get_value("asset_name", ""))
+        self.assertNotIn("Asset", pill0.items.get_value("asset_name", ""))
 
-        pill1 = next((p for p in pills if p.components.get("asset_row") == 1), None)
+        pill1 = next((p for p in pills if p.items.get_value("asset_row") == 1), None)
         self.assertIsNotNone(pill1)
-        self.assertIn("Asset", pill1.components.get("asset_name", ""))
+        self.assertIn("Asset", pill1.items.get_value("asset_name", ""))
 
 
 if __name__ == "__main__":

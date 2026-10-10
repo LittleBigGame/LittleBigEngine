@@ -31,7 +31,7 @@ def create_launcher_runtime(window, graphics, input_state, on_select_project):
     container = ui.create(root, "Container", "panel", x=0, y=0, w=window.width, h=window.height, color=(17, 23, 31))
 
     title = ui.create(container, "Title", "label", text="LittleBigEngine - Project Manager (LBE v1)", size=16, w=1100, h=26, color=(69, 182, 199, 255))
-    subtitle = ui.create(container, "Subtitle", "label", text="Editor Version: LBE v1 | Full File Manager & Project Launcher", size=10, w=1100, h=18, color=(145, 163, 183, 255))
+    subtitle = ui.create(container, "Subtitle", "label", text="UUID item kernel | Typed references | Inherited components", size=10, w=1100, h=18, color=(145, 163, 183, 255))
 
     # Browser state (Default starting dir from user state or Documents)
     from .user_state import get_last_directory
@@ -45,7 +45,7 @@ def create_launcher_runtime(window, graphics, input_state, on_select_project):
     state.last_page = -1
     state.mode = "browse"  # "browse" or "pick_template"
     state.target_project_path = None
-    root.components["browser_state"] = state
+    root.items.set_value("browser_state", state)
 
     # --- TOP TOOLBAR ---
     # Row 1: Address Bar & Navigation
@@ -230,7 +230,7 @@ def create_launcher_runtime(window, graphics, input_state, on_select_project):
             open_current_btn.text = "Copy Current Folder as Template"
         else:
             title.text = "LittleBigEngine - Project Manager (LBE v1)"
-            subtitle.text = "Editor Version: LBE v1 | Full File Manager & Project Launcher"
+            subtitle.text = "UUID item kernel | Typed references | Inherited components"
             open_current_btn.text = "Open Current Folder as Project"
 
         # Read directory
@@ -298,7 +298,7 @@ def create_launcher_runtime(window, graphics, input_state, on_select_project):
                 row_entity = ui.create(items_container, f"Row_{p.name}", "panel", w=row_w, h=34, color=(25, 34, 45))
                 main_btn = ui.button(row_entity, f"Btn_{p.name}", text=display_name, action=action,
                                      w=max(100, row_w - 12), h=30, color=btn_color, hover_color=btn_hover, ink=ink_color)
-                main_btn.tags.add("main_act")
+                main_btn.items.add_tag("main_act")
                 stack(row_entity, [main_btn], axis="x", padding=2, gap=0)
                 dynamic_rows.append(row_entity)
             else:
@@ -334,7 +334,7 @@ def create_launcher_runtime(window, graphics, input_state, on_select_project):
 
                 main_btn = ui.button(row_entity, f"Btn_{p.name}", text=display_name, action=action,
                                      w=max(100, row_w - 210), h=30, color=btn_color, hover_color=btn_hover, ink=ink_color)
-                main_btn.tags.add("main_act")
+                main_btn.items.add_tag("main_act")
 
                 def make_rename_action(target=p):
                     def handler():
@@ -433,7 +433,7 @@ def create_launcher_runtime(window, graphics, input_state, on_select_project):
         # 5. Position dynamic row children and stack dynamic rows inside items_container
         for r in dynamic_rows:
             r.w = items_container.w - 20
-            main_btn = next((c for c in r.children if "main_act" in c.tags), None)
+            main_btn = next((c for c in r.children if c.items.has_tag("main_act")), None)
             if main_btn:
                 if state.mode == "pick_template":
                     main_btn.w = max(100, r.w - 12)
@@ -450,7 +450,7 @@ def create_launcher_runtime(window, graphics, input_state, on_select_project):
 def update(dt):
     pass
 """)
-    system = root.systems.attach("launcher_layout", sys_def)
+    system = root.items.attach_system("launcher_layout", sys_def)
     system.namespace["update"] = update
 
     # Perform initial layout pass synchronously before first render frame

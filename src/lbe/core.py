@@ -1,172 +1,66 @@
 """Generic entity storage, hierarchy and live queries."""
 
-from collections.abc import MutableMapping, MutableSet
-from contextlib import contextmanager
-from copy import deepcopy
 from uuid import UUID, uuid4
 from math import isfinite
 
 from .events import Changes, Events, ABSENT
+from .items import Component, InheritedComponent, Items, Tag, Relation, Parent
 
 _MISSING = object()
 
 
-class Components(MutableMapping):
-    def __init__(self, entity):
-        self._entity = entity
-        self._values = {}
-
-    def __getitem__(self, key):
-        self._entity._check()
-        return self._values[key]
-
-    def __setitem__(self, key, value):
-        self._entity._check()
-        if not isinstance(key, str) or not key:
-            raise ValueError("Component names must be nonempty strings")
-        previous = self._values.get(key, ABSENT)
-        self._values[key] = value
-        self._entity._changed("component.set", key, old=previous, new=value)
-
-    def __delitem__(self, key):
-        self._entity._check()
-        previous = self._values.pop(key)
-        self._entity._changed("component.remove", key, old=previous)
-
-    def __iter__(self):
-        self._entity._check()
-        return iter(tuple(self._values))
-
-    def __len__(self):
-        self._entity._check()
-        return len(self._values)
-
-    def touch(self, key):
-        """Notify observers after externally mutating an arbitrary object."""
-        self._entity._changed("component.mutate", key, new=self[key])
-
-    @contextmanager
-    def edit(self, key):
-        """Edit a deep copy and commit once, only on successful exit."""
-        value = deepcopy(self[key])
-        yield value
-        self[key] = value
-
-
-class Tags(MutableSet):
-    def __init__(self, entity):
-        self._entity = entity
-        self._values = set()
-
-    def __contains__(self, value):
-        self._entity._check()
-        return value in self._values
-
-    def __iter__(self):
-        self._entity._check()
-        return iter(sorted(self._values))
-
-    def __len__(self):
-        self._entity._check()
-        return len(self._values)
-
-    def add(self, value):
-        self._entity._check()
-        if not isinstance(value, str) or not value:
-            raise ValueError("Tags must be nonempty strings")
-        if value not in self._values:
-            self._values.add(value)
-            self._entity._changed("tag.add", value, old=False, new=True)
-
-    def discard(self, value):
-        self._entity._check()
-        if value in self._values:
-            self._values.remove(value)
-            self._entity._changed("tag.remove", value, old=True, new=False)
-
-
-class Relations(MutableMapping):
-    """Named directed links to live entities in the same runtime."""
-
-    def __init__(self, entity):
-        self._entity = entity
-        self._values = {}
-
-    def __getitem__(self, key):
-        self._entity._check()
-        return self._values[key]
-
-    def __setitem__(self, key, target):
-        self._entity._check()
-        if not isinstance(key, str) or not key:
-            raise ValueError("Relation names must be nonempty strings")
-        self._entity.runtime._validate(target)
-        if target._destroying:
-            raise RuntimeError("Cannot link to an entity during destruction")
-        runtime = self._entity.runtime
-        previous = self._values.get(key)
-        if previous is not None:
-            incoming = runtime._incoming.get(previous)
-            if incoming is not None:
-                incoming.discard((self._entity, key))
-                if not incoming:
-                    runtime._incoming.pop(previous, None)
-        self._values[key] = target
-        runtime._incoming.setdefault(target, set()).add((self._entity, key))
-        self._entity._changed("relation.set", key, old=previous, new=target)
-
-    def __delitem__(self, key):
-        self._entity._check()
-        target = self._values.pop(key)
-        incoming = self._entity.runtime._incoming.get(target)
-        if incoming is not None:
-            incoming.discard((self._entity, key))
-            if not incoming:
-                self._entity.runtime._incoming.pop(target, None)
-        self._entity._changed("relation.remove", key, old=target)
-
-    def __iter__(self):
-        self._entity._check()
-        return iter(tuple(self._values))
-
-    def __len__(self):
-        self._entity._check()
-        return len(self._values)
-
-
 class Entity:
     __slots__ = (
-        "_runtime", "_id", "_alive", "_destroying", "_parent", "_children",
-        "_components", "_tags", "_relations", "_systems", "_scripts",
+        "_runtime", "_id", "_alive", "_destroying", "_items",
     )
 
     def __init__(self, runtime, identity):
-        from .systems import Systems
-        from .scripts import Scripts
-
         object.__setattr__(self, "_runtime", runtime)
         object.__setattr__(self, "_id", identity)
         object.__setattr__(self, "_alive", True)
         object.__setattr__(self, "_destroying", False)
-        object.__setattr__(self, "_parent", None)
-        object.__setattr__(self, "_children", [])
-        object.__setattr__(self, "_components", Components(self))
-        object.__setattr__(self, "_tags", Tags(self))
-        object.__setattr__(self, "_relations", Relations(self))
-        object.__setattr__(self, "_systems", Systems(self))
-        object.__setattr__(self, "_scripts", Scripts(self))
+        object.__setattr__(self, "_items", Items(self))
 
     id = property(lambda self: self._id)
     alive = property(lambda self: self._alive)
     runtime = property(lambda self: self._runtime)
-    components = property(lambda self: self._components)
-    tags = property(lambda self: self._tags)
-    relations = property(lambda self: self._relations)
-    systems = property(lambda self: self._systems)
-    scripts = property(lambda self: self._scripts)
+    items = property(lambda self: self._items)
+    handle = property(lambda self: self.runtime.linker.handle(self.id))
+
+    def __getitem__(self, identity):
+        return self.items[identity]
+
+    def all(self, item_type):
+        return self.items.all(item_type)
+
+    @property
+    def _parent(self):
+        if not self._alive:
+            return None
+        try:
+            return self.runtime.resolve(self.items.named(Parent, "parent").target)
+        except KeyError:
+            return None
+
+    @_parent.setter
+    def _parent(self, target):
+        try:
+            item = self.items.named(Parent, "parent")
+        except KeyError:
+            item = None
+        if target is None:
+            if item is not None:
+                self.items._drop(item.id)
+        else:
+            self.items._put(Parent(target.id, item.id if item else uuid4()))
+
+    @property
+    def _children(self):
+        # Derived adjacency/sibling order, never recursively owned entity records.
+        return self.runtime._children.setdefault(self.id, [])
 
     def run(self, reference, *args, **kwargs):
-        return self.scripts.run(reference,*args,**kwargs)
+        return self.items.run_script(reference, *args, **kwargs)
 
     def _check(self):
         if not self._alive:
@@ -177,23 +71,25 @@ class Entity:
 
     def __getattr__(self, name):
         try:
-            return self.components[name]
+            return self.items.require_value(name)
         except KeyError:
+            if self.items.has_value(name):
+                raise
             raise AttributeError(name) from None
 
     def __setattr__(self, name, value):
         if name == "parent":
             type(self).parent.fset(self, value)
         elif name.startswith("_") or hasattr(type(self), name):
-            raise AttributeError(f"{name} is reserved; use components[{name!r}]")
+            raise AttributeError(f"{name} is reserved; use items.set_value({name!r}, value)")
         else:
-            self.components[name] = value
+            self.items.set_value(name, value)
 
     def __delattr__(self, name):
         if name.startswith("_") or hasattr(type(self), name):
             raise AttributeError(f"{name} is reserved")
         try:
-            del self.components[name]
+            self.items.remove_value(name)
         except KeyError:
             raise AttributeError(name) from None
 
@@ -270,12 +166,12 @@ class Entity:
     @property
     def root(self):
         chain = (self,) + self.ancestors
-        return next((e for e in chain if "root" in e.tags), chain[-1])
+        return next((e for e in chain if e.items.has_tag("root")), chain[-1])
 
     def inherit(self, key, default=_MISSING):
         for entity in (self,) + self.ancestors:
-            if key in entity.components:
-                return entity.components[key]
+            if entity.items.has_value(key):
+                return entity.items.require_value(key)
         if default is _MISSING:
             raise KeyError(key)
         return default
@@ -307,7 +203,7 @@ class Entity:
 
 def _matches_requirement(entity, requirement):
     if isinstance(requirement,str):
-        return requirement in entity.components
+        return entity.items.has_value(requirement)
     from .systems import SystemDefinition
     from .assets import AssetRef
     if isinstance(requirement,(tuple,list)):
@@ -319,10 +215,10 @@ def _matches_requirement(entity, requirement):
         uid=identity(entity,requirement)
         if uid is None:
             return False
-        if str(uid) in entity.scripts or str(uid) in entity.systems:
+        if entity.items.has_behaviour(str(uid), kind='script') or entity.items.has_behaviour(str(uid), kind='system'):
             return True
         registry=entity.runtime.assets.registry
-        for instance in entity.systems.values():
+        for instance in entity.items.behaviour_dict('system').values():
             if instance.definition.asset_id == uid:
                 return True
             try:
@@ -331,12 +227,12 @@ def _matches_requirement(entity, requirement):
             except ValueError:
                 pass
         return False
-    return requirement in entity.components
+    return entity.items.has_value(requirement)
 
 
 def _matches(entity, components, tags):
     tags = (tags,) if isinstance(tags, str) else tags
-    return entity.alive and all(_matches_requirement(entity,k) for k in components) and all(t in entity.tags for t in tags)
+    return entity.alive and all(_matches_requirement(entity,k) for k in components) and all(entity.items.has_tag(t) for t in tags)
 
 
 class Query:
@@ -364,25 +260,15 @@ class Runtime:
         from .systems import Assets
 
         self._entities = {}
+        self._children = {}
+        from .linker import Linker
+        self.linker = Linker(self)
         self._incoming = {}
         self.changes = Changes()
         self.events = Events()
         self.assets = Assets()
         self.services = {}
         self._stepping = False
-        self._incoming_relations = {}
-
-    def _track_relation(self, source, key, target):
-        if target not in self._incoming_relations:
-            self._incoming_relations[target] = set()
-        self._incoming_relations[target].add((source, key))
-
-    def _untrack_relation(self, source, key, target):
-        incoming = self._incoming_relations.get(target)
-        if incoming:
-            incoming.discard((source, key))
-            if not incoming:
-                del self._incoming_relations[target]
 
     @property
     def entities(self):
@@ -393,13 +279,43 @@ class Runtime:
             raise ValueError("Entity must belong to this runtime")
         entity._check()
 
-    def create(self, *, identity=None, parent=None, tags=(), components=None, **values):
+    def _composition_changed(self, identity):
+        """Invalidate derived consumers through normal change observations."""
+        if identity not in self.linker._dependents:
+            return
+        for uid in self.linker.dependents(identity):
+            item = self.linker.objects.get(uid)
+            if not isinstance(item, InheritedComponent):
+                continue
+            owner = self._entities.get(self.linker.owners.get(uid))
+            if owner is None or not owner.alive or owner._destroying:
+                continue
+            try:
+                value = self.linker.component_value(uid)
+            except (KeyError, ValueError, TypeError):
+                value = ABSENT
+            self.changes.publish("component.mutate", owner, item.name, new=value)
+
+    def create(self, *, identity=None, parent=None, tags=(), items=(), **values):
+        if 'components' in values:
+            raise TypeError('create no longer accepts components; supply typed items')
         if parent is not None:
             self._validate(parent)
             if parent._destroying:
                 raise RuntimeError("Cannot create children during parent destruction")
-        data = dict(components or {})
-        data.update(values)
+        data = dict(values)
+        if hasattr(items, 'items'):
+            pairs = tuple(items.items())
+            if any(UUID(str(key)) != item.id for key, item in pairs):
+                raise ValueError('Item dictionary keys must match record UUIDs')
+            declarations = tuple(item for _, item in pairs)
+        else:
+            declarations = tuple(items)
+        ids = [item.id for item in declarations]
+        if any(not isinstance(uid, UUID) for uid in ids):
+            raise TypeError('Item identities must be UUIDs')
+        if len(set(ids)) != len(ids) or any(uid in self.linker.objects for uid in ids):
+            raise ValueError('Duplicate item UUID in entity creation')
         tags = (tags,) if isinstance(tags, str) else tuple(tags)
         if any(not isinstance(k, str) or not k for k in data):
             raise ValueError("Component names must be nonempty strings")
@@ -407,32 +323,44 @@ class Runtime:
             raise ValueError("Tags must be nonempty strings")
         if identity is not None:
             identity = UUID(str(identity))
-            if identity in self._entities:
+            if identity in self.linker.objects:
                 raise ValueError(f"Entity with id {identity} already exists")
         else:
             identity = uuid4()
+        if identity in ids:
+            raise ValueError('An entity and its items must have distinct UUIDs')
         entity = Entity(self, identity)
-        entity._components._values.update(data)
-        entity._tags._values.update(tags)
+        self.linker.register(entity)
+        for name, value in data.items():
+            entity.items._put(Component(name, value))
+        for name in dict.fromkeys(tags):
+            entity.items._put(Tag(name))
         object.__setattr__(entity, "_parent", parent)
         if parent is not None:
             parent._children.append(entity)
         self._entities[entity.id] = entity
+        try:
+            # Sources are registered before inherited declarations are linked.
+            ordered = sorted(declarations, key=lambda item: isinstance(item, InheritedComponent))
+            for item in ordered:
+                entity.items.add(item)
+            if declarations:
+                prefix = [uid for uid in entity.items._records if uid not in ids]
+                entity.items._records = {uid: entity.items._records[uid] for uid in prefix + ids}
+                entity.items._reindex_order()
+        except Exception:
+            self.destroy(entity)
+            raise
         entity._changed("entity.create")
         return entity
 
     def resolve(self, identity):
-        if isinstance(identity, UUID):
-            return self._entities[identity]
-        if isinstance(identity, str):
-            try:
-                return self._entities[UUID(identity)]
-            except ValueError:
-                for entity in self._entities.values():
-                    if entity.components.get("name") == identity:
-                        return entity
-                raise KeyError(identity) from None
-        return self._entities[UUID(str(identity))]
+        """Resolve exact persistent identity, never an editable display name."""
+        try:
+            uid = identity if isinstance(identity, UUID) else UUID(str(identity))
+        except (ValueError, TypeError, AttributeError):
+            raise KeyError(f'Expected an entity UUID, not {identity!r}') from None
+        return self._entities[uid]
 
     def query(self, *components, tags=()):
         return Query(self, None, components, tags, True)
@@ -447,16 +375,20 @@ class Runtime:
         for node in reversed(subtree):
             if not node.alive:
                 continue
-            node.systems.clear()
-            node.scripts.clear()
+            node.items.clear_behaviours('system')
+            node.items.clear_behaviours('script')
             for other, key in tuple(self._incoming.pop(node, ())):
-                if other.alive and other.relations.get(key) is node:
-                    del other.relations[key]
-            node.relations.clear()
+                if other.alive and other.items.target(key) is node:
+                    other.items.disconnect(key)
+            node.items.clear_links()
             if node._parent is not None:
                 node._parent._children.remove(node)
             object.__setattr__(node, "_parent", None)
             del self._entities[node.id]
+            for identity in tuple(node.items):
+                node.items._drop(identity)
+            self.linker.unregister(node.id)
+            self._children.pop(node.id, None)
             object.__setattr__(node, "_alive", False)
             node._changed("entity.destroy")
 
@@ -467,7 +399,7 @@ class Runtime:
             raise ValueError("dt must be a nonnegative number of seconds")
         self._stepping = True
         try:
-            instances = tuple(instance for entity in self.entities for instance in entity.systems.values())
+            instances = tuple(instance for entity in self.entities for instance in entity.items.behaviour_dict('system').values())
             pause_cache = {}
             for phase in ("update", "draw"):
                 for instance in instances:
@@ -478,7 +410,7 @@ class Runtime:
                                 is_p = False
                                 curr = ent
                                 while curr is not None:
-                                    if "paused" in curr.tags or (curr.components.get("paused") is True):
+                                    if curr.items.has_tag("paused") or (curr.items.get_value("paused") is True):
                                         is_p = True
                                         break
                                     if curr in pause_cache:

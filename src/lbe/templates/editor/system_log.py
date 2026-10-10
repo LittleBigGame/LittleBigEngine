@@ -6,15 +6,15 @@ from lbe.ui import put, FIELD, ACCENT, MUTED
 def start():
     global owned_controls
     owned_controls = []
-    ui = entity.root.components['ui']
+    ui = entity.root.items.require_value('ui')
     log.exclude(entity)
-    entity.components['log'] = log
-    entity.components['offset'] = 0
-    entity.components['selected_record'] = None
-    entity.components['on_scroll'] = scroll
-    entity.components['on_click'] = press
-    entity.components['on_drag'] = move
-    entity.components['on_release'] = release
+    entity.items.set_value('log', log)
+    entity.items.set_value('offset', 0)
+    entity.items.set_value('selected_record', None)
+    entity.items.set_value('on_scroll', scroll)
+    entity.items.set_value('on_click', press)
+    entity.items.set_value('on_drag', move)
+    entity.items.set_value('on_release', release)
     for name, text, callback in (
         ('PauseLog', 'Pause', toggle_pause), ('ClearLog', 'Clear', clear),
         ('CallsLog', 'Calls', toggle_calls), ('EditorLog', 'Editor', toggle_editor),
@@ -36,26 +36,26 @@ def stop():
             runtime.destroy(control)
     for name, callback in (('on_scroll', scroll), ('on_click', press),
                            ('on_drag', move), ('on_release', release)):
-        if entity.components.get(name) is callback:
-            del entity.components[name]
-    if entity.root.relations.get('active_drag') is entity:
-        del entity.root.relations['active_drag']
-    entity.components.pop('drag_offset', None)
-    if entity.components.get('log') is log:
-        del entity.components['log']
+        if entity.items.get_value(name) is callback:
+            entity.items.remove_value(name)
+    if entity.root.items.target('active_drag') is entity:
+        entity.root.items.disconnect('active_drag')
+    entity.items.remove_value('drag_offset', None)
+    if entity.items.get_value('log') is log:
+        entity.items.remove_value('log')
     log.excluded.discard(entity.id)
 
 
 def press(control, event):
     if event[3] == 1 and event[2] < entity.y+28:
         entity.drag_offset = (event[1]-entity.x, event[2]-entity.y)
-        entity.root.relations['active_drag'] = entity
+        entity.root.items.connect('active_drag', entity)
         return True
     return False
 
 
 def move(control, event):
-    offset = entity.components.get('drag_offset')
+    offset = entity.items.get_value('drag_offset')
     if offset:
         put(entity, x=max(0, min(window.width-80, event[1]-offset[0])),
             y=max(0, min(window.height-28, event[2]-offset[1])))
@@ -63,7 +63,7 @@ def move(control, event):
 
 
 def release(control, event):
-    entity.components.pop('drag_offset', None)
+    entity.items.remove_value('drag_offset', None)
 
 
 def resize(control, event):
@@ -112,8 +112,8 @@ def update(dt):
     put(controls['FilterLog'], x=x, y=y, w=max(0, entity.x+entity.w-8-x))
     records = log.view(include_editor=log.include_editor, text=controls['FilterLog'].buffer.text)
     filter_key = (log.include_editor, controls['FilterLog'].buffer.text)
-    previous_filter = entity.components.get('history_filter')
-    previous_tail = entity.components.get('history_tail')
+    previous_filter = entity.items.get_value('history_filter')
+    previous_tail = entity.items.get_value('history_tail')
     if previous_filter != filter_key:
         entity.offset = 0
     elif entity.offset and previous_tail is not None:

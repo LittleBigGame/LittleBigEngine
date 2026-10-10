@@ -37,8 +37,8 @@ class SceneTests(unittest.TestCase):
         runtime = load_project(window, graphics, None, directory.name, template=template_path("demo"))
         runtime.step(0)
         self.assertEqual(len(graphics.rectangles), 2)
-        game = next(e for e in runtime.entities if e.components.get("name") == "Game")
-        instance = game.systems["render"]
+        game = next(e for e in runtime.entities if e.items.get_value("name") == "Game")
+        instance = game.items.behaviour("render", kind='system')
         self.assertEqual(tuple(instance.errors), ())
         self.assertIn("def draw", instance.definition.source)
         self.assertEqual(len(game.children), 2)
@@ -46,7 +46,7 @@ class SceneTests(unittest.TestCase):
         self.assertIn(game.children[0], runtime.services["space"].query(10, 0))
         window.width = 1000
         runtime.step(0)
-        self.assertEqual(game.relations["viewport"].w, 1000)
+        self.assertEqual(game.items.require_target("viewport").w, 1000)
         runtime.close()
 
     def test_render_draws_child_entities_recursively(self):
@@ -56,7 +56,7 @@ class SceneTests(unittest.TestCase):
         self.addCleanup(directory.cleanup)
         runtime = load_project(window, graphics, None, directory.name, template=template_path("demo"))
         runtime.step(0)
-        game = next(e for e in runtime.entities if e.components.get("name") == "Game")
+        game = next(e for e in runtime.entities if e.items.get_value("name") == "Game")
         self.assertEqual(len(graphics.rectangles), 2)
         # Create a child entity under one of the game's direct children
         child = runtime.create(parent=game.children[0], name="ChildEntity", x=5.0, y=5.0, w=1.0, h=1.0, color=(255, 0, 0))
@@ -79,7 +79,7 @@ class SceneTests(unittest.TestCase):
         self.addCleanup(directory.cleanup)
         runtime = load_project(window, graphics, None, directory.name, template=template_path("demo"))
         runtime.step(0)
-        game = next(e for e in runtime.entities if e.components.get("name") == "Game")
+        game = next(e for e in runtime.entities if e.items.get_value("name") == "Game")
         
         # Create an offscreen entity far away (x=500, y=500)
         offscreen = runtime.create(parent=game, name="OffscreenEntity", x=500.0, y=500.0, w=2.0, h=2.0, color=(100, 100, 100))
@@ -100,10 +100,10 @@ class SceneTests(unittest.TestCase):
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
         runtime = load_project(window, graphics, None, directory.name, template=template_path("demo"))
-        game = next(e for e in runtime.entities if e.components.get("name") == "Game")
+        game = next(e for e in runtime.entities if e.items.get_value("name") == "Game")
         
         # Enable F3 spatial debug
-        game.components["show_spatial_debug"] = True
+        game.items.set_value("show_spatial_debug", True)
         
         # Entity A is at (-3, -1) in cell (-1, -1) -> 1 entity in that cell (Green)
         # Add another entity at (-3, -1) -> 2 entities in cell (-1, -1) -> Multiple (Red)

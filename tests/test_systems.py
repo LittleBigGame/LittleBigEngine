@@ -13,8 +13,8 @@ class SystemTests(unittest.TestCase):
     def test_same_definition_has_independent_script_globals(self):
         definition = SystemDefinition("items = []\ndef update(dt):\n    items.append(dt)\n")
         other = self.runtime.create()
-        a = self.owner.systems.attach("worker", definition)
-        b = other.systems.attach("worker", definition)
+        a = self.owner.items.attach_system("worker", definition)
+        b = other.items.attach_system("worker", definition)
         self.runtime.step(0.5)
         a.namespace["items"].append(99)
         self.assertEqual(a.globals["items"], [0.5, 99])
@@ -26,11 +26,11 @@ class SystemTests(unittest.TestCase):
         log = []
         self.runtime.services["log"] = log
         source = "def update(dt): log.append(system.name + ':update')\ndef draw(): log.append(system.name + ':draw')"
-        self.owner.systems.attach("a", SystemDefinition(source))
-        self.owner.systems.attach("b", SystemDefinition(source))
+        self.owner.items.attach_system("a", SystemDefinition(source))
+        self.owner.items.attach_system("b", SystemDefinition(source))
         self.runtime.step(1)
         self.assertEqual(log, ["a:update", "b:update", "a:draw", "b:draw"])
-        self.owner.systems.move("b", 0)
+        self.owner.items.move_behaviour(self.owner.items.behaviour("b", kind='system').id, 0)
         log.clear()
         self.runtime.step(1)
         self.assertEqual(log, ["b:update", "a:update", "b:draw", "a:draw"])
@@ -39,7 +39,7 @@ class SystemTests(unittest.TestCase):
         moving = self.runtime.create(parent=self.owner, x=0, y=0)
         still = self.runtime.create(parent=self.owner, x=4, y=4)
         script = SystemDefinition('def update(dt):\n    for child in query("x", "y", "vx", "vy"):\n        child.x += child.vx * dt\n        child.y += child.vy * dt\n')
-        self.owner.systems.attach("movement", script)
+        self.owner.items.attach_system("movement", script)
         self.runtime.step(1)
         moving.vx, moving.vy = 2, -3
         self.runtime.step(0.5)
@@ -47,8 +47,8 @@ class SystemTests(unittest.TestCase):
         self.assertEqual((still.x, still.y), (4, 4))
 
     def test_script_errors_do_not_stop_other_systems(self):
-        failed = self.owner.systems.attach("bad", SystemDefinition("def update(dt): raise RuntimeError('bad script')"))
-        good = self.owner.systems.attach("good", SystemDefinition("ticks = 0\ndef update(dt):\n    global ticks\n    ticks += 1"))
+        failed = self.owner.items.attach_system("bad", SystemDefinition("def update(dt): raise RuntimeError('bad script')"))
+        good = self.owner.items.attach_system("good", SystemDefinition("ticks = 0\ndef update(dt):\n    global ticks\n    ticks += 1"))
         self.runtime.step(1)
         self.runtime.step(1)
         self.assertFalse(failed.running)
@@ -56,13 +56,13 @@ class SystemTests(unittest.TestCase):
         self.assertEqual(good.globals["ticks"], 2)
 
     def test_reload_preserves_working_instance_on_compile_or_init_failure(self):
-        old = self.owner.systems.attach("worker", SystemDefinition("state = []"))
-        self.assertIs(self.owner.systems.reload("worker", "def invalid("), old)
+        old = self.owner.items.attach_system("worker", SystemDefinition("state = []"))
+        self.assertIs(self.owner.items.reload(self.owner.items.behaviour("worker", kind='system').id, "def invalid("), old)
         self.assertTrue(old.running)
-        self.assertIs(self.owner.systems.reload("worker", "raise ValueError('bad init')"), old)
+        self.assertIs(self.owner.items.reload(self.owner.items.behaviour("worker", kind='system').id, "raise ValueError('bad init')"), old)
         self.assertTrue(old.running)
         self.assertEqual(len(old.errors), 2)
-        new = self.owner.systems.reload("worker", "state = [1]")
+        new = self.owner.items.reload(self.owner.items.behaviour("worker", kind='system').id, "state = [1]")
         self.assertIsNot(new, old)
         self.assertFalse(old.running)
         self.assertTrue(new.running)
@@ -76,9 +76,9 @@ def start():
 def stop():
     entity.calls.append("stop")
 ''')
-        instance = self.owner.systems.attach("worker", script)
+        instance = self.owner.items.attach_system("worker", script)
         self.runtime.events.emit("ping")
-        del self.owner.systems["worker"]
+        self.owner.items.remove(self.owner.items.behaviour("worker", kind='system').id)
         self.runtime.events.emit("ping")
         instance.stop()
         self.assertEqual(self.owner.calls, ["start", "ping", "stop"])
@@ -86,8 +86,8 @@ def stop():
     def test_detaching_during_update_skips_draw_and_other_attachment(self):
         log = []
         self.runtime.services["log"] = log
-        self.owner.systems.attach("first", SystemDefinition('def update(dt): del systems["second"]'))
-        second = self.owner.systems.attach("second", SystemDefinition('def update(dt): log.append("update")\ndef draw(): log.append("draw")'))
+        self.owner.items.attach_system("first", SystemDefinition('def update(dt): entity.items.remove(entity.items.behaviour("second").id)'))
+        second = self.owner.items.attach_system("second", SystemDefinition('def update(dt): log.append("update")\ndef draw(): log.append("draw")'))
         self.runtime.step(1)
         self.assertEqual(log, [])
         self.assertFalse(second.running)
@@ -95,15 +95,15 @@ def stop():
     def test_destroy_runs_stop_and_closes_runtime(self):
         log = []
         self.runtime.services["log"] = log
-        self.owner.systems.attach("worker", SystemDefinition('def stop(): log.append("stopped")'))
+        self.owner.items.attach_system("worker", SystemDefinition('def stop(): log.append("stopped")'))
         self.runtime.close()
         self.runtime.close()
         self.assertEqual(log, ["stopped"])
         self.assertEqual(self.runtime.entities, ())
 
     def test_failed_initialization_is_inspectable(self):
-        instance = self.owner.systems.attach("worker", SystemDefinition('raise ValueError("initialization")'))
-        self.assertIs(self.owner.systems["worker"], instance)
+        instance = self.owner.items.attach_system("worker", SystemDefinition('raise ValueError("initialization")'))
+        self.assertIs(self.owner.items.behaviour("worker", kind='system'), instance)
         self.assertFalse(instance.running)
         self.assertEqual(instance.errors[0].message, "initialization")
 
@@ -120,7 +120,7 @@ def stop():
             self.assertIsNot(first, self.runtime.assets.system(path))
 
     def test_recursive_step_becomes_script_diagnostic(self):
-        instance = self.owner.systems.attach("worker", SystemDefinition("def update(dt): entity.runtime.step(dt)"))
+        instance = self.owner.items.attach_system("worker", SystemDefinition("def update(dt): entity.runtime.step(dt)"))
         self.runtime.step(1)
         self.assertFalse(instance.running)
         self.assertIn("recursively", instance.errors[-1].message)
@@ -137,7 +137,7 @@ def run(dt):
     self.x += self.vx * dt
     self.y += self.vy * dt
 ''')
-        self.owner.systems.attach("mover", script)
+        self.owner.items.attach_system("mover", script)
         self.runtime.step(0.5)
         self.assertEqual((c1.x, c1.y), (2.5, -1.0))
         self.assertEqual((c2.x, c2.y), (9.5, 21.5))
@@ -162,7 +162,7 @@ def run(dt):
     for other in nearby:
         collected.append((self.name, other.name))
 ''')
-        self.owner.systems.attach("collider", script)
+        self.owner.items.attach_system("collider", script)
         self.runtime.step(0.1)
         self.assertIn(("ball1", "ball2"), collected)
         self.assertIn(("ball2", "ball1"), collected)
@@ -179,7 +179,7 @@ def run(dt):
     self.y += self.vy * dt
 ''')
         # Attached directly to ball, NOT to self.owner (Game/world)!
-        attachment = ball.systems.attach("phys", script)
+        attachment = ball.items.attach_system("phys", script)
         self.assertTrue(attachment.running)
         self.runtime.step(0.5)
         self.assertEqual(ball.x, 2.5)

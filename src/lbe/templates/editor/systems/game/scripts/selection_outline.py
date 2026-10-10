@@ -6,8 +6,8 @@ def run(entity, root, zoom):
     x, y = 0.0, 0.0
     curr = selected
     while curr is not None and curr is not root:
-        x += curr.components.get("x", 0.0)
-        y += curr.components.get("y", 0.0)
+        x += curr.items.get_value("x", 0.0)
+        y += curr.items.get_value("y", 0.0)
         curr = curr.parent
     w = selected.w
     h = selected.h
