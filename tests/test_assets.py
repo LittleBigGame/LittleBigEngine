@@ -452,39 +452,24 @@ class AssetSystemTests(unittest.TestCase):
         self.assertIn("DragonBoss", txt_matches2[-1][0][0])
         self.assertIn("🔷", txt_matches2[-1][0][0])
 
-    def test_drag_system_into_inspector_components_vs_systems_area(self):
-        """Dragging system script into Components area adds it as component; into Systems area attaches it as system."""
+    def test_drag_source_attaches_behaviour_or_edits_exact_uuid_value_row(self):
         ed = self.editor
-        reg = self.runtime.assets.registry
-        enemy_id = reg.get_id(self.enemy_script)
-
-        hero = self.runtime.create(parent=ed.game, name="PlayerTarget")
-        ed.select(hero)
+        uid = self.runtime.assets.registry.get_id(self.enemy_script)
+        owner = self.runtime.create(parent=ed.game, name="PlayerTarget", source=None)
+        ed.inspect_entity(owner)
         self.runtime.step(0)
-
-        drag_data = {
-            "id": enemy_id,
-            "name": "enemy.py",
-            "path": "enemy.py",
-            "type": "system",
-            "icon": "⚡",
-        }
-
-        # Drop 1: Dropped onto Components area (above system_label)
-        comp_area_y = ed.components_title.y + 15
-        ed.app.items.require_value("on_asset_drop")(drag_data, ("release", ed.inspector.x + 30, comp_area_y, 0, 0))
-
-        # Should be added as component, NOT attached as a system
-        self.assertIn("enemy", hero.items.value_dict())
-        self.assertIsInstance(hero.items.require_value("enemy"), AssetRef)
-        self.assertNotIn("enemy", hero.items.behaviour_dict('system'))
-
-        # Drop 2: Dropped onto Systems area (below system_label)
-        sys_area_y = ed.system_label.y + 15
-        ed.app.items.require_value("on_asset_drop")(drag_data, ("release", ed.inspector.x + 30, sys_area_y, 0, 0))
-
-        # Should now be attached as a system
-        self.assertIn("enemy", hero.items.behaviour_dict('system'))
+        data = dict(id=uid, name="enemy.py", path="enemy.py", type="system", icon="λ")
+        ed.app.items.require_value("on_asset_drop")(data, ("release", ed.inspector.x+30, ed.components_title.y+15, 0, 0))
+        self.assertIn("enemy", owner.items.behaviour_dict('system'))
+        self.assertFalse(owner.items.has_value('enemy'))
+        record = owner.items.component('source')
+        ed.focus_item(owner, record.id)
+        _, field = next((name, field) for name, field in ed.component_rows if field.visible and field.item_id == record.id)
+        ed.app.items.require_value("on_asset_drop")(data, ("release", field.x+8, field.y+8, 0, 0))
+        self.assertEqual(owner.items.component('source').id, record.id)
+        self.assertIsInstance(owner.items.value(record.id), AssetRef)
+        self.assertEqual(owner.items.value(record.id).id, uid)
+        self.assertIn('enemy', owner.items.behaviour_dict('system'))
 
     def test_drag_entity_from_hierarchy(self):
         """Dragging entity from hierarchy allows dropping into code editor, inspector, or reparenting."""
@@ -703,7 +688,7 @@ class AssetSystemTests(unittest.TestCase):
         # Start by inspecting Game
         ed.select(ed.game)
         self.runtime.step(0)
-        self.assertEqual(ed.identity_label.text, "🔷 Entity: Game")
+        self.assertEqual(ed.identity_label.text, "◆ Entity: Game")
 
         # Create two entities
         ent_a = self.runtime.create(parent=ed.game, name="EntityAlpha")

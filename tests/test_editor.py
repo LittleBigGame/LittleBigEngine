@@ -82,7 +82,10 @@ class EditorTests(unittest.TestCase):
         self.runtime.step(1)
         ed.select(target)
         ed.inspector_sync()
-        self.assertTrue(any(r.visible and r.items.get_value('system_key')==(target.id,'external') for r in ed.system_rows))
+        _, field = self.item_controls(target, target.items.behaviour('external', kind='system').id)
+        self.click(field)
+        self.assertEqual(ed.path_field.buffer.text, 'external.py')
+        self.assertIn('entity.x += dt', ed.code.buffer.text)
         self.assertTrue(any(r.asset is None and r.system=='external' for r in self.runtime.services['effects'].affecting(target)))
         self.assertFalse([list(i.errors) for e in self.runtime.entities for i in e.items.behaviour_dict('system').values() if i.errors])
 
@@ -223,9 +226,11 @@ class EditorTests(unittest.TestCase):
         self.assertEqual(ed.affected_entities()[target.id], (90,195,125))
         ed.select(target)
         ed.inspector_sync()
-        row = next(r for r in ed.system_rows if r.visible and r.items.get_value('system_key') == (ed.game.id,'observed'))
-        self.assertEqual(row.ink,(90,195,125))
-        self.assertEqual(row.asset_id,identity)
+        self.assertFalse(any(record is ed.game.items.behaviour('observed', kind='system') for record in target.items.values()))
+        self.click(ed.identity_label)
+        self.choose_menu('Affected by → observed')
+        self.assertIs(ed.code.items.require_target('owner'), ed.game)
+        self.assertEqual(ed.code.system_name, 'observed')
         path.write_text('def update(dt):\n    list(query("effect_target"))', encoding='utf-8')
         ed.game.items.reload(ed.game.items.behaviour('observed', kind='system').id, SystemDefinition(path.read_text(encoding='utf-8'), str(path)))
         self.runtime.step(0)
@@ -326,6 +331,34 @@ class EditorTests(unittest.TestCase):
         instance = self.editor.app.items.behaviour("app", kind='system')
         self.assertTrue(instance.running, list(instance.errors))
         self.assertEqual(list(instance.errors), [])
+
+    def item_controls(self, owner, identity):
+        self.editor.focus_item(owner, identity)
+        pair = next((name, data) for name, data in self.editor.component_rows
+                    if data.visible and data.items.require_value('item_id') == identity)
+        for control in pair:
+            self.assertTrue(self.editor.ui.visible(control))
+        return pair
+
+    def item_badge(self, owner, identity):
+        self.item_controls(owner, identity)
+        return next(b for b in self.editor.item_type_buttons
+                    if b.visible and b.items.require_value('item_id') == identity)
+
+    def choose_menu(self, label):
+        menu = self.editor.app.items.require_target('context_menu')
+        item = next(c for c in menu.children if c.items.get_value('text') == label)
+        if not item.visible:
+            overflow = item.y + item.h - (menu.y + menu.h - 4)
+            underflow = menu.y + 4 - item.y
+            delta = -int((overflow + 27)//28) if overflow > 0 else int((underflow + 27)//28)
+            self.send(('scroll', menu.x+8, menu.y+8, 0, delta))
+        self.assertTrue(item.visible, label)
+        self.click(item)
+
+    def add_item_menu(self, label):
+        self.click(self.editor.add_comp_menu_button)
+        self.choose_menu(label)
 
     def send(self, *events, dt=0):
         self.input.pending.extend(events)
@@ -436,10 +469,10 @@ class EditorTests(unittest.TestCase):
         self.assert_healthy()
 
     def test_editor_source_is_visible_and_reload_keeps_spatial_index(self):
-        self.select(self.editor.app)
-        self.runtime.step(0)
-        button = self.editor.system_rows[0]
-        self.click(button)
+        owner = self.editor.app
+        instance = owner.items.behaviour("app", kind='system')
+        _, data = self.item_controls(owner, instance.id)
+        self.click(data)
         self.assertEqual(self.editor.path_field.buffer.text, "app.py")
         self.click(self.editor.save_button)
         self.runtime.step(0)
@@ -449,17 +482,31 @@ class EditorTests(unittest.TestCase):
         self.assertIn(moving, self.runtime.services["space"].query(10, 0))
 
     def test_tags_relations_parent_and_generic_panel(self):
-        moving = self.editor.app.items.require_target("selection")
-        self.type(self.editor.tags_field, "visible, selected", commit=True)
-        self.assertEqual(set(set(moving.items.tag_names())), {"visible", "selected"})
-        self.type(self.editor.relation_field, "friend=Entity B", commit=True)
-        self.assertIs(moving.items.require_target("friend"), self.editor.game.children[1])
-        self.type(self.editor.parent_field, "Application", commit=True)
-        self.assertIs(moving.parent, self.editor.app)
-        self.click(self.editor.panel_button)
-        panel = self.editor.extra_panels[-1]
+        from lbe import Tag, Relation, Parent
+        ed = self.editor
+        moving = ed.inspected()
+        for name in ("visible", "selected"):
+            self.add_item_menu("# Tag")
+            created = moving.items.named(Tag, 'tag')
+            label, _ = self.item_controls(moving, created.id)
+            self.type(label, name, commit=True)
+            self.assertEqual(moving.items.named(Tag, name).id, created.id)
+        self.assertEqual(set(moving.items.tag_names()), {"visible", "selected"})
+        destination = ed.game.children[1]
+        self.add_item_menu("↔ Relationship")
+        self.choose_menu(str(destination.items.require_value('name')))
+        record = moving.items.named(Relation, 'link')
+        label, _ = self.item_controls(moving, record.id)
+        self.type(label, 'friend', commit=True)
+        self.assertIs(moving.items.require_target('friend'), destination)
+        self.add_item_menu("↑ Parent")
+        self.choose_menu('Application')
+        self.assertIs(moving.parent, ed.app)
+        self.assertEqual(moving.all(Parent)[0].target, ed.app.id)
+        self.click(ed.panel_button)
+        panel = ed.extra_panels[-1]
         self.assertIs(panel.items.require_target("target"), moving)
-        self.assertIn(panel, self.editor.app.children)
+        self.assertIn(panel, ed.app.children)
         self.assertTrue(all(child.items.has_tag("ui") for child in panel.children))
 
     def test_clipboard_and_undo(self):
@@ -770,59 +817,22 @@ class EditorTests(unittest.TestCase):
 
     def test_inspectable_editor_control_systems_and_navigation(self):
         ed = self.editor
-
-        # 1. Select CodeEditorPanel and discover its behavior
-        self.select(ed.code_panel)
+        owners_and_behaviours = ((ed.code_panel, "code_editor"), (ed.code, "text_area"),
+                                (ed.code, "code_editor"), (ed.hierarchy, "hierarchy"), (ed.inspector, "inspector"))
+        for owner, name in owners_and_behaviours:
+            instance = owner.items.behaviour(name, kind='system')
+            _, data = self.item_controls(owner, instance.id)
+            badge = self.item_badge(owner, instance.id)
+            self.assertIn("System", badge.text)
+            self.click(data)
+            self.assertEqual(ed.path_field.buffer.text, name + ".py")
+            self.assertEqual(data.items.require_value('item_id'), instance.id)
+        ed.inspect_entity(ed.code_panel)
         self.runtime.step(0)
-        self.assertIs(ed.app.items.require_target("selection"), ed.code_panel)
-
-        sys_buttons = [b for b in ed.system_rows if b.visible]
-        self.assertTrue(any(b.items.get_value("text", "").endswith(" code_editor.py") for b in sys_buttons))
-
-        # Clicking system button opens its source in code editor
-        code_sys_btn = next(b for b in sys_buttons if b.items.get_value("text", "").endswith(" code_editor.py"))
-        self.click(code_sys_btn)
-        self.assertEqual(ed.path_field.buffer.text, "code_editor.py")
-        self.assertIn("Code editor panel and coding-specific specialization system", ed.code.buffer.text)
-
-        # 2. Navigate to child control (TextArea) from CodeEditorPanel
-        child_buttons = [b for b in ed.child_rows if b.visible]
-        text_area_btn = next(b for b in child_buttons if b.items.get_value("text") == "TextArea")
-        self.click(text_area_btn)
-        self.runtime.step(0)
-
-        # TextArea is now selected and hierarchy automatically expanded
-        self.assertIs(ed.app.items.require_target("selection"), ed.code)
+        self.click(ed.identity_label)
+        self.choose_menu("Child → TextArea")
+        self.assertIs(ed.inspected(), ed.code)
         self.assertIn(ed.code_panel.id, ed.hierarchy.expanded)
-
-        # 3. Inspect TextArea's reusable behavior and coding-specific behavior
-        text_area_sys = [b.items.get_value("text", "").split(" ", 1)[-1] for b in ed.system_rows if b.visible]
-        self.assertIn("text_area.py", text_area_sys)
-        self.assertIn("code_editor.py", text_area_sys)
-
-        # Open text_area system source
-        ta_btn = next(b for b in ed.system_rows if b.visible and b.items.get_value("text", "").endswith(" text_area.py"))
-        self.click(ta_btn)
-        self.assertEqual(ed.path_field.buffer.text, "text_area.py")
-        self.assertIn("Reusable multiline text area entity system", ed.code.buffer.text)
-
-        # Open code_editor specialization system source
-        ce_btn = next(b for b in ed.system_rows if b.visible and b.items.get_value("text", "").endswith(" code_editor.py"))
-        self.click(ce_btn)
-        self.assertEqual(ed.path_field.buffer.text, "code_editor.py")
-
-        # 4. Verify same approach works for other controls (e.g. HierarchyPanel, InspectorPanel)
-        self.select(ed.hierarchy)
-        self.runtime.step(0)
-        h_btn = next(b for b in ed.system_rows if b.visible and b.items.get_value("text", "").endswith(" hierarchy.py"))
-        self.click(h_btn)
-        self.assertEqual(ed.path_field.buffer.text, "hierarchy.py")
-
-        self.select(ed.inspector)
-        self.runtime.step(0)
-        i_btn = next(b for b in ed.system_rows if b.visible and b.items.get_value("text", "").endswith(" inspector.py"))
-        self.click(i_btn)
-        self.assertEqual(ed.path_field.buffer.text, "inspector.py")
 
     def test_project_persistence_and_movement_scene_recovery(self):
         ed = self.editor
@@ -1245,50 +1255,35 @@ class EditorTests(unittest.TestCase):
 
     def test_inspector_clean_flow_and_bounded_child_navigation(self):
         ed = self.editor
-
-        # Select TextArea entity which has ~95 children (parts for lines, errors, etc.)
-        self.select(ed.code)
+        ed.inspect_entity(ed.code)
         self.runtime.step(0)
-
-        self.assertIs(ed.app.items.require_target("selection"), ed.code)
-        children_count = len(ed.code.children)
-        self.assertGreater(children_count, 20)
-
-        # Verify child buttons count is strictly bounded (max 9 visible buttons)
-        visible_children = [b for b in ed.child_rows if b.visible]
-        self.assertLessEqual(len(visible_children), 9)
-        self.assertGreater(len(visible_children), 0)
-
-        # Verify all visible child buttons are positioned inside the inspector bounds
-        ip = ed.inspector
-        for btn in visible_children:
-            self.assertGreaterEqual(btn.x, ip.x)
-            self.assertLessEqual(btn.x + btn.w, ip.x + ip.w + 1)
-            self.assertGreaterEqual(btn.y, ip.y)
-            self.assertLessEqual(btn.y + btn.h, ip.y + ip.h + 2)
-
-        # Verify metadata correctly reflects total children without layout overflow
-        self.assertIn(f"{children_count} children", ed.metadata.items.get_value("text", ""))
-
-        # Verify component rows do NOT overlap the systems section
-        visible_comp_rows = [(lbl, fld) for lbl, fld in ed.component_rows if fld.visible]
-        if visible_comp_rows:
-            max_comp_y = max(fld.y + fld.h for _, fld in visible_comp_rows)
-            self.assertLessEqual(max_comp_y, ed.system_label.y)
-
-        # Verify section order and dividers
+        count = len(ed.code.children)
+        self.assertGreater(count, 20)
+        self.assertIn(f"{count} derived children", ed.metadata.text)
+        self.assertFalse(any(b.visible for b in ed.child_rows))
+        # Child navigation is derived hierarchy, not fabricated owned item rows.
+        visible = [(label, data) for label, data in ed.component_rows if data.visible]
+        self.assertLessEqual(len(visible), ed.inspector.capacity)
+        stored = tuple(ed.code.items)
+        self.assertEqual([data.item_id for _, data in visible],
+                         list(stored[ed.inspector.scroll:ed.inspector.scroll+ed.inspector.capacity]))
+        for label, data in visible:
+            for control in (label, data):
+                self.assertGreaterEqual(control.x, ed.inspector.x)
+                self.assertLessEqual(control.x + control.w, ed.inspector.x + ed.inspector.w)
+                self.assertGreaterEqual(control.y, ed.components_title.y + ed.components_title.h)
+                self.assertLessEqual(control.y + control.h, ed.metadata.y)
         self.assertTrue(ed.divider_identity.visible)
-        self.assertTrue(ed.divider_components.visible)
-        self.assertLessEqual(ed.components_title.y, ed.system_label.y)
-        visible_sys = [b for b in ed.system_rows if b.visible]
-        if visible_sys:
-            for btn in visible_sys:
-                self.assertGreaterEqual(btn.y, ed.system_label.y)
-                self.assertLessEqual(btn.y + btn.h, ed.tags_field.y)
-        self.assertLessEqual(ed.system_label.y, ed.tags_field.y)
-        self.assertLessEqual(ed.tags_field.y + ed.tags_field.h, ed.parent_field.y)
-        self.assertLessEqual(ed.parent_field.y + ed.parent_field.h, ed.relation_field.y)
-        self.assertLessEqual(ed.relation_field.y + ed.relation_field.h, ed.metadata.y)
+        self.assertFalse(ed.system_label.visible)
+        self.assertFalse(ed.links_header.visible)
+        self.click(ed.identity_label)
+        menu = ed.app.items.require_target('context_menu')
+        child_entries = [c for c in menu.children if c.items.get_value('text', '').startswith('Child → ')]
+        self.assertEqual(len(child_entries), count)
+        for entry in child_entries:
+            if entry.visible:
+                self.assertGreaterEqual(entry.y, menu.y)
+                self.assertLessEqual(entry.y + entry.h, menu.y + menu.h)
 
     def test_scrollbars_rendering_and_interaction(self):
         ed = self.editor
@@ -1432,23 +1427,19 @@ class EditorTests(unittest.TestCase):
         self.click(del_item)
         self.assertNotIn("color", bare.items.value_dict())
 
-        # 3. Interactive relations list and unlinking via context menu
+        # Relationships use the same UUID rows and item menu as other records.
+        from lbe import Relation
         other = self.runtime.create(parent=ed.game, name="TargetAlly")
-        self.type(ed.relation_field, "ally=TargetAlly", commit=True)
+        self.add_item_menu("↔ Relationship")
+        self.choose_menu("TargetAlly")
+        record = bare.items.named(Relation, 'link')
+        label, field = self.item_controls(bare, record.id)
+        self.type(label, 'ally', commit=True)
+        self.assertEqual(field.buffer.text, 'TargetAlly')
         self.assertIs(bare.items.target("ally"), other)
-
-        # Check relation row exists and unlink via right click context menu
-        self.assertEqual(len([r for r, u in ed.relation_rows if r.visible]), 1)
-        rel_btn, _ = ed.relation_rows[0]
-        self.assertIn("ally -> TargetAlly", rel_btn.items.get_value("text", ""))
-
-        self.send(("click", rel_btn.x + 10, rel_btn.y + 10, 4, 0))
-        menu = ed.app.items.target("context_menu")
-        self.assertIsNotNone(menu)
-        unlink_item = next(c for c in menu.children if "Unlink" in c.items.get_value("text", ""))
-        self.click(unlink_item)
-        self.assertNotIn("ally", bare.items.link_dict())
-        self.assertEqual(len([r for r, u in ed.relation_rows if r.visible]), 0)
+        self.click(self.item_badge(bare, record.id))
+        self.choose_menu("Remove item")
+        self.assertNotIn(record.id, bare.items)
 
     def test_right_click_rename_in_hierarchy_and_inspector(self):
         ed = self.editor
@@ -1523,41 +1514,29 @@ class EditorTests(unittest.TestCase):
         self.assertEqual(ent.items.get_value("color"), (200, 200, 200))
 
     def test_relation_add_and_edit_workflow(self):
+        from lbe import Relation
         ed = self.editor
         ship = self.runtime.create(parent=ed.game, name="HeroShip")
         dock = self.runtime.create(parent=ed.game, name="DockingBay")
-        self.select(ship)
+        ed.inspect_entity(ship)
         self.runtime.step(0)
-
-        # 1. Add link using '+' button with case-insensitive bare target name
-        self.type(ed.relation_field, "dockingbay")
-        self.click(ed.link_add_button)
-        self.assertIs(ship.items.target("dockingbay"), dock)
-
-        # 2. Existing relation row has [Edit] button
-        self.assertEqual(len([r for r, u in ed.relation_rows if r.visible]), 1)
-        rel_btn, unlink_btn = ed.relation_rows[0]
-        edit_btn = ed.relation_edit_buttons[0]
-        self.assertTrue(edit_btn.visible)
-        self.click(edit_btn)
-
-        # Check relation_field is populated and focused for editing
-        self.assertEqual(ed.relation_field.buffer.text, "dockingbay=DockingBay")
-        self.assertIs(ed.ui.focused, ed.relation_field)
-
-        # Update relation name to 'home_port' and click '+' button
-        self.type(ed.relation_field, "home_port=DockingBay")
-        self.click(ed.link_add_button)
-        self.assertIs(ship.items.target("home_port"), dock)
-        self.assertNotIn("dockingbay", ship.items.link_dict())
-
-        # 3. Right-clicking relation row shows context menu
-        self.send(("click", rel_btn.x + 10, rel_btn.y + 5, 4, 0))
-        menu = ed.app.items.target("context_menu")
-        self.assertIsNotNone(menu)
-        unlink_item = next(c for c in menu.children if "Unlink 'home_port'" in c.items.get_value("text", ""))
-        self.click(unlink_item)
-        self.assertNotIn("home_port", ship.items.link_dict())
+        self.add_item_menu("↔ Relationship")
+        self.choose_menu("DockingBay")
+        record = ship.items.named(Relation, 'link')
+        label, data = self.item_controls(ship, record.id)
+        self.assertEqual(data.buffer.text, 'DockingBay')
+        self.type(label, "home_port", commit=True)
+        self.assertIs(ship.items.require_target("home_port"), dock)
+        self.assertEqual(ship.items.named(Relation, "home_port").id, record.id)
+        other = self.runtime.create(parent=ed.game, name="NewPort")
+        badge = self.item_badge(ship, record.id)
+        self.click(badge)
+        self.choose_menu("Target → NewPort")
+        self.assertIs(ship.items.require_target("home_port"), other)
+        self.assertEqual(ship.items.named(Relation, "home_port").id, record.id)
+        self.click(self.item_badge(ship, record.id))
+        self.choose_menu("Remove item")
+        self.assertNotIn(record.id, ship.items)
 
     def test_inspector_header_layout_and_button_dimensions(self):
         ed = self.editor
@@ -2170,50 +2149,26 @@ class EditorTests(unittest.TestCase):
         self.send(("release", code.x + 60, code.y + 20, 1, 0))
 
     def test_inspector_systems_management_attach_and_detach(self):
-        """Issue #57: Inspector systems section is always visible with attach/detach controls."""
         ed = self.editor
-        ent = self.runtime.create(parent=ed.game, name="ActorEntity")
-        self.select(ent)
+        owner = self.runtime.create(parent=ed.game, name="ActorEntity")
+        ed.inspect_entity(owner)
         self.runtime.step(0)
-
-        # 1. Systems section is always visible, showing 'No systems attached' placeholder
-        self.assertTrue(ed.system_label.visible)
-        self.assertTrue(ed.add_system_button.visible)
-        self.assertTrue(ed.no_systems_label.visible)
-
-        # 2. Click '+ Attach' button to open system menu
-        self.click(ed.add_system_button)
-        menu = ed.app.items.target("context_menu")
-        self.assertIsNotNone(menu)
-        render_item = next((c for c in menu.children if "render" in c.items.get_value("text", "")), None)
-        self.assertIsNotNone(render_item)
-
-        # Click to attach render system to ActorEntity
+        self.assertIn('ITEMS', ed.components_title.text)
+        self.assertFalse(ed.system_label.visible)
+        self.add_item_menu("λ System / ▶ Script")
+        menu = ed.app.items.require_target('context_menu')
+        render_item = next(c for c in menu.children if "render" in c.items.get_value("text", ""))
         self.click(render_item)
-        self.assertIn("render", ent.items.behaviour_dict('system'))
-        self.assertFalse(ed.no_systems_label.visible)
-
-        # 3. System appears in inspector row with Edit button
-        sys_btn = next((b for b in ed.system_rows if b.visible and "render" in b.items.get_value("text", "")), None)
-        self.assertIsNotNone(sys_btn)
-        edit_btn = ed.system_edit_buttons[0]
-        self.assertTrue(edit_btn.visible)
-
-        # Click Edit to open in code editor
-        self.click(edit_btn)
-        self.assertEqual(ed.path_field.buffer.text, "render.py")
-
-        # 4. Right click system row to detach
-        self.send(("click", sys_btn.x + 10, sys_btn.y + 10, 4, 0))
-        detach_menu = ed.app.items.target("context_menu")
-        self.assertIsNotNone(detach_menu)
-        detach_item = next((c for c in detach_menu.children if "Detach" in c.items.get_value("text", "")), None)
-        self.assertIsNotNone(detach_item)
-        self.click(detach_item)
-
-        # Verify system is cleanly detached
-        self.assertNotIn("render", ent.items.behaviour_dict('system'))
-        self.assertTrue(ed.no_systems_label.visible)
+        instance = owner.items.behaviour('render', kind='system')
+        label, data = self.item_controls(owner, instance.id)
+        self.assertEqual(label.buffer.text, 'render')
+        self.assertTrue(data.readonly)
+        self.click(data)
+        self.assertEqual(ed.path_field.buffer.text, 'render.py')
+        self.click(self.item_badge(owner, instance.id))
+        self.choose_menu("Remove item")
+        self.assertNotIn(instance.id, owner.items)
+        self.assertNotIn('render', owner.items.behaviour_dict('system'))
 
     def test_clean_float_formatting_in_inspector(self):
         """Issue #57: Float precision is cleanly formatted in component fields."""
@@ -2290,19 +2245,19 @@ class EditorTests(unittest.TestCase):
         # Components are visible initially, as is divider
         visible_comps = [fld for lbl, fld in ed.component_rows if fld.visible]
         self.assertGreater(len(visible_comps), 0)
-        self.assertTrue(ed.divider_components.visible)
+        self.assertTrue(ed.divider_identity.visible)
 
-        # Click COMPONENTS header to collapse
+        # The single canonical item list collapses as one section.
         self.click(ed.components_title)
         visible_comps_after = [fld for lbl, fld in ed.component_rows if fld.visible]
         self.assertEqual(len(visible_comps_after), 0)
-        self.assertFalse(ed.divider_components.visible)
+        self.assertFalse(any(b.visible for b in ed.item_type_buttons))
 
         # Click COMPONENTS header again to re-expand
         self.click(ed.components_title)
         visible_comps_reexpanded = [fld for lbl, fld in ed.component_rows if fld.visible]
         self.assertGreater(len(visible_comps_reexpanded), 0)
-        self.assertTrue(ed.divider_components.visible)
+        self.assertTrue(any(b.visible for b in ed.item_type_buttons))
 
     def test_hierarchy_hover_color_and_no_flashing(self):
         """Hierarchy row colors have matching normal/hover colors between sync and motion, preventing flashing."""
@@ -2325,20 +2280,19 @@ class EditorTests(unittest.TestCase):
         self.assertEqual(row.color, row.normal_color)
 
     def test_system_edit_button_dimensions_and_visibility(self):
-        """System Edit button width is at least 52px so 'Edit' text fits without truncation to 'Edi'."""
-        ed = self.editor
-        ent = self.runtime.create(parent=ed.game, name="SysEntity")
-        self.select(ent)
-        self.runtime.step(0)
-        # Attach a system
         from lbe.systems import SystemDefinition
-        ent.items.attach_system("sample", SystemDefinition('def update(dt): pass'))
-        self.runtime.step(0)
-        edit_btn = next(b for b in ed.system_edit_buttons if b.visible)
-        self.assertEqual(edit_btn.text, "Edit")
-        self.assertGreaterEqual(edit_btn.w, 52)
-        # Pitch is 8, 4 chars * 8 = 32px; width 52 leaves 20px padding (>= 16px required)
-        self.assertGreaterEqual(edit_btn.w - 16, 4 * 8)
+        ed = self.editor
+        owner = self.runtime.create(parent=ed.game, name='SysEntity')
+        instance = owner.items.attach_system('sample', SystemDefinition('def update(dt): pass'))
+        _, data = self.item_controls(owner, instance.id)
+        self.assertTrue(data.readonly)
+        self.assertEqual(data.buffer.text, '<system>')
+        self.assertGreaterEqual(data.w, 40)
+        badge = self.item_badge(owner, instance.id)
+        self.assertIn('λ System', badge.text)
+        self.click(data)
+        self.assertIn('def update(dt): pass', ed.code.buffer.text)
+        self.assertIs(ed.code.items.require_target('owner'), owner)
 
     def test_hierarchy_right_click_selects_target(self):
         """Right-clicking a hierarchy row immediately selects the entity in hierarchy and inspector."""
