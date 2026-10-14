@@ -1,0 +1,24 @@
+{
+    "type": 0,
+    "data": {
+        "components": {
+            "UIContainer": {
+                "layout": "horizontal",
+                "gap": 4.0,
+                "padding": 4.0,
+                "columns": 2,
+                "collapsible": false,
+                "collapsed": false
+            }
+        },
+        "resources": [],
+        "scripts": [],
+        "children": [
+            "1673e42c2cc45d29393ad3a6bada2826",
+            "4c638db400158ca14a5c5018ba913dba",
+            "4b766a0a7b44e292ad6efd9cedb8f27a"
+        ],
+        "parent": "511ab202f929253c65f6c27e0991cd60"
+    },
+    "name": "FilterBar"
+}

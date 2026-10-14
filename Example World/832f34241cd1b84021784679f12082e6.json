@@ -1,0 +1,19 @@
+{
+    "type": 0,
+    "data": {
+        "components": {
+            "UIButton": {
+                "label": "Lock",
+                "width": 50.0,
+                "height": 0.0,
+                "on_click": "",
+                "enabled": true
+            }
+        },
+        "resources": [],
+        "scripts": [],
+        "children": [],
+        "parent": "0b06bbc7dd39fdf03b9ca6a64fcc39a0"
+    },
+    "name": "LockBtn"
+}

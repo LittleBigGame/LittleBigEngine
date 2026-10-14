@@ -1,0 +1,31 @@
+{
+    "type": 0,
+    "data": {
+        "components": {
+            "Transform": {
+                "x": 100.0,
+                "y": 200.0,
+                "z": 0.0,
+                "rot_z": 0.0
+            },
+            "Health": {
+                "current": 100,
+                "max": 100
+            },
+            "Stats": {
+                "speed": 250.0,
+                "defense": 15
+            }
+        },
+        "resources": [],
+        "scripts": [
+            "f9ccf55e8151cc155db58672b5ea447c"
+        ],
+        "children": [
+            "ca1f3a17daf9ee6c2e260553ae95ab63",
+            "a3e5ce1248eb3310ff986dc47f3cf0e4"
+        ],
+        "parent": "e1995f1574e8a6ed7429a7cd1c5e9bc0"
+    },
+    "name": "Player"
+}

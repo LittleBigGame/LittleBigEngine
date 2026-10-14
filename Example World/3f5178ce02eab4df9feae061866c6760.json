@@ -1,0 +1,21 @@
+{
+    "type": 0,
+    "data": {
+        "components": {
+            "Transform": {
+                "x": 0.0,
+                "y": -26.0,
+                "z": 0.0
+            },
+            "UIText": {
+                "content": "Hero",
+                "bullet": false
+            }
+        },
+        "resources": [],
+        "scripts": [],
+        "children": [],
+        "parent": "a29db19d2910a284f8498680499be9ad"
+    },
+    "name": "PlayerNameTag"
+}

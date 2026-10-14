@@ -1,0 +1,19 @@
+{
+    "type": 0,
+    "data": {
+        "components": {
+            "UIButton": {
+                "label": "All",
+                "width": 45.0,
+                "height": 0.0,
+                "on_click": "",
+                "enabled": true
+            }
+        },
+        "resources": [],
+        "scripts": [],
+        "children": [],
+        "parent": "ffebd021ea9833c0e26c01c75f7310e6"
+    },
+    "name": "AllFilter"
+}

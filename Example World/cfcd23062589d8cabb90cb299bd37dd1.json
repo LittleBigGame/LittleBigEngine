@@ -1,0 +1,24 @@
+{
+    "type": 0,
+    "data": {
+        "components": {
+            "UIContainer": {
+                "layout": "horizontal",
+                "gap": 4.0,
+                "padding": 4.0,
+                "columns": 2,
+                "collapsible": false,
+                "collapsed": false
+            }
+        },
+        "resources": [],
+        "scripts": [],
+        "children": [
+            "a097688ef35c1943ad6acfbcfa2f66f8",
+            "b6572f1edd2b9bf4c84a0778b295f96f",
+            "d87b9dc54bec8dad02e973fdd7ee1aaf"
+        ],
+        "parent": "610938d270be10c501754ace1c6cde0d"
+    },
+    "name": "HeaderBar"
+}

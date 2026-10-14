@@ -1,0 +1,23 @@
+{
+    "type": 0,
+    "data": {
+        "components": {
+            "Transform": {
+                "x": 0.0,
+                "y": -22.0,
+                "z": 0.0
+            },
+            "UISlider": {
+                "label": "HP",
+                "value": 0.8,
+                "min": 0.0,
+                "max": 1.0
+            }
+        },
+        "resources": [],
+        "scripts": [],
+        "children": [],
+        "parent": "6e7e7e83313c850b5c5080ae40258057"
+    },
+    "name": "GoblinHP"
+}

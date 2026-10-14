@@ -1,0 +1,21 @@
+{
+    "type": 0,
+    "data": {
+        "components": {
+            "Panel": {
+                "title": "Hierarchy",
+                "panel_type": "hierarchy",
+                "minimized": false
+            }
+        },
+        "resources": [],
+        "scripts": [],
+        "children": [
+            "998fce444d35d99040b35c6b13279409",
+            "0e236fa6a70dd9bc3be71dba07c450d7",
+            "4df362be055d4b3b9dd5899816a456cd"
+        ],
+        "parent": "3949bd7d4b6fbaad2411300db309e1d0"
+    },
+    "name": "Hierarchy Panel"
+}

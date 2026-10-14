@@ -1,0 +1,19 @@
+{
+    "type": 0,
+    "data": {
+        "components": {
+            "UIButton": {
+                "label": "UI & Tools",
+                "width": 75.0,
+                "height": 0.0,
+                "on_click": "",
+                "enabled": true
+            }
+        },
+        "resources": [],
+        "scripts": [],
+        "children": [],
+        "parent": "74af9c8cabbbc0ec649bfe10c2023b1b"
+    },
+    "name": "ToolsFilter"
+}

@@ -1,0 +1,21 @@
+{
+    "type": 0,
+    "data": {
+        "components": {
+            "Panel": {
+                "title": "Inspector",
+                "panel_type": "inspector",
+                "minimized": false,
+                "locked": false
+            }
+        },
+        "resources": [],
+        "scripts": [],
+        "children": [
+            "b12ad1cdc1c5b73c2b9d3694d5f9bb1a",
+            "736e27789709dc679d8c218dde81278f"
+        ],
+        "parent": "e97d58e97ee2bd49c786382085dd8d0d"
+    },
+    "name": "Inspector Panel"
+}

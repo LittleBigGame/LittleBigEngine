@@ -1,0 +1,22 @@
+{
+    "type": 0,
+    "data": {
+        "components": {
+            "Weapon": {
+                "damage": 45,
+                "range": 1.5,
+                "element": "Light"
+            },
+            "Transform": {
+                "x": 20.0,
+                "y": 0.0,
+                "z": 0.0
+            }
+        },
+        "resources": [],
+        "scripts": [],
+        "children": [],
+        "parent": "87cc7cfc15f825069a46c6d23dd03483"
+    },
+    "name": "Excalibur"
+}

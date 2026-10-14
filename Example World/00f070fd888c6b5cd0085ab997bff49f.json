@@ -1,0 +1,14 @@
+{
+    "type": 0,
+    "data": {
+        "components": {},
+        "resources": [],
+        "scripts": [],
+        "children": [
+            "842ed5017307782ba35d5a582204978d",
+            "3e30353849b5bb5a71b45b015288c841"
+        ],
+        "parent": null
+    },
+    "name": "Application"
+}

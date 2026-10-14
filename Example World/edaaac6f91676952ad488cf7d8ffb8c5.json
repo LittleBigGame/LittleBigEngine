@@ -1,0 +1,13 @@
+{
+    "type": 1,
+    "data": {
+        "name": "PlayerCombat",
+        "source_path": "",
+        "code": "# Player Combat Script\n# Reference to Player using LBE syntax:\nhero = <|0|8d186d4290c36cb66cb7a6aacd0bc0fb|>\n\ndef update(self, dt):\n    # Query attached child weapons:\n    for weapon in self.query_children(\"Weapon\"):\n        weapon.transform.rot_z += 45.0 * dt\n",
+        "requires": [
+            "Transform",
+            "Health"
+        ]
+    },
+    "name": "PlayerCombat"
+}

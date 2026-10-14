@@ -1,0 +1,14 @@
+{
+    "type": 1,
+    "data": {
+        "name": "PlayerCombat",
+        "source_path": "",
+        "code": "# Player Combat Script\nhero = <|0|ef257633d59af65503e37c7e25e68fb5|>\n\ndef update(self, dt):\n    for weapon in self.query_children(\"Weapon\"):\n        weapon.transform.rot_z += 45.0 * dt\n",
+        "requires": [
+            "Transform",
+            "Health"
+        ],
+        "symbols": {}
+    },
+    "name": "PlayerCombat"
+}

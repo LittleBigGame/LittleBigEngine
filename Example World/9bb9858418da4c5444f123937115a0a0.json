@@ -1,0 +1,15 @@
+{
+    "type": 0,
+    "data": {
+        "components": {},
+        "resources": [],
+        "scripts": [],
+        "children": [
+            "5c04adf7f97b7238f2d5f68c5c264559",
+            "e30f05e734282bba6ad5d82de1135724",
+            "4d7b956998a94427a972e51fce3b9c20"
+        ],
+        "parent": "2e8ddd03b029d6b6519dd44b59f3c82d"
+    },
+    "name": "Game"
+}

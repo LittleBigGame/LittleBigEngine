@@ -1,0 +1,22 @@
+{
+    "type": 0,
+    "data": {
+        "components": {
+            "UIContainer": {
+                "layout": "vertical",
+                "gap": 6.0,
+                "padding": 8.0,
+                "columns": 2,
+                "collapsible": false,
+                "collapsed": false
+            }
+        },
+        "resources": [],
+        "scripts": [],
+        "children": [
+            "5213361c2951acc29d58058c538d5b2d"
+        ],
+        "parent": "ebc35dbb5618023929db48e90163a970"
+    },
+    "name": "GameGUI"
+}

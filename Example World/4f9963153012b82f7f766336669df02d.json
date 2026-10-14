@@ -1,0 +1,17 @@
+{
+    "type": 0,
+    "data": {
+        "components": {
+            "UIText": {
+                "content": "Inspector",
+                "color": null,
+                "bullet": false
+            }
+        },
+        "resources": [],
+        "scripts": [],
+        "children": [],
+        "parent": "37e86f791408763de96e883a55e1c2dd"
+    },
+    "name": "TitleText"
+}

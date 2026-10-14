@@ -1,0 +1,15 @@
+{
+    "type": 0,
+    "data": {
+        "components": {},
+        "resources": [],
+        "scripts": [],
+        "children": [
+            "256daed561edd7263a0467b19e86b1c3",
+            "10d37450a8aa926dde79dd781b3f8586",
+            "7d86fcc97fd16d0bd5c855a1bb9aa5f0"
+        ],
+        "parent": "078181328230b0a0ebab137a55314b02"
+    },
+    "name": "Editor"
+}

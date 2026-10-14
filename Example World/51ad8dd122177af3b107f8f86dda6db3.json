@@ -1,0 +1,27 @@
+{
+    "type": 0,
+    "data": {
+        "components": {
+            "Transform": {
+                "x": 400.0,
+                "y": 200.0,
+                "z": 0.0
+            },
+            "Health": {
+                "current": 50,
+                "max": 50
+            },
+            "AI": {
+                "aggro_radius": 150.0,
+                "state": "idle"
+            }
+        },
+        "resources": [],
+        "scripts": [],
+        "children": [
+            "a9e4cfcc45bb70d0c12aa8598581719b"
+        ],
+        "parent": "1f92e0f93f1251b1fccc67f5d2222fb4"
+    },
+    "name": "Goblin"
+}
