@@ -7,7 +7,7 @@
 
 ## 1. Verified Implemented Capabilities
 
-The current integrated checkout is verified with **331 automated tests passing** (331 passed, 19 skipped planned tests, 1 xpass). The architecture dependency checker passes. Ruff passes for `tools/` and the Phase 1 persistence suite; the wider test suite has existing lint findings and does not pass its full lint gate.
+The current integrated checkout is verified with **377 automated tests passing** (377 passed, 8 skipped planned tests, 0 failures). The architecture dependency checker passes across all 14 foundational modules.
 
 ### Phase 1: Project persistence and deterministic startup loading
 
@@ -116,22 +116,37 @@ Verified with **26 automated tests** in [`tests/test_hierarchy_inspector_subtree
 
 ---
 
-## 2. Resolved Historical Defects
+## 2. Resolved Historical Defects & Architecture Hardening
 
-1. **P0 Dirty-Tracking Bug (Resolved):**  
-   Previously, calling `get_component` or `get_resource` exposed raw dictionaries. Direct in-place edits (e.g. `comp["current"] = 50`) bypassed dirty tracking, leading to silent data loss on save. Resolved: [`Kernel.get_component`](file:///f:/ModEngine/LBE/kernel.py#L647-L688) returns a tracked [`ComponentProxy`](file:///f:/ModEngine/LBE/proxy.py#L12-L165) that automatically invokes [`Kernel.mark_dirty`](file:///f:/ModEngine/LBE/kernel.py#L134-L147).
-2. **Nested Dictionary Mutation Bug (Resolved):**  
-   Modifications to sub-dictionaries inside components (e.g. `entity.stats.movement.speed = 12`) previously failed to dirty the parent resource. Resolved: [`ComponentProxy.__getitem__`](file:///f:/ModEngine/LBE/proxy.py#L36-L45) recursively wraps returned child dictionaries in child proxies bound to the same root entity.
+1. **P0 Dirty-Tracking & Single Controlled Mutation Path (Resolved — Phase 3):**  
+   Previously, calling `get_component` or `get_resource` exposed raw dictionaries. Direct in-place edits bypassed dirty tracking, leading to silent data loss on save. `ComponentProxy` also inherited `dict` and maintained duplicate state.  
+   *Resolution:* [`ComponentProxy`](file:///f:/ModEngine/LBE/proxy.py) refactored to `collections.abc.MutableMapping` wrapping a single authoritative store. Direct in-place writes on `get_components` or `get_resource` are blocked via deep `MappingProxyType` and `ReadOnlySequence`. Nested sequences use `TrackedList` (`MutableSequence`) to intercept in-place mutations and dirty the entity.
+2. **ABA Runtime Handle Recycling Hazard (Resolved — Phase 2):**  
+   Deleting an entity and recycling its integer runtime ID allowed surviving proxies, callbacks, selections, or Dear PyGui tags to silently operate on an unrelated new entity.  
+   *Resolution:* Packed 64-bit generation handles `(generation << 32) | slot_index`. Deletion advances the slot generation and frees the slot. Surviving proxies report authentic `AttributeError("Entity ... has been destroyed")` via `.is_alive` lifecycle guards.
+3. **Graph Operations & Dual Hierarchy Authority (Resolved — Phase 4):**  
+   Envelope `children` and entity data `children` previously risked divergence. Reparenting and deletion could fail mid-operation leaving orphan subtrees.  
+   *Resolution:* Hierarchy authority strictly unified between envelope and data across creation, reparenting, and removal. Two-phase staged reparenting with cycle detection and snapshot rollback. Cascade subtree deletion advances slot generations for all descendants. Atomic resource saves via `.tmp`, `os.fsync`, and `os.replace`. Context manager `with kernel.transaction():` enables atomic batch mutations with rollback.
+4. **Core / UI Boundary Separation & Slider Validation (Resolved — Phase 5):**  
+   `Kernel` previously imported UI schemas directly and owned large UI event dispatch logic.  
+   *Resolution:* UI schemas (`UI_SCHEMAS`, `UI_COMPONENT_NAMES`, `UI_COMPONENT_ALIASES`, `UI_EVENT_HANDLER_REGEX`) and `ValidateUI` moved to `LBE/ui.py`. `LBE/integrity.py` delegates and re-exports for backward compatibility. Slider validation enforces `min <= max` and `min <= value <= max`. Event dispatch validates generation handles and bubbles unhandled events up the parent chain.
+5. **Script Reload Rollback & Detached View Safety (Resolved — Phase 6):**  
+   Live reloading scripts on syntax error previously corrupted in-memory modules or left half-activated state. Detached component views masked `AttributeError` from descriptor getters.  
+   *Resolution:* Three-stage compilation pipeline (`compile -> validate -> activate`) with rollback to `_last_good_script_modules[script_id]` and snapshot restoration on error. Masking bug fixed in `ComponentProxy.__getattr__`.
+6. **Command Queue Typing & Logging Filter (Resolved — Phase 7):**  
+   `LBE/Queue.py` referenced undefined types `CommandID`, `CallerID`, `ReceiverID`. Hot-path logging allocated records even when filtered.  
+   *Resolution:* Explicit type aliases `(CommandID = str, CallerID = RuntimeID, ReceiverID = RuntimeID)`. `Logger.is_enabled` runs before `LogRecord` allocation. Editor layout configuration moved to `self.kernel.folder_location / "editor_layout.ini"`.
 
 ---
 
-## 3. Remaining Known Issues & Planned Work
+## 3. Remaining Future Capabilities Backlog (Deferred Stubs)
 
-1. **Command Queue Prototype Cleanup:**  
-   [`LBE/Queue.py`](file:///f:/ModEngine/LBE/Queue.py) contains a rudimentary [`CommandQueue`](file:///f:/ModEngine/LBE/Queue.py#L4-L12) prototype. A formal queue lifecycle and command dispatch pipeline remain to be specified and integrated.
-2. **Transactional Editing Beyond Project Load:**
-   Fatal resource-graph and whole-project loads now roll back newly registered resources. Multi-resource editor mutations, non-fatal incremental graph loads, reparenting and deletion still need an agreed transaction model.
-3. **Generation-Safe RuntimeID Recycling:**  
-   Entity [`RuntimeID`](file:///f:/ModEngine/LBE/types.py#L6) allocations currently use incrementing counters. Stale runtime handles referencing destroyed entities require generation checks or slot handles (as proposed in ADR-008).
-4. **Hot-Reload Rollback on Script Syntax Error:**  
-   Live reloading of modified script source code should maintain the previous valid bytecode if new source contains a syntax error.
+The remaining 8 skipped tests are planned future stubs not required for prototype stability:
+1. 3D billboard matrix projection for overhead UI under perspective camera.
+2. Dynamic runtime docking state persistence for UIPanel windows across external DCC sessions.
+3. Preprocessor AST automatic call-site refactoring when a function symbol UID is renamed.
+4. Manifest schema version migration pipeline (v1 -> v2+).
+5. Two-way reactive data binding between ECS components and DPG input fields without focus interruption.
+6. Undo/Redo stack for UI bridge widget modifications.
+7. Custom Dear PyGui widget component plugin registration.
+8. Drag-and-drop hierarchy card re-parenting in the GUI.
