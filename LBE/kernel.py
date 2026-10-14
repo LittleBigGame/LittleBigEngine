@@ -34,6 +34,8 @@ class Kernel(object):
         self.dirty_runtime_ids: set[RuntimeID] = set()
         self.stale_runtime_ids: list[RuntimeID] = []
         self.runtime_idx = 0
+        self.manifest: ProjectManifest | None = None
+        self.broken_references: list[BrokenReference] = []
         self._script_cache: dict[RuntimeID, tuple[str, Any, set[tuple[int, str]]]] = {}
         self._script_module_cache: dict[RuntimeID, tuple[str, dict[str, Any]]] = {}
         self._script_mtime_cache: dict[RuntimeID, int] = {}
@@ -275,18 +277,253 @@ class Kernel(object):
         return None
 
     def save_all_resources(self) -> None | list[Error]:
-        """Flush all dirty resources to disk."""
+        """Flush all dirty resources to disk and persist project manifest."""
         dirty_count = len(self.dirty_runtime_ids)
         logger.trace(f"Flushing all {dirty_count} dirty resources to disk", channel="storage", data={"count": dirty_count})
         errors: list[Error] = []
         for runtime_id in list(self.dirty_runtime_ids):
             if err := self.save_resource(runtime_id):
-                errors.append(err)
+                if isinstance(err, list):
+                    errors.extend(err)
+                else:
+                    errors.append(err)
+        if proj_err := self.save_project():
+            if isinstance(proj_err, Error):
+                errors.append(proj_err)
         return errors if errors else None
 
     def save_dirty_resources(self) -> None | list[Error]:
         """Flush all dirty resources to disk."""
         return self.save_all_resources()
+
+    def save_project(self) -> None | Error:
+        """Gather root entity storage IDs and persist project manifest to project.json atomically."""
+        root_rids: list[RuntimeID] = []
+        for rid in self.resources:
+            if self.is_entity(rid):
+                parent_val = self.resources[rid].get("data", {}).get("parent")
+                if not parent_val:
+                    root_rids.append(rid)
+
+        root_sids: list[str] = [
+            self.get_storage_id(r).hex()
+            for r in root_rids
+            if isinstance(self.get_storage_id(r), bytes)
+        ]
+        root_sids.sort()
+
+        if self.manifest is not None:
+            self.manifest.root_entity_ids = root_sids
+        else:
+            self.manifest = ProjectManifest(
+                name=self.folder_location.name,
+                format_version=1,
+                root_entity_ids=root_sids,
+            )
+
+        manifest_dict = {
+            "name": self.manifest.name,
+            "format_version": self.manifest.format_version,
+            "root_entity_ids": self.manifest.root_entity_ids,
+            "settings": self.manifest.settings,
+        }
+
+        project_path = self.folder_location / "project.json"
+        temp_path = self.folder_location / "project.tmp"
+        try:
+            with open(temp_path, "w", encoding="utf-8") as f:
+                f.write(json.dumps(manifest_dict, indent=4))
+            temp_path.replace(project_path)
+        except Exception as ex:
+            if temp_path.exists():
+                temp_path.unlink(missing_ok=True)
+            err = Error(
+                message="Failed to save project manifest",
+                description=f"Failed to write project manifest: {ex}",
+                data={"path": str(project_path), "error": str(ex)},
+                code=FailedToSaveResourceOnDiskError,
+            )
+            logger.error("Failed to save project manifest", channel="storage", error=err)
+            return err
+
+        return None
+
+    def load_project(self) -> dict[str, Any] | None | Error:
+        """Load a project either from project.json or via deterministic root discovery."""
+        self.broken_references.clear()
+        manifest_path = self.folder_location / "project.json"
+        if manifest_path.exists():
+            try:
+                with open(manifest_path, "r", encoding="utf-8") as f:
+                    manifest_data = json.load(f)
+            except Exception as ex:
+                err = Error(
+                    message="Invalid project manifest",
+                    description=f"Failed to read or parse project.json: {ex}",
+                    data={"manifest_path": str(manifest_path), "error": str(ex)},
+                    code=InvalidProjectManifestError,
+                )
+                logger.error("Project manifest parsing failed", channel="storage", error=err)
+                return err
+
+            if not isinstance(manifest_data, dict):
+                err = Error(
+                    message="Invalid project manifest",
+                    description=f"Manifest must be a JSON object, got {type(manifest_data).__name__}",
+                    data={"manifest_path": str(manifest_path)},
+                    code=InvalidProjectManifestError,
+                )
+                logger.error("Project manifest structure invalid", channel="storage", error=err)
+                return err
+
+            format_version = manifest_data.get("format_version", 1)
+            if not isinstance(format_version, int) or format_version < 1:
+                err = Error(
+                    message="Invalid project manifest",
+                    description=f"Manifest format_version must be an integer >= 1, got {format_version}",
+                    data={"manifest_path": str(manifest_path), "format_version": format_version},
+                    code=InvalidProjectManifestError,
+                )
+                logger.error("Manifest format_version invalid", channel="storage", error=err)
+                return err
+
+            raw_root_ids = manifest_data.get("root_entity_ids", [])
+            if not isinstance(raw_root_ids, list):
+                raw_root_ids = []
+
+            self.manifest = ProjectManifest(
+                name=manifest_data.get("name", "Untitled Project"),
+                format_version=format_version,
+                root_entity_ids=[str(rid) for rid in raw_root_ids],
+                settings=manifest_data.get("settings", {}) if isinstance(manifest_data.get("settings"), dict) else {},
+            )
+
+            for raw_root_id in self.manifest.root_entity_ids:
+                norm_sid = self._normalize_storage_id(raw_root_id)
+                if isinstance(norm_sid, Error):
+                    self.broken_references.append(
+                        BrokenReference(
+                            source_storage_id=b"\x00" * 16,
+                            target_storage_id=b"\x00" * 16,
+                            reference_type="root",
+                            details=f"Invalid root ID: {raw_root_id}",
+                        )
+                    )
+                    logger.trace(f"Broken reference detected: invalid root entity ID {raw_root_id}", channel="storage")
+                    continue
+                res = self.load_resource(norm_sid, load_dependencies=-1, load_children=-1)
+                if isinstance(res, Error):
+                    if res.code == StorageIDNotFoundOnDiskError:
+                        self.broken_references.append(
+                            BrokenReference(
+                                source_storage_id=b"\x00" * 16,
+                                target_storage_id=norm_sid,
+                                reference_type="root",
+                                details="File not found on disk",
+                            )
+                        )
+                        logger.trace(f"Broken reference detected: 0x{norm_sid.hex()} missing from disk", channel="storage")
+                        continue
+                    return res
+
+            return {
+                "manifest": self.manifest,
+                "roots_loaded": len(self.manifest.root_entity_ids),
+                "broken_references": len(self.broken_references),
+            }
+
+        # If project.json does NOT exist:
+        candidate_entity_sids: set[StorageID] = set()
+        referenced_child_sids: set[StorageID] = set()
+        has_parent_sids: set[StorageID] = set()
+
+        for p in sorted(self.folder_location.glob("*.json")):
+            if p.name == "project.json":
+                continue
+            try:
+                sid = bytes.fromhex(p.stem)
+                if len(sid) != 16:
+                    continue
+            except ValueError:
+                continue
+
+            try:
+                with open(p, "r", encoding="utf-8") as f:
+                    envelope = json.load(f)
+            except Exception:
+                continue
+
+            if not isinstance(envelope, dict):
+                continue
+
+            if envelope.get("type") == Entity:
+                candidate_entity_sids.add(sid)
+                entity_data = envelope.get("data", {})
+                if isinstance(entity_data, dict):
+                    parent_hex = entity_data.get("parent")
+                    if parent_hex and isinstance(parent_hex, str):
+                        has_parent_sids.add(sid)
+
+                    data_children = entity_data.get("children", [])
+                    if isinstance(data_children, list):
+                        for ch in data_children:
+                            ch_sid = self._normalize_storage_id(ch)
+                            if isinstance(ch_sid, bytes):
+                                referenced_child_sids.add(ch_sid)
+
+                children_list = envelope.get("children", [])
+                if isinstance(children_list, list):
+                    for ch in children_list:
+                        ch_sid = self._normalize_storage_id(ch)
+                        if isinstance(ch_sid, bytes):
+                            referenced_child_sids.add(ch_sid)
+
+        if not candidate_entity_sids:
+            return None
+
+        discovered_roots = [
+            sid for sid in candidate_entity_sids
+            if sid not in referenced_child_sids and sid not in has_parent_sids
+        ]
+        discovered_roots.sort(key=lambda s: s.hex())
+
+        for sid in discovered_roots:
+            res = self.load_resource(sid, load_dependencies=-1, load_children=-1)
+            if isinstance(res, Error):
+                if res.code == StorageIDNotFoundOnDiskError:
+                    self.broken_references.append(
+                        BrokenReference(
+                            source_storage_id=b"\x00" * 16,
+                            target_storage_id=sid,
+                            reference_type="root",
+                            details="File not found on disk",
+                        )
+                    )
+                    logger.trace(f"Broken reference detected: 0x{sid.hex()} missing from disk", channel="storage")
+                    continue
+                return res
+
+        self.manifest = ProjectManifest(
+            name=self.folder_location.name,
+            format_version=1,
+            root_entity_ids=[s.hex() for s in discovered_roots],
+        )
+        self.save_project()
+
+        return {
+            "manifest": self.manifest,
+            "roots_loaded": len(self.manifest.root_entity_ids),
+            "broken_references": len(self.broken_references),
+        }
+
+    def get_diagnostics(self) -> dict[str, Any]:
+        """Return diagnostic metrics including broken references, total loaded resources, and dirty count."""
+        return {
+            "broken_references": self.broken_references,
+            "total_resources": len(self.resources),
+            "dirty_count": len(self.dirty_runtime_ids),
+        }
+
 
     def reload_resource(self, runtime_id: RuntimeID) -> None | Error:
         """Discard in-memory changes and reload the resource from disk."""
@@ -374,6 +611,7 @@ class Kernel(object):
         load_dependencies: int = -1,
         load_children: int = -1,
         _visited: set[StorageID] | None = None,
+        is_fatal: bool = False,
     ) -> RuntimeID | Error:
         if _visited is None:
             _visited = set()
@@ -425,14 +663,39 @@ class Kernel(object):
             for raw_dep_id in resource_data.get("dependencies", []):
                 norm_sid = self._normalize_storage_id(raw_dep_id)
                 if isinstance(norm_sid, Error):
-                    return norm_sid
+                    self.broken_references.append(
+                        BrokenReference(
+                            source_storage_id=storage_id,
+                            target_storage_id=b"\x00" * 16,
+                            reference_type="dependency",
+                            details=f"Invalid dependency ID: {raw_dep_id}",
+                        )
+                    )
+                    logger.trace(f"Broken reference detected: invalid dependency ID {raw_dep_id}", channel="storage")
+                    if is_fatal:
+                        return norm_sid
+                    continue
                 dep_res = self.load_resource(
                     norm_sid,
                     load_dependencies=next_dep_depth,
                     load_children=0,
                     _visited=_visited,
+                    is_fatal=is_fatal,
                 )
                 if isinstance(dep_res, Error):
+                    if dep_res.code == StorageIDNotFoundOnDiskError:
+                        self.broken_references.append(
+                            BrokenReference(
+                                source_storage_id=storage_id,
+                                target_storage_id=norm_sid,
+                                reference_type="dependency",
+                                details="File not found on disk",
+                            )
+                        )
+                        logger.trace(f"Broken reference detected: 0x{norm_sid.hex()} missing from disk", channel="storage")
+                        if is_fatal:
+                            return dep_res
+                        continue
                     return dep_res
 
         # Recursively load children if requested depth > 0 or infinite (< 0)
@@ -449,14 +712,39 @@ class Kernel(object):
             for raw_child_id in children_to_load:
                 norm_sid = self._normalize_storage_id(raw_child_id)
                 if isinstance(norm_sid, Error):
-                    return norm_sid
+                    self.broken_references.append(
+                        BrokenReference(
+                            source_storage_id=storage_id,
+                            target_storage_id=b"\x00" * 16,
+                            reference_type="child",
+                            details=f"Invalid child ID: {raw_child_id}",
+                        )
+                    )
+                    logger.trace(f"Broken reference detected: invalid child ID {raw_child_id}", channel="storage")
+                    if is_fatal:
+                        return norm_sid
+                    continue
                 child_res = self.load_resource(
                     norm_sid,
                     load_dependencies=0,
                     load_children=next_child_depth,
                     _visited=_visited,
+                    is_fatal=is_fatal,
                 )
                 if isinstance(child_res, Error):
+                    if child_res.code == StorageIDNotFoundOnDiskError:
+                        self.broken_references.append(
+                            BrokenReference(
+                                source_storage_id=storage_id,
+                                target_storage_id=norm_sid,
+                                reference_type="child",
+                                details="File not found on disk",
+                            )
+                        )
+                        logger.trace(f"Broken reference detected: 0x{norm_sid.hex()} missing from disk", channel="storage")
+                        if is_fatal:
+                            return child_res
+                        continue
                     return child_res
 
         return runtime_id

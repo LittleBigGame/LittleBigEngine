@@ -284,9 +284,19 @@ def main() -> None:
     world_path = Path(args.world)
     world_path.mkdir(parents=True, exist_ok=True)
 
-    from LBE import Kernel
+    from LBE import Kernel, Error
     kernel = Kernel(world_path)
-    populate_demo_world_if_empty(kernel)
+    load_res = kernel.load_project()
+    if isinstance(load_res, Error):
+        print(f"\n[Error] Failed to load project '{world_path}': {load_res.message} - {load_res.description}\n")
+        return
+
+    if not any(kernel.is_entity(rid) for rid in kernel.resources):
+        populate_demo_world_if_empty(kernel)
+        kernel.save_dirty_resources()
+        kernel.save_project()
+    else:
+        print(f"Loaded existing project '{kernel.folder_location.name}' with {len(kernel.resources)} resources.")
 
     if args.headless:
         run_headless_simulation(kernel, ticks=args.ticks)
