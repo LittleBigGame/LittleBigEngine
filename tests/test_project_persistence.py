@@ -49,6 +49,7 @@ from LBE.types import (
     FailedToSaveResourceOnDiskError,
     InvalidProjectManifestError,
     ProjectManifest,
+    ProjectLoadError,
     Script,
     StorageIDNotFoundOnDiskError,
 )
@@ -196,6 +197,16 @@ class TestManifestFileContract:
         assert res.code == InvalidProjectManifestError
         assert "format_version" in res.description
 
+    def test_manifest_missing_format_version(self, tmp_path: Path):
+        kernel = Kernel(tmp_path)
+        manifest_path = tmp_path / "project.json"
+        manifest_path.write_text(json.dumps({"root_entity_ids": []}), encoding="utf-8")
+
+        res = kernel.load_project()
+        assert isinstance(res, Error)
+        assert res.code == InvalidProjectManifestError
+        assert "format_version" in res.description
+
     def test_manifest_invalid_format_version_negative(self, tmp_path: Path):
         kernel = Kernel(tmp_path)
         manifest_path = tmp_path / "project.json"
@@ -213,6 +224,32 @@ class TestManifestFileContract:
         res = kernel.load_project()
         assert isinstance(res, Error)
         assert res.code == InvalidProjectManifestError
+
+    def test_manifest_unsupported_future_format_version(self, tmp_path: Path):
+        kernel = Kernel(tmp_path)
+        manifest_path = tmp_path / "project.json"
+        manifest_path.write_text(
+            json.dumps({"format_version": 2, "root_entity_ids": []}),
+            encoding="utf-8",
+        )
+
+        res = kernel.load_project()
+        assert isinstance(res, Error)
+        assert res.code == InvalidProjectManifestError
+        assert "unsupported" in res.description.lower()
+
+    def test_manifest_root_entity_ids_must_be_a_list(self, tmp_path: Path):
+        kernel = Kernel(tmp_path)
+        manifest_path = tmp_path / "project.json"
+        manifest_path.write_text(
+            json.dumps({"format_version": 1, "root_entity_ids": "not-a-list"}),
+            encoding="utf-8",
+        )
+
+        res = kernel.load_project()
+        assert isinstance(res, Error)
+        assert res.code == InvalidProjectManifestError
+        assert "root_entity_ids" in res.description
 
     def test_manifest_corrupted_json(self, tmp_path: Path):
         kernel = Kernel(tmp_path)
@@ -358,6 +395,38 @@ class TestDeterministicRootDiscovery:
         k3.load_project()
         assert k3.manifest is not None
         assert k3.manifest.name == "Synthesized Title"
+
+    def test_root_discovery_recovers_entity_with_missing_parent(self, tmp_path: Path):
+        k1 = Kernel(tmp_path)
+        orphan_id = k1.create_entity(name="RecoverableOrphan")
+        orphan_sid = k1.get_storage_id(orphan_id)
+        k1.save_dirty_resources()
+        (tmp_path / "project.json").unlink(missing_ok=True)
+
+        orphan_path = tmp_path / f"{orphan_sid.hex()}.json"
+        payload = json.loads(orphan_path.read_text(encoding="utf-8"))
+        payload["data"]["parent"] = "f" * 32
+        orphan_path.write_text(json.dumps(payload), encoding="utf-8")
+
+        k2 = Kernel(tmp_path)
+        result = k2.load_project()
+
+        assert isinstance(result, dict)
+        assert k2.manifest is not None
+        assert k2.manifest.root_entity_ids == [orphan_sid.hex()]
+        assert orphan_sid in k2.resource_runtime_ids
+
+    def test_root_discovery_rejects_corrupt_resource_without_writing_manifest(self, tmp_path: Path):
+        corrupt_resource = tmp_path / f"{'a' * 32}.json"
+        corrupt_resource.write_text("{broken json", encoding="utf-8")
+
+        kernel = Kernel(tmp_path)
+        result = kernel.load_project()
+
+        assert isinstance(result, Error)
+        assert result.code == ProjectLoadError
+        assert kernel.resources == {}
+        assert not (tmp_path / "project.json").exists()
 
 
 class TestBrokenReferenceResilienceAndDiagnostics:
@@ -570,14 +639,53 @@ class TestStartupLoadingContract:
         assert not any(kernel.is_entity(r) for r in kernel.resources)
 
 
-class TestPlannedPersistenceFeatures:
-    """Planned tests for future persistence architecture features."""
+class TestPersistenceSafetyAndPlannedFeatures:
+    """Safety guarantees completed in Phase 1 and explicitly deferred future work."""
 
-    @pytest.mark.skip(reason="Planned test: Transactional rollback on fatal load failure")
-    def test_planned_transactional_rollback_on_failed_load(self):
-        # If load_resource(is_fatal=True) encounters an unrecoverable disk corruption,
-        # resources loaded earlier in the recursive branch should be unmounted/rolled back.
-        pass
+    def test_transactional_rollback_on_failed_fatal_load(self, tmp_path: Path):
+        k1 = Kernel(tmp_path)
+        child_id = k1.create_entity(name="BrokenChild")
+        child_sid = k1.get_storage_id(child_id)
+        root_id = k1.create_entity(name="Root")
+        root_sid = k1.get_storage_id(root_id)
+        k1.resources[root_id]["data"]["children"] = [child_sid.hex()]
+        k1.mark_dirty(root_id)
+        k1.save_dirty_resources()
+
+        (tmp_path / f"{child_sid.hex()}.json").write_text("{broken json", encoding="utf-8")
+
+        k2 = Kernel(tmp_path)
+        result = k2.load_resource(root_sid, is_fatal=True)
+
+        assert isinstance(result, Error)
+        assert k2.resources == {}
+        assert k2.resource_runtime_ids == {}
+        assert k2.resource_storage_ids == {}
+        assert k2.runtime_idx == 0
+
+    def test_project_load_rolls_back_all_roots_on_corrupt_resource(self, tmp_path: Path):
+        k1 = Kernel(tmp_path)
+        good_id = k1.create_entity(name="GoodRoot")
+        bad_id = k1.create_entity(name="BadRoot")
+        good_sid = k1.get_storage_id(good_id)
+        bad_sid = k1.get_storage_id(bad_id)
+        k1.save_dirty_resources()
+        k1.save_project()
+
+        (tmp_path / f"{bad_sid.hex()}.json").write_text("{broken json", encoding="utf-8")
+        manifest = json.loads((tmp_path / "project.json").read_text(encoding="utf-8"))
+        manifest["root_entity_ids"] = [good_sid.hex(), bad_sid.hex()]
+        (tmp_path / "project.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+        k2 = Kernel(tmp_path)
+        result = k2.load_project()
+
+        assert isinstance(result, Error)
+        assert result.code == ProjectLoadError
+        assert k2.manifest is None
+        assert k2.resources == {}
+        assert k2.resource_runtime_ids == {}
+        assert k2.resource_storage_ids == {}
 
     @pytest.mark.skip(reason="Planned test: Manifest schema version migration pipeline")
     def test_planned_manifest_schema_migration_pipeline(self):
@@ -597,8 +705,20 @@ class TestPlannedPersistenceFeatures:
         # file-watcher should reject the change and retain the in-memory manifest state.
         pass
 
-    @pytest.mark.skip(reason="Planned test: Recursive dependency loading for nested children in scene hierarchy")
-    def test_planned_child_entities_recursively_load_dependencies(self):
-        # When an entity hierarchy is loaded, child entities with dependencies should also
-        # have their dependencies resolved when load_dependencies is negative.
-        pass
+    def test_child_entities_recursively_load_dependencies(self, tmp_path: Path):
+        k1 = Kernel(tmp_path)
+        script_id = k1.create_script_resource(name="ChildDependency", code="value = 1")
+        script_sid = k1.get_storage_id(script_id)
+        root_id = k1.create_entity(name="Root")
+        child_id = k1.create_entity(name="Child", parent_id=root_id)
+        child_sid = k1.get_storage_id(child_id)
+        assert k1.attach_script(child_id, script_id) is None
+        k1.save_dirty_resources()
+        k1.save_project()
+
+        k2 = Kernel(tmp_path)
+        result = k2.load_project()
+
+        assert isinstance(result, dict)
+        assert child_sid in k2.resource_runtime_ids
+        assert script_sid in k2.resource_runtime_ids

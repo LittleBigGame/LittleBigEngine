@@ -558,11 +558,52 @@ class TestPlannedEngineFeatures:
         # any partially loaded parent nodes from kernel.resources.
         pass
 
-    @pytest.mark.skip(reason="Planned test: Generation-safe RuntimeID recycling prevents stale handles")
-    def test_planned_runtime_id_recycle_generation_safety(self):
-        # Destroying an entity and creating a new one reusing the slot must invalidate
-        # stale EntityProxy instances via generation counters.
-        pass
+    def test_planned_runtime_id_recycle_generation_safety(self, tmp_path):
+        kernel = Kernel(tmp_path)
+        a_id = kernel.create_entity(name="EntityA", components={"Transform": {"x": 10.0, "y": 20.0}})
+        assert not isinstance(a_id, Error)
+        proxy_a = kernel.get_entity_proxy(a_id)
+        assert not isinstance(proxy_a, Error)
+        assert proxy_a.is_alive
+        assert proxy_a.name == "EntityA"
+        assert proxy_a.Transform["x"] == 10.0
+
+        # Delete Entity A
+        res = kernel.delete_resource(a_id)
+        assert res is True
+        assert not kernel.is_entity(a_id)
+        assert not kernel.is_valid_runtime_id(a_id)
+        assert not proxy_a.is_alive
+
+        # Create Entity B (which reuses the freed slot)
+        b_id = kernel.create_entity(name="EntityB", components={"Transform": {"x": 99.0, "y": 99.0}})
+        assert not isinstance(b_id, Error)
+        proxy_b = kernel.get_entity_proxy(b_id)
+        assert not isinstance(proxy_b, Error)
+        assert proxy_b.is_alive
+        assert proxy_b.name == "EntityB"
+
+        # Assert Entity B has a different handle than Entity A
+        assert b_id != a_id
+        slot_a, gen_a = kernel._unpack_handle(a_id)
+        slot_b, gen_b = kernel._unpack_handle(b_id)
+        assert slot_a == slot_b
+        assert gen_b > gen_a
+
+        # Assert accessing proxy for Entity A raises or fails cleanly, and does NOT mutate or read Entity B
+        assert not proxy_a.is_alive
+        with pytest.raises(AttributeError):
+            _ = proxy_a.name
+        with pytest.raises(AttributeError):
+            _ = proxy_a.Transform
+        with pytest.raises(AttributeError):
+            proxy_a.Transform = {"x": 0.0, "y": 0.0}
+        with pytest.raises(KeyError):
+            _ = proxy_a["Transform"]
+
+        # Verify Entity B was not mutated by attempts to access or modify proxy_a
+        assert proxy_b.name == "EntityB"
+        assert proxy_b.Transform["x"] == 99.0
 
     @pytest.mark.skip(reason="Planned test: Hot reload rollback preserves stable system state on syntax error")
     def test_planned_hot_reload_rollback_on_syntax_error(self):

@@ -17,6 +17,9 @@ from .integrity import (
 from .proxy import ComponentProxy, EntityProxy, ScriptProxy
 
 
+PROJECT_FORMAT_VERSION = 1
+
+
 class Kernel(object):
     def __init__(self, folder_location: Path):
         if not folder_location.exists():
@@ -32,7 +35,9 @@ class Kernel(object):
         self.resource_storage_ids: dict[RuntimeID, StorageID] = {}
         self.resources: dict[RuntimeID, Any] = {}
         self.dirty_runtime_ids: set[RuntimeID] = set()
-        self.stale_runtime_ids: list[RuntimeID] = []
+        self.stale_runtime_ids: list[int] = []
+        self._slot_generations: dict[int, int] = {}
+        self._active_slots: set[int] = set()
         self.runtime_idx = 0
         self.manifest: ProjectManifest | None = None
         self.broken_references: list[BrokenReference] = []
@@ -67,9 +72,43 @@ class Kernel(object):
         )
         return rid
 
+    def _unpack_handle(self, runtime_id: RuntimeID) -> tuple[int, int]:
+        """Unpack a RuntimeID handle into (slot_index, generation)."""
+        if not isinstance(runtime_id, int) or runtime_id < 0:
+            return (-1, -1)
+        if runtime_id < (1 << 32):
+            return (runtime_id, self._slot_generations.get(runtime_id, 1))
+        return (runtime_id & 0xFFFFFFFF, runtime_id >> 32)
+
+    def is_valid_runtime_id(self, runtime_id: RuntimeID) -> bool:
+        """Check if a runtime handle is alive and matches the current slot generation."""
+        slot, gen = self._unpack_handle(runtime_id)
+        if slot < 0:
+            return False
+        return slot in self._active_slots and self._slot_generations.get(slot) == gen
+
+    def _resolve_handle(self, runtime_id: RuntimeID) -> RuntimeID:
+        """Resolve a potentially plain slot index to its active packed handle."""
+        if isinstance(runtime_id, int) and 0 <= runtime_id < (1 << 32):
+            gen = self._slot_generations.get(runtime_id, 1)
+            packed = (gen << 32) | runtime_id
+            if packed in self.resources:
+                return packed
+        return runtime_id
+
     def get_storage_id(self, runtime_id: RuntimeID) -> StorageID | Error:
         """Get the Storage ID corresponding to the given Resource ID only if it has been loaded."""
-        if runtime_id not in self.resource_storage_ids:
+        if not self.is_valid_runtime_id(runtime_id):
+            err = Error(
+                message="Resource not found",
+                description=f"Runtime ID {runtime_id} is invalid or stale (referencing a deleted resource)!",
+                data={"resource_storage_ids": self.resource_storage_ids, "runtime_id": runtime_id},
+                code=RuntimeIDNotFoundOnMemoryError,
+            )
+            logger.trace("Failed to resolve RuntimeID to StorageID: invalid or stale", channel="storage", error=err, entity_id=runtime_id)
+            return err
+        resolved_id = self._resolve_handle(runtime_id)
+        if resolved_id not in self.resource_storage_ids:
             err = Error(
                 message="Resource not found",
                 description=f"Resource with runtime ID {runtime_id} not found on memory!",
@@ -78,7 +117,7 @@ class Kernel(object):
             )
             logger.trace("Failed to resolve RuntimeID to StorageID", channel="storage", error=err, entity_id=runtime_id)
             return err
-        sid = self.resource_storage_ids[runtime_id]
+        sid = self.resource_storage_ids[resolved_id]
         logger.trace(
             f"Resolved RuntimeID {runtime_id} to StorageID 0x{sid.hex()[:8]}...",
             channel="storage",
@@ -89,7 +128,17 @@ class Kernel(object):
 
     def get_resource(self, runtime_id: RuntimeID) -> Any | Error:
         """Get the loaded resource data for a given Runtime ID."""
-        if runtime_id not in self.resources:
+        if not self.is_valid_runtime_id(runtime_id):
+            err = Error(
+                message="Resource not found",
+                description=f"Runtime ID {runtime_id} is invalid or stale (referencing a deleted resource)!",
+                data={"resources": self.resources, "runtime_id": runtime_id},
+                code=RuntimeIDNotFoundOnMemoryError,
+            )
+            logger.trace("Failed to get resource from memory: invalid or stale", channel="resources", error=err, entity_id=runtime_id)
+            return err
+        resolved_id = self._resolve_handle(runtime_id)
+        if resolved_id not in self.resources:
             err = Error(
                 message="Resource not found",
                 description=f"Resource with runtime ID {runtime_id} not found on memory!",
@@ -98,11 +147,21 @@ class Kernel(object):
             )
             logger.trace("Failed to get resource from memory", channel="resources", error=err, entity_id=runtime_id)
             return err
-        return self.resources[runtime_id]
+        return self.resources[resolved_id]
 
     def mutate_resource(self, runtime_id: RuntimeID, new_data: dict[str, Any]) -> None | Error:
         """Update a resource's payload in memory and trace the before/after mutation."""
-        if runtime_id not in self.resources:
+        if not self.is_valid_runtime_id(runtime_id):
+            err = Error(
+                message="Resource not found",
+                description=f"Cannot mutate: Runtime ID {runtime_id} is invalid or stale (referencing a deleted resource)!",
+                data={"runtime_id": runtime_id},
+                code=RuntimeIDNotFoundOnMemoryError,
+            )
+            logger.trace("Resource mutation failed: invalid or stale", channel="resources", error=err, entity_id=runtime_id)
+            return err
+        resolved_id = self._resolve_handle(runtime_id)
+        if resolved_id not in self.resources:
             err = Error(
                 message="Resource not found",
                 description=f"Cannot mutate: Runtime ID {runtime_id} not found in memory!",
@@ -112,18 +171,18 @@ class Kernel(object):
             logger.trace("Resource mutation failed: not in memory", channel="resources", error=err, entity_id=runtime_id)
             return err
 
-        before_state = copy.deepcopy(self.resources[runtime_id].get("data"))
-        self.resources[runtime_id]["data"] = new_data
-        self.dirty_runtime_ids.add(runtime_id)
-        self._script_cache.pop(runtime_id, None)
-        self._script_module_cache.pop(runtime_id, None)
-        self._script_mtime_cache.pop(runtime_id, None)
-        self._method_sig_cache = {k: v for k, v in self._method_sig_cache.items() if k[0] != runtime_id}
+        before_state = copy.deepcopy(self.resources[resolved_id].get("data"))
+        self.resources[resolved_id]["data"] = new_data
+        self.dirty_runtime_ids.add(resolved_id)
+        self._script_cache.pop(resolved_id, None)
+        self._script_module_cache.pop(resolved_id, None)
+        self._script_mtime_cache.pop(resolved_id, None)
+        self._method_sig_cache = {k: v for k, v in self._method_sig_cache.items() if k[0] != resolved_id}
 
         logger.trace(
-            f"Resource {runtime_id} mutated in memory",
+            f"Resource {resolved_id} mutated in memory",
             channel="resources",
-            entity_id=runtime_id,
+            entity_id=resolved_id,
             action="mutated",
             before=before_state,
             after=copy.deepcopy(new_data),
@@ -131,23 +190,79 @@ class Kernel(object):
         return None
 
     def get_fresh_runtime_id(self) -> RuntimeID:
-        """Get the fresh runtime ID."""
+        """Get the fresh runtime ID packed with generation counter."""
         if len(self.stale_runtime_ids) > 0:
-            runtime_id = self.stale_runtime_ids.pop()
-            logger.trace(f"Recycled stale RuntimeID {runtime_id}", channel="allocation", entity_id=runtime_id)
+            slot = self.stale_runtime_ids.pop()
+            gen = self._slot_generations.get(slot, 1)
+            logger.trace(f"Recycled stale slot {slot} (gen={gen})", channel="allocation", entity_id=slot)
         else:
-            runtime_id = self.runtime_idx
+            slot = self.runtime_idx
             self.runtime_idx += 1
-            logger.trace(f"Allocated fresh RuntimeID {runtime_id}", channel="allocation", entity_id=runtime_id)
-        return runtime_id
+            gen = 1
+            self._slot_generations[slot] = gen
+            logger.trace(f"Allocated fresh slot {slot} (gen={gen})", channel="allocation", entity_id=slot)
+
+        self._active_slots.add(slot)
+        handle = (gen << 32) | slot
+        return handle
+
+    def delete_resource(self, runtime_id: RuntimeID) -> bool | Error:
+        """Delete a resource from memory, advancing its slot generation so existing handles become invalid."""
+        if not self.is_valid_runtime_id(runtime_id):
+            err = Error(
+                message="Resource not found",
+                description=f"Runtime ID {runtime_id} is invalid or stale (referencing a deleted resource)!",
+                data={"runtime_id": runtime_id},
+                code=RuntimeIDNotFoundOnMemoryError,
+            )
+            logger.trace("Failed to delete resource: invalid or stale", channel="resources", error=err, entity_id=runtime_id)
+            return err
+
+        resolved_id = self._resolve_handle(runtime_id)
+        slot, gen = self._unpack_handle(resolved_id)
+        self._active_slots.discard(slot)
+        self._slot_generations[slot] = gen + 1
+        self.stale_runtime_ids.append(slot)
+
+        self.resources.pop(resolved_id, None)
+        self.dirty_runtime_ids.discard(resolved_id)
+        storage_id = self.resource_storage_ids.pop(resolved_id, None)
+        if storage_id is not None:
+            self.resource_runtime_ids.pop(storage_id, None)
+
+        self._script_cache.pop(resolved_id, None)
+        self._script_module_cache.pop(resolved_id, None)
+        self._script_mtime_cache.pop(resolved_id, None)
+        self._method_sig_cache = {k: v for k, v in self._method_sig_cache.items() if k[0] != resolved_id}
+
+        logger.trace(
+            f"Deleted resource {resolved_id} (slot={slot}, next_gen={gen + 1})",
+            channel="resources",
+            entity_id=resolved_id,
+            action="deleted",
+        )
+        return True
 
     def is_dirty(self, runtime_id: RuntimeID) -> bool:
         """Check if a runtime ID has unpersisted changes in memory."""
-        return runtime_id in self.dirty_runtime_ids
+        if not self.is_valid_runtime_id(runtime_id):
+            return False
+        resolved_id = self._resolve_handle(runtime_id)
+        return resolved_id in self.dirty_runtime_ids
 
     def mark_dirty(self, runtime_id: RuntimeID) -> None | Error:
         """Mark a resource as dirty so it will be saved on next flush."""
-        if runtime_id not in self.resources:
+        if not self.is_valid_runtime_id(runtime_id):
+            err = Error(
+                message="Resource not found",
+                description=f"Runtime ID {runtime_id} is invalid or stale (referencing a deleted resource)!",
+                data={"runtime_id": runtime_id},
+                code=RuntimeIDNotFoundOnMemoryError,
+            )
+            logger.trace("Failed to mark resource dirty: invalid or stale", channel="storage", error=err, entity_id=runtime_id)
+            return err
+        resolved_id = self._resolve_handle(runtime_id)
+        if resolved_id not in self.resources:
             err = Error(
                 message="Resource not found",
                 description=f"Resource with runtime ID {runtime_id} not found on memory!",
@@ -156,22 +271,32 @@ class Kernel(object):
             )
             logger.trace("Failed to mark resource dirty: not in memory", channel="storage", error=err, entity_id=runtime_id)
             return err
-        self.dirty_runtime_ids.add(runtime_id)
-        logger.trace(f"Resource {runtime_id} marked dirty", channel="storage", entity_id=runtime_id, action="marked_dirty")
+        self.dirty_runtime_ids.add(resolved_id)
+        logger.trace(f"Resource {resolved_id} marked dirty", channel="storage", entity_id=resolved_id, action="marked_dirty")
         return None
 
     def save_resource(self, runtime_id: RuntimeID) -> None | Error | list[Error]:
         """Flush a specific resource (or all dirty resources if runtime_id is None) to disk."""
-
-        if runtime_id not in self.resources or runtime_id not in self.resource_storage_ids:
-            err = Error(
-                message="Resource not found",
-                description=f"Resource with runtime ID {runtime_id} not found on memory!",
-                data={"runtime_id": runtime_id},
-                code=RuntimeIDNotFoundOnMemoryError,
-            )
-            logger.trace("Save failed: not in memory", channel="storage", error=err, entity_id=runtime_id)
-            return err
+        if runtime_id is not None:
+            if not self.is_valid_runtime_id(runtime_id):
+                err = Error(
+                    message="Resource not found",
+                    description=f"Runtime ID {runtime_id} is invalid or stale (referencing a deleted resource)!",
+                    data={"runtime_id": runtime_id},
+                    code=RuntimeIDNotFoundOnMemoryError,
+                )
+                logger.trace("Save failed: invalid or stale", channel="storage", error=err, entity_id=runtime_id)
+                return err
+            runtime_id = self._resolve_handle(runtime_id)
+            if runtime_id not in self.resources or runtime_id not in self.resource_storage_ids:
+                err = Error(
+                    message="Resource not found",
+                    description=f"Resource with runtime ID {runtime_id} not found on memory!",
+                    data={"runtime_id": runtime_id},
+                    code=RuntimeIDNotFoundOnMemoryError,
+                )
+                logger.trace("Save failed: not in memory", channel="storage", error=err, entity_id=runtime_id)
+                return err
 
         storage_id = self.resource_storage_ids[runtime_id]
         resource_data = self.resources[runtime_id]
@@ -298,18 +423,16 @@ class Kernel(object):
 
     def save_project(self) -> None | Error:
         """Gather root entity storage IDs and persist project manifest to project.json atomically."""
-        root_rids: list[RuntimeID] = []
+        root_sids: list[str] = []
         for rid in self.resources:
             if self.is_entity(rid):
                 parent_val = self.resources[rid].get("data", {}).get("parent")
-                if not parent_val:
-                    root_rids.append(rid)
-
-        root_sids: list[str] = [
-            self.get_storage_id(r).hex()
-            for r in root_rids
-            if isinstance(self.get_storage_id(r), bytes)
-        ]
+                parent_sid = self._normalize_storage_id(parent_val) if parent_val else None
+                if isinstance(parent_sid, bytes) and parent_sid in self.resource_runtime_ids:
+                    continue
+                storage_id = self.resource_storage_ids.get(rid)
+                if storage_id is not None:
+                    root_sids.append(storage_id.hex())
         root_sids.sort()
 
         if self.manifest is not None:
@@ -317,8 +440,19 @@ class Kernel(object):
         else:
             self.manifest = ProjectManifest(
                 name=self.folder_location.name,
-                format_version=1,
+                format_version=PROJECT_FORMAT_VERSION,
                 root_entity_ids=root_sids,
+            )
+
+        if self.manifest.format_version != PROJECT_FORMAT_VERSION:
+            return Error(
+                message="Invalid project manifest",
+                description=(
+                    f"Cannot save unsupported manifest format_version "
+                    f"{self.manifest.format_version}; supported version is {PROJECT_FORMAT_VERSION}"
+                ),
+                data={"format_version": self.manifest.format_version},
+                code=InvalidProjectManifestError,
             )
 
         manifest_dict = {
@@ -350,7 +484,6 @@ class Kernel(object):
 
     def load_project(self) -> dict[str, Any] | None | Error:
         """Load a project either from project.json or via deterministic root discovery."""
-        self.broken_references.clear()
         manifest_path = self.folder_location / "project.json"
         if manifest_path.exists():
             try:
@@ -376,8 +509,18 @@ class Kernel(object):
                 logger.error("Project manifest structure invalid", channel="storage", error=err)
                 return err
 
-            format_version = manifest_data.get("format_version", 1)
-            if not isinstance(format_version, int) or format_version < 1:
+            if "format_version" not in manifest_data:
+                err = Error(
+                    message="Invalid project manifest",
+                    description="Manifest format_version is required",
+                    data={"manifest_path": str(manifest_path)},
+                    code=InvalidProjectManifestError,
+                )
+                logger.error("Manifest format_version missing", channel="storage", error=err)
+                return err
+
+            format_version = manifest_data["format_version"]
+            if type(format_version) is not int or format_version < 1:
                 err = Error(
                     message="Invalid project manifest",
                     description=f"Manifest format_version must be an integer >= 1, got {format_version}",
@@ -387,17 +530,56 @@ class Kernel(object):
                 logger.error("Manifest format_version invalid", channel="storage", error=err)
                 return err
 
+            if format_version != PROJECT_FORMAT_VERSION:
+                err = Error(
+                    message="Invalid project manifest",
+                    description=(
+                        f"Unsupported manifest format_version {format_version}; "
+                        f"supported version is {PROJECT_FORMAT_VERSION}"
+                    ),
+                    data={"manifest_path": str(manifest_path), "format_version": format_version},
+                    code=InvalidProjectManifestError,
+                )
+                logger.error("Manifest format_version unsupported", channel="storage", error=err)
+                return err
+
             raw_root_ids = manifest_data.get("root_entity_ids", [])
             if not isinstance(raw_root_ids, list):
-                raw_root_ids = []
+                err = Error(
+                    message="Invalid project manifest",
+                    description="Manifest root_entity_ids must be a JSON array",
+                    data={"manifest_path": str(manifest_path)},
+                    code=InvalidProjectManifestError,
+                )
+                logger.error("Manifest root_entity_ids invalid", channel="storage", error=err)
+                return err
 
-            self.manifest = ProjectManifest(
-                name=manifest_data.get("name", "Untitled Project"),
+            manifest_name = manifest_data.get("name", "Untitled Project")
+            settings = manifest_data.get("settings", {})
+            if not isinstance(manifest_name, str) or not isinstance(settings, dict):
+                err = Error(
+                    message="Invalid project manifest",
+                    description="Manifest name must be a string and settings must be a JSON object",
+                    data={"manifest_path": str(manifest_path)},
+                    code=InvalidProjectManifestError,
+                )
+                logger.error("Manifest metadata invalid", channel="storage", error=err)
+                return err
+
+            candidate_manifest = ProjectManifest(
+                name=manifest_name,
                 format_version=format_version,
                 root_entity_ids=[str(rid) for rid in raw_root_ids],
-                settings=manifest_data.get("settings", {}) if isinstance(manifest_data.get("settings"), dict) else {},
+                settings=settings,
             )
 
+            state_before_load = self._snapshot_loaded_state()
+            previous_manifest = self.manifest
+            previous_broken_references = self.broken_references
+            self.manifest = candidate_manifest
+            self.broken_references = []
+            roots_loaded = 0
+            loaded_root_ids: set[StorageID] = set()
             for raw_root_id in self.manifest.root_entity_ids:
                 norm_sid = self._normalize_storage_id(raw_root_id)
                 if isinstance(norm_sid, Error):
@@ -410,6 +592,8 @@ class Kernel(object):
                         )
                     )
                     logger.trace(f"Broken reference detected: invalid root entity ID {raw_root_id}", channel="storage")
+                    continue
+                if norm_sid in loaded_root_ids:
                     continue
                 res = self.load_resource(norm_sid, load_dependencies=-1, load_children=-1)
                 if isinstance(res, Error):
@@ -424,18 +608,22 @@ class Kernel(object):
                         )
                         logger.trace(f"Broken reference detected: 0x{norm_sid.hex()} missing from disk", channel="storage")
                         continue
+                    self._restore_loaded_state(state_before_load)
+                    self.manifest = previous_manifest
+                    self.broken_references = previous_broken_references
                     return res
+                loaded_root_ids.add(norm_sid)
+                roots_loaded += 1
 
             return {
                 "manifest": self.manifest,
-                "roots_loaded": len(self.manifest.root_entity_ids),
+                "roots_loaded": roots_loaded,
                 "broken_references": len(self.broken_references),
             }
 
-        # If project.json does NOT exist:
+        # If project.json does not exist, inspect resource envelopes without loading them.
         candidate_entity_sids: set[StorageID] = set()
         referenced_child_sids: set[StorageID] = set()
-        has_parent_sids: set[StorageID] = set()
 
         for p in sorted(self.folder_location.glob("*.json")):
             if p.name == "project.json":
@@ -450,20 +638,26 @@ class Kernel(object):
             try:
                 with open(p, "r", encoding="utf-8") as f:
                     envelope = json.load(f)
-            except Exception:
-                continue
+            except (OSError, json.JSONDecodeError) as ex:
+                return Error(
+                    message="Project root discovery failed",
+                    description=f"Failed to inspect resource {p.name}: {ex}",
+                    data={"resource_path": p, "error": str(ex)},
+                    code=ProjectLoadError,
+                )
 
             if not isinstance(envelope, dict):
-                continue
+                return Error(
+                    message="Project root discovery failed",
+                    description=f"Resource {p.name} must contain a JSON object",
+                    data={"resource_path": p},
+                    code=ProjectLoadError,
+                )
 
             if envelope.get("type") == Entity:
                 candidate_entity_sids.add(sid)
                 entity_data = envelope.get("data", {})
                 if isinstance(entity_data, dict):
-                    parent_hex = entity_data.get("parent")
-                    if parent_hex and isinstance(parent_hex, str):
-                        has_parent_sids.add(sid)
-
                     data_children = entity_data.get("children", [])
                     if isinstance(data_children, list):
                         for ch in data_children:
@@ -483,10 +677,22 @@ class Kernel(object):
 
         discovered_roots = [
             sid for sid in candidate_entity_sids
-            if sid not in referenced_child_sids and sid not in has_parent_sids
+            if sid not in referenced_child_sids
         ]
         discovered_roots.sort(key=lambda s: s.hex())
 
+        if not discovered_roots:
+            return Error(
+                message="Project root discovery failed",
+                description="Entity resources were found, but no root entities could be discovered",
+                data={"folder_location": self.folder_location, "entity_count": len(candidate_entity_sids)},
+                code=ProjectLoadError,
+            )
+
+        state_before_load = self._snapshot_loaded_state()
+        previous_manifest = self.manifest
+        previous_broken_references = self.broken_references
+        self.broken_references = []
         for sid in discovered_roots:
             res = self.load_resource(sid, load_dependencies=-1, load_children=-1)
             if isinstance(res, Error):
@@ -501,14 +707,21 @@ class Kernel(object):
                     )
                     logger.trace(f"Broken reference detected: 0x{sid.hex()} missing from disk", channel="storage")
                     continue
+                self._restore_loaded_state(state_before_load)
+                self.manifest = previous_manifest
+                self.broken_references = previous_broken_references
                 return res
 
         self.manifest = ProjectManifest(
             name=self.folder_location.name,
-            format_version=1,
+            format_version=PROJECT_FORMAT_VERSION,
             root_entity_ids=[s.hex() for s in discovered_roots],
         )
-        self.save_project()
+        if save_error := self.save_project():
+            self._restore_loaded_state(state_before_load)
+            self.manifest = previous_manifest
+            self.broken_references = previous_broken_references
+            return save_error
 
         return {
             "manifest": self.manifest,
@@ -523,6 +736,30 @@ class Kernel(object):
             "total_resources": len(self.resources),
             "dirty_count": len(self.dirty_runtime_ids),
         }
+
+    def _snapshot_loaded_state(self) -> dict[str, Any]:
+        """Capture registry state so a failed graph load can be rolled back."""
+        return {
+            "resource_runtime_ids": self.resource_runtime_ids.copy(),
+            "resource_storage_ids": self.resource_storage_ids.copy(),
+            "resources": self.resources.copy(),
+            "dirty_runtime_ids": self.dirty_runtime_ids.copy(),
+            "stale_runtime_ids": self.stale_runtime_ids.copy(),
+            "_slot_generations": self._slot_generations.copy(),
+            "_active_slots": self._active_slots.copy(),
+            "runtime_idx": self.runtime_idx,
+        }
+
+    def _restore_loaded_state(self, snapshot: dict[str, Any]) -> None:
+        """Restore registry state captured by _snapshot_loaded_state."""
+        self.resource_runtime_ids = snapshot["resource_runtime_ids"]
+        self.resource_storage_ids = snapshot["resource_storage_ids"]
+        self.resources = snapshot["resources"]
+        self.dirty_runtime_ids = snapshot["dirty_runtime_ids"]
+        self.stale_runtime_ids = snapshot["stale_runtime_ids"]
+        self._slot_generations = snapshot.get("_slot_generations", self._slot_generations).copy()
+        self._active_slots = snapshot.get("_active_slots", self._active_slots).copy()
+        self.runtime_idx = snapshot["runtime_idx"]
 
 
     def reload_resource(self, runtime_id: RuntimeID) -> None | Error:
@@ -613,11 +850,49 @@ class Kernel(object):
         _visited: set[StorageID] | None = None,
         is_fatal: bool = False,
     ) -> RuntimeID | Error:
+        """Load a resource graph, optionally rolling back all new registrations on failure."""
+        if not is_fatal or _visited is not None:
+            return self._load_resource(
+                storage_id,
+                load_dependencies=load_dependencies,
+                load_children=load_children,
+                _visited=_visited,
+                is_fatal=is_fatal,
+            )
+
+        snapshot = self._snapshot_loaded_state()
+        result = self._load_resource(
+            storage_id,
+            load_dependencies=load_dependencies,
+            load_children=load_children,
+            _visited=set(),
+            is_fatal=True,
+        )
+        if isinstance(result, Error):
+            self._restore_loaded_state(snapshot)
+        return result
+
+    def _load_resource(
+        self,
+        storage_id: StorageID,
+        load_dependencies: int = -1,
+        load_children: int = -1,
+        _visited: set[StorageID] | None = None,
+        is_fatal: bool = False,
+    ) -> RuntimeID | Error:
         if _visited is None:
             _visited = set()
 
         if storage_id in _visited:
-            return self.resource_runtime_ids[storage_id]
+            existing_id = self.resource_runtime_ids.get(storage_id)
+            if existing_id is not None:
+                return existing_id
+            return Error(
+                message="Project load failed",
+                description=f"Resource cycle reached unregistered storage ID {storage_id.hex()}",
+                data={"storage_id": storage_id},
+                code=ProjectLoadError,
+            )
         _visited.add(storage_id)
 
         if storage_id in self.resource_runtime_ids:
@@ -634,8 +909,18 @@ class Kernel(object):
                 logger.trace("Load failed: file not on disk", channel="storage", error=err, entity_id=storage_id.hex())
                 return err
 
-            with open(resource_path, "r", encoding="utf-8") as file:
-                resource_data = json.load(file)
+            try:
+                with open(resource_path, "r", encoding="utf-8") as file:
+                    resource_data = json.load(file)
+            except (OSError, json.JSONDecodeError) as ex:
+                err = Error(
+                    message="Project load failed",
+                    description=f"Failed to read resource {storage_id.hex()}: {ex}",
+                    data={"resource_path": resource_path, "storage_id": storage_id, "error": str(ex)},
+                    code=ProjectLoadError,
+                )
+                logger.error("Resource file could not be read", channel="storage", error=err)
+                return err
 
             if isinstance(e := Validate.resource_data(resource_data), Error):
                 logger.trace("Load failed: resource validation failed", channel="storage", error=e, entity_id=storage_id.hex())
@@ -660,7 +945,18 @@ class Kernel(object):
         if load_dependencies != 0:
             next_dep_depth = load_dependencies if load_dependencies < 0 else load_dependencies - 1
             resource_data = self.resources[runtime_id]
-            for raw_dep_id in resource_data.get("dependencies", []):
+            dependency_ids = list(resource_data.get("dependencies", []))
+            if resource_data.get("type") == Entity:
+                entity_data = resource_data.get("data", {})
+                if isinstance(entity_data, dict):
+                    for field_name in ("resources", "scripts"):
+                        field_references = entity_data.get(field_name, [])
+                        if isinstance(field_references, list):
+                            for reference in field_references:
+                                if reference not in dependency_ids:
+                                    dependency_ids.append(reference)
+
+            for raw_dep_id in dependency_ids:
                 norm_sid = self._normalize_storage_id(raw_dep_id)
                 if isinstance(norm_sid, Error):
                     self.broken_references.append(
@@ -675,7 +971,7 @@ class Kernel(object):
                     if is_fatal:
                         return norm_sid
                     continue
-                dep_res = self.load_resource(
+                dep_res = self._load_resource(
                     norm_sid,
                     load_dependencies=next_dep_depth,
                     load_children=0,
@@ -724,9 +1020,9 @@ class Kernel(object):
                     if is_fatal:
                         return norm_sid
                     continue
-                child_res = self.load_resource(
+                child_res = self._load_resource(
                     norm_sid,
-                    load_dependencies=0,
+                    load_dependencies=load_dependencies,
                     load_children=next_child_depth,
                     _visited=_visited,
                     is_fatal=is_fatal,
@@ -942,12 +1238,26 @@ class Kernel(object):
 
     def is_entity(self, entity_id: RuntimeID) -> bool:
         """Check whether a loaded RuntimeID is an Entity."""
-        res = self.resources.get(entity_id)
+        if not self.is_valid_runtime_id(entity_id):
+            return False
+        resolved_id = self._resolve_handle(entity_id)
+        res = self.resources.get(resolved_id)
         return bool(res and res.get("type") == Entity)
 
     def get_entity_proxy(self, entity: RuntimeID) -> EntityProxy | Error:
         """Get an EntityProxy for an entity in memory."""
-        if entity not in self.resources:
+        if not self.is_valid_runtime_id(entity):
+            err = Error(
+                message="Entity not found",
+                description=f"Runtime ID {entity} is invalid or stale (referencing a deleted resource)!",
+                data={"entity_id": entity},
+                code=RuntimeIDNotFoundOnMemoryError,
+            )
+            logger.trace("Failed to get entity proxy: invalid or stale", channel="entities", error=err, entity_id=entity)
+            return err
+
+        resolved_id = self._resolve_handle(entity)
+        if resolved_id not in self.resources:
             err = Error(
                 message="Entity not found",
                 description=f"RuntimeID {entity} was not found in memory!",
@@ -957,7 +1267,7 @@ class Kernel(object):
             logger.trace("Failed to get entity proxy: entity not found", channel="entities", error=err, entity_id=entity)
             return err
 
-        res = self.resources[entity]
+        res = self.resources[resolved_id]
         if res.get("type") != Entity:
             err = Error(
                 message="Resource is not an entity",
@@ -968,7 +1278,7 @@ class Kernel(object):
             logger.trace("Failed to get entity proxy: not an entity", channel="entities", error=err, entity_id=entity)
             return err
 
-        return EntityProxy(self, entity)
+        return EntityProxy(self, resolved_id)
 
     def get_component(self, entity_id: RuntimeID, component_name: str) -> ComponentProxy | Error:
         """Retrieve a component dictionary proxy from an Entity by ID."""
@@ -1734,7 +2044,18 @@ class Kernel(object):
 
     def get_script_proxy(self, script_id: RuntimeID) -> ScriptProxy | Error:
         """Get a ScriptProxy for a script resource in memory."""
-        if not isinstance(script_id, int) or script_id not in self.resources:
+        if not self.is_valid_runtime_id(script_id):
+            err = Error(
+                message="Resource not found",
+                description=f"Runtime ID {script_id} is invalid or stale (referencing a deleted resource)!",
+                data={"script_id": script_id},
+                code=RuntimeIDNotFoundOnMemoryError,
+            )
+            logger.trace("Failed to get script proxy: invalid or stale", channel="resources", error=err, entity_id=script_id)
+            return err
+
+        resolved_id = self._resolve_handle(script_id)
+        if resolved_id not in self.resources:
             err = Error(
                 message="Resource not found",
                 description=f"RuntimeID {script_id} was not found in memory!",
@@ -1744,7 +2065,7 @@ class Kernel(object):
             logger.trace("Failed to get script proxy: resource not found", channel="resources", error=err, entity_id=script_id)
             return err
 
-        res = self.resources[script_id]
+        res = self.resources[resolved_id]
         if res.get("type") != Script:
             err = Error(
                 message="Resource is not a script",
@@ -1755,11 +2076,22 @@ class Kernel(object):
             logger.trace("Failed to get script proxy: not a script", channel="resources", error=err, entity_id=script_id)
             return err
 
-        return ScriptProxy(self, script_id)
+        return ScriptProxy(self, resolved_id)
 
     def get_script_module(self, script_id: RuntimeID) -> dict[str, Any] | Error:
         """Load, bind, and execute a script resource module, returning its namespace globals."""
-        if not isinstance(script_id, int) or script_id not in self.resources:
+        if not self.is_valid_runtime_id(script_id):
+            err = Error(
+                message="Resource not found",
+                description=f"Runtime ID {script_id} is invalid or stale (referencing a deleted resource)!",
+                data={"script_id": script_id},
+                code=RuntimeIDNotFoundOnMemoryError,
+            )
+            logger.trace("Failed to get script module: invalid or stale", channel="resources", error=err, entity_id=script_id)
+            return err
+
+        resolved_id = self._resolve_handle(script_id)
+        if resolved_id not in self.resources:
             err = Error(
                 message="Resource not found",
                 description=f"RuntimeID {script_id} was not found in memory!",
@@ -1769,7 +2101,7 @@ class Kernel(object):
             logger.trace("Failed to get script module: resource not found", channel="resources", error=err, entity_id=script_id)
             return err
 
-        res = self.resources[script_id]
+        res = self.resources[resolved_id]
         if res.get("type") != Script:
             err = Error(
                 message="Resource is not a script",

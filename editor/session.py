@@ -256,17 +256,14 @@ class EditorSession:
         for child_id in children:
             self.delete_entity(child_id, delete_from_disk=delete_from_disk)
 
-        storage_id = self.kernel.resource_storage_ids.pop(entity_id, None)
-        if storage_id is not None:
-            self.kernel.resource_runtime_ids.pop(storage_id, None)
-            if delete_from_disk and hasattr(self.kernel, "folder_location"):
-                disk_file = self.kernel.folder_location / f"{storage_id.hex()}.json"
-                disk_file.unlink(missing_ok=True)
+        storage_id = self.kernel.resource_storage_ids.get(entity_id)
+        if storage_id is not None and delete_from_disk and hasattr(self.kernel, "folder_location"):
+            disk_file = self.kernel.folder_location / f"{storage_id.hex()}.json"
+            disk_file.unlink(missing_ok=True)
 
-        self.kernel.resources.pop(entity_id, None)
-        self.kernel.dirty_runtime_ids.discard(entity_id)
-        self.kernel.stale_runtime_ids.append(entity_id)
-        self.kernel._script_cache.pop(entity_id, None)
+        del_res = self.kernel.delete_resource(entity_id)
+        if isinstance(del_res, Error):
+            return del_res
 
         self._notify_state_changed()
         return True

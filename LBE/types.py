@@ -40,7 +40,7 @@ Script = 1
 class BrokenReference:
     source_storage_id: StorageID
     target_storage_id: StorageID
-    reference_type: str  # "dependency", "child", "component_ref"
+    reference_type: str  # "dependency", "child", "component_ref", or "root"
     details: str = ""
 
 
@@ -50,4 +50,3 @@ class ProjectManifest:
     format_version: int = 1
     root_entity_ids: list[str] = field(default_factory=list)
     settings: dict[str, Any] = field(default_factory=dict)
-

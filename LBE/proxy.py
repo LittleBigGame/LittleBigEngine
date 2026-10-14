@@ -183,19 +183,31 @@ class EntityProxy:
     """Wraps an entity RuntimeID and provides ergonomic, tracked component access."""
 
     def __init__(self, kernel: Kernel | Any, entity_id: RuntimeID) -> None:
-        self._kernel = kernel
-        self._entity_id = entity_id
+        object.__setattr__(self, "_kernel", kernel)
+        object.__setattr__(self, "_entity_id", entity_id)
+        object.__setattr__(self, "kernel", kernel)
+        object.__setattr__(self, "runtime_id", entity_id)
 
     @property
     def id(self) -> RuntimeID:
         return self._entity_id
 
     @property
+    def is_alive(self) -> bool:
+        return bool(self._kernel.is_entity(self._entity_id))
+
+    def _ensure_alive(self) -> None:
+        if not self.is_alive:
+            raise AttributeError(f"Entity {self._entity_id} has been destroyed and is no longer valid.")
+
+    @property
     def storage_id(self) -> StorageID | Error:
+        self._ensure_alive()
         return self._kernel.get_storage_id(self._entity_id)
 
     @property
     def name(self) -> str | None:
+        self._ensure_alive()
         res = self._kernel.get_resource(self._entity_id)
         if isinstance(res, dict):
             return res.get("name")
@@ -203,6 +215,7 @@ class EntityProxy:
 
     @name.setter
     def name(self, val: str | None) -> None:
+        self._ensure_alive()
         res = self._kernel.get_resource(self._entity_id)
         if isinstance(res, dict):
             if val is None:
@@ -213,6 +226,7 @@ class EntityProxy:
 
     @property
     def parent(self) -> EntityProxy | None:
+        self._ensure_alive()
         p_id = self._kernel.get_entity_parent(self._entity_id)
         if p_id is not None:
             return EntityProxy(self._kernel, p_id)
@@ -220,6 +234,7 @@ class EntityProxy:
 
     @parent.setter
     def parent(self, new_parent: EntityProxy | RuntimeID | None) -> None:
+        self._ensure_alive()
         if new_parent is None:
             cur = self._kernel.get_entity_parent(self._entity_id)
             if cur is not None:
@@ -230,22 +245,27 @@ class EntityProxy:
 
     @property
     def children(self) -> list[EntityProxy]:
+        self._ensure_alive()
         child_ids = self._kernel.get_entity_children(self._entity_id)
         return [EntityProxy(self._kernel, cid) for cid in child_ids]
 
     @property
     def world(self) -> WorldProxy:
+        self._ensure_alive()
         return WorldProxy(self._kernel)
 
     def add_child(self, child: EntityProxy | RuntimeID) -> None | Error:
+        self._ensure_alive()
         child_id = child.id if hasattr(child, "id") else child
         return self._kernel.add_entity_child(self._entity_id, child_id)
 
     def remove_child(self, child: EntityProxy | RuntimeID) -> None | Error:
+        self._ensure_alive()
         child_id = child.id if hasattr(child, "id") else child
         return self._kernel.remove_entity_child(self._entity_id, child_id)
 
     def query_children(self, *component_names: str, recursive: bool = False) -> list[EntityProxy]:
+        self._ensure_alive()
         results: list[EntityProxy] = []
         visited: set[RuntimeID] = set()
 
@@ -263,6 +283,7 @@ class EntityProxy:
         return results
 
     def find_child(self, name: str, recursive: bool = False) -> EntityProxy | None:
+        self._ensure_alive()
         visited: set[RuntimeID] = set()
 
         def _find(proxy: EntityProxy) -> EntityProxy | None:
@@ -281,6 +302,7 @@ class EntityProxy:
         return _find(self)
 
     def spawn(self, template: Any, as_child: bool = False, name: str | None = None) -> EntityProxy:
+        self._ensure_alive()
         parent_id = self._entity_id if as_child else None
         res = self._kernel.spawn(template, parent_id=parent_id, name=name)
         if isinstance(res, Error):
@@ -289,10 +311,12 @@ class EntityProxy:
 
     def click(self, *args: Any, **kwargs: Any) -> Any | Error:
         """Trigger the on_click UI event for this entity."""
+        self._ensure_alive()
         return self._kernel.trigger_ui_event(self._entity_id, "on_click", *args, **kwargs)
 
     def trigger(self, event_name: str, *args: Any, **kwargs: Any) -> Any | Error:
         """Trigger an arbitrary UI event for this entity."""
+        self._ensure_alive()
         return self._kernel.trigger_ui_event(self._entity_id, event_name, *args, **kwargs)
 
     def _find_component_name(self, name: str) -> str | None:
@@ -310,6 +334,7 @@ class EntityProxy:
     def __getattr__(self, name: str) -> ComponentProxy:
         if name.startswith("_"):
             raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
+        self._ensure_alive()
         comp_name = self._find_component_name(name)
         if comp_name is not None:
             comp = self._kernel.get_component(self._entity_id, comp_name)
@@ -319,7 +344,7 @@ class EntityProxy:
         raise AttributeError(f"Entity {self._entity_id} has no component or attribute '{name}'")
 
     def __setattr__(self, name: str, value: Any) -> None:
-        if name.startswith("_"):
+        if name.startswith("_") or name in ("kernel", "runtime_id"):
             object.__setattr__(self, name, value)
             return
         prop = getattr(type(self), name, None)
@@ -328,6 +353,7 @@ class EntityProxy:
                 raise AttributeError(f"can't set attribute '{name}'")
             prop.fset(self, value)
             return
+        self._ensure_alive()
         comp_name = self._find_component_name(name)
         target_name = comp_name if comp_name is not None else name
         err = self.set(target_name, value)
@@ -335,12 +361,13 @@ class EntityProxy:
             raise AttributeError(f"Failed to set component '{name}': {err.message}")
 
     def __delattr__(self, name: str) -> None:
-        if name.startswith("_"):
+        if name.startswith("_") or name in ("kernel", "runtime_id"):
             object.__delattr__(self, name)
             return
         prop = getattr(type(self), name, None)
         if isinstance(prop, property):
             raise AttributeError(f"can't delete attribute '{name}'")
+        self._ensure_alive()
         comp_name = self._find_component_name(name)
         target_name = comp_name if comp_name is not None else name
         err = self.remove(target_name)
@@ -348,6 +375,8 @@ class EntityProxy:
             raise AttributeError(f"Failed to remove component '{name}': {err.message}")
 
     def __getitem__(self, name: str) -> ComponentProxy:
+        if not self.is_alive:
+            raise KeyError(f"Entity {self._entity_id} has been destroyed and is no longer valid.")
         comp_name = self._find_component_name(name)
         if comp_name is None:
             raise KeyError(f"Component '{name}' not found on Entity {self._entity_id}")
@@ -357,6 +386,8 @@ class EntityProxy:
         return comp
 
     def get(self, name: str, default: Any = None) -> Any:
+        if not self.is_alive:
+            return default
         comp_name = self._find_component_name(name)
         if comp_name is None:
             return default
@@ -366,13 +397,29 @@ class EntityProxy:
         return comp
 
     def has(self, name: str) -> bool:
+        if not self.is_alive:
+            return False
         return self._find_component_name(name) is not None
 
     def set(self, name: str, data: dict[str, Any]) -> None | Error:
+        if not self.is_alive:
+            return Error(
+                message="Resource not found",
+                description=f"Runtime ID {self._entity_id} is invalid or stale (referencing a deleted resource)!",
+                data={"entity_id": self._entity_id},
+                code=RuntimeIDNotFoundOnMemoryError,
+            )
         target_data = data.to_dict() if isinstance(data, ComponentProxy) else data
         return self._kernel.set_component(self._entity_id, name, target_data)
 
     def remove(self, name: str) -> dict | Error:
+        if not self.is_alive:
+            return Error(
+                message="Resource not found",
+                description=f"Runtime ID {self._entity_id} is invalid or stale (referencing a deleted resource)!",
+                data={"entity_id": self._entity_id},
+                code=RuntimeIDNotFoundOnMemoryError,
+            )
         comp_name = self._find_component_name(name)
         target_name = comp_name if comp_name is not None else name
         return self._kernel.remove_component(self._entity_id, target_name)
@@ -381,11 +428,15 @@ class EntityProxy:
         return self.has(name)
 
     def __setitem__(self, name: str, data: dict[str, Any]) -> None:
+        if not self.is_alive:
+            raise KeyError(f"Entity {self._entity_id} has been destroyed and is no longer valid.")
         err = self.set(name, data)
         if isinstance(err, Error):
             raise KeyError(f"Failed to set component '{name}': {err.message}")
 
     def __delitem__(self, name: str) -> None:
+        if not self.is_alive:
+            raise KeyError(f"Entity {self._entity_id} has been destroyed and is no longer valid.")
         err = self.remove(name)
         if isinstance(err, Error):
             raise KeyError(f"Failed to remove component '{name}': {err.message}")
@@ -421,6 +472,10 @@ class ScriptProxy:
     @property
     def id(self) -> RuntimeID:
         return self._script_id
+
+    @property
+    def is_alive(self) -> bool:
+        return bool(self._kernel.is_valid_runtime_id(self._script_id))
 
     @property
     def storage_id(self) -> StorageID | Error:
@@ -507,6 +562,8 @@ class ScriptProxy:
         return BoundScriptProxy(self, entity)
 
     def __getattr__(self, name: str) -> Any:
+        if not self.is_alive:
+            raise AttributeError(f"Script resource {self._script_id} has been destroyed and is no longer valid.")
         if name.startswith("_") and not name.startswith("_fn_"):
             raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
         target_symbol = name

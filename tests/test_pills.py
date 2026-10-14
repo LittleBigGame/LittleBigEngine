@@ -838,12 +838,54 @@ class TestPlannedPillCapabilities:
         """Future: If updated script source fails syntax check, previous valid bytecode remains active in memory."""
         pass
 
-    @pytest.mark.skip(
-        reason="Planned test: Stale handle safety / generation checks when referenced script is destroyed"
-    )
-    def test_planned_stale_handle_safety_when_referenced_script_destroyed(self) -> None:
-        """Future: Deleting a script resource from storage safely invalidates proxies without crashing callers."""
-        pass
+    def test_planned_stale_handle_safety_when_referenced_script_destroyed(self, tmp_path: Path) -> None:
+        """Deleting a script resource safely invalidates proxies without crashing callers."""
+        kernel = Kernel(tmp_path)
+        script_code = "def _fn_calculate():\n    return 42\n"
+        s1 = kernel.create_script_resource("MathUtils", code=script_code)
+        assert not isinstance(s1, Error)
+
+        proxy1 = kernel.get_script_proxy(s1)
+        assert not isinstance(proxy1, Error)
+        assert proxy1.is_alive
+        assert proxy1._fn_calculate() == 42
+
+        # Delete the script resource
+        res = kernel.delete_resource(s1)
+        assert res is True
+        assert not kernel.is_valid_runtime_id(s1)
+        assert not proxy1.is_alive
+
+        # Calling functions or properties on stale proxy raises cleanly
+        with pytest.raises(AttributeError):
+            _ = proxy1._fn_calculate
+
+        get_res = kernel.get_resource(s1)
+        assert isinstance(get_res, Error)
+        assert get_res.code == RuntimeIDNotFoundOnMemoryError
+
+        # Create a new script resource that recycles the slot
+        new_code = "def _fn_other():\n    return 100\n"
+        s2 = kernel.create_script_resource("OtherUtils", code=new_code)
+        assert not isinstance(s2, Error)
+        assert s2 != s1
+
+        slot1, gen1 = kernel._unpack_handle(s1)
+        slot2, gen2 = kernel._unpack_handle(s2)
+        assert slot1 == slot2
+        assert gen2 > gen1
+
+        # Old proxy remains dead and cannot access the recycled slot
+        assert not proxy1.is_alive
+        with pytest.raises(AttributeError):
+            _ = proxy1._fn_calculate
+
+        proxy2 = kernel.get_script_proxy(s2)
+        assert not isinstance(proxy2, Error)
+        assert proxy2.is_alive
+        assert proxy2._fn_other() == 100
+
+    test_planned_stale_handle_safety_when_script_destroyed = test_planned_stale_handle_safety_when_referenced_script_destroyed
 
     @pytest.mark.skip(
         reason="Planned test: Transactional rollback cleans up loaded parents if a nested script resource fails load validation"

@@ -40,7 +40,7 @@ from editor.hierarchy_panel import HierarchyPanel
 from editor.inspector_panel import InspectorPanel
 from editor.session import EditorSession
 from editor.viewport_panel import ViewportPanel
-from LBE import Kernel, Validate
+from LBE import Error, Kernel, Validate
 from LBE.types import RuntimeID
 from main import populate_demo_world_if_empty
 
@@ -896,9 +896,40 @@ class TestPlannedHierarchyInspectorFeatures:
     def test_planned_hierarchy_card_drag_drop_reparenting(self):
         pass
 
-    @pytest.mark.skip(reason="Planned test: Generation-safe runtime handle recycling during dynamic tree rebuilds")
-    def test_planned_stale_handle_safety_during_panel_rebuild(self):
-        pass
+    def test_planned_stale_handle_safety_during_panel_rebuild(self, tmp_path, dpg_context):
+        kernel = Kernel(tmp_path)
+        session = EditorSession(kernel)
+        panel = HierarchyPanel(session)
+
+        # Create entity and select it
+        e1 = session.create_entity("CardA")
+        assert not isinstance(e1, Error)
+        session.select_entity(e1)
+        assert session.selected_entity_id == e1
+
+        # Delete entity
+        assert session.delete_entity(e1) is True
+        assert session.selected_entity_id is None
+
+        # Re-create an entity reusing the slot
+        e2 = session.create_entity("CardB")
+        assert not isinstance(e2, Error)
+        assert e2 != e1
+
+        # Verify old handle is invalid and cannot be selected or queried as alive
+        assert not kernel.is_entity(e1)
+        assert not kernel.is_valid_runtime_id(e1)
+        assert kernel.is_valid_runtime_id(e2)
+
+        # Rebuilding panel does not crash or reference stale handle
+        panel.rebuild()
+
+        assert session.get_entity_proxy(e1) is None
+        proxy_b = session.get_entity_proxy(e2)
+        assert proxy_b is not None
+        assert proxy_b.name == "CardB"
+
+    test_planned_generation_safe_runtime_handle_recycling = test_planned_stale_handle_safety_during_panel_rebuild
 
     @pytest.mark.skip(reason="Planned test: Failed hot-reload rollback preserves prior UI subtree on script syntax error")
     def test_planned_failed_hot_reload_rollback_ui_subtrees(self):
