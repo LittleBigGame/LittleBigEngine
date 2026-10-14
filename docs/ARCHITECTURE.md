@@ -47,7 +47,7 @@ This is a dependency/ownership model, not a required directory tree. The **kerne
 
 ### Implemented Phase 1 project contract
 
-The current implementation uses `project.json` format version 1 as the project entry point. It contains the project name, settings, and sorted 32-character hexadecimal persistent IDs for root entities. Startup loads this manifest before deciding whether a new demo world is needed.
+The current implementation uses `project.json` format version 1 as the project entry point. It contains the project name, settings, and sorted 32-character hexadecimal persistent IDs for root entities. `main.py` loads a specific Application root by persistent ID; missing selected data fails visibly without bootstrapping a replacement. `Kernel.load_project(root_storage_id=...)` loads that declared root and its reachable graph, preserving the other manifest roots when saving; omitting the argument loads all declared roots.
 
 When a legacy resource folder has no manifest, root entities are discovered deterministically from stored child links. A manifest is written only after the discovered graph loads successfully. Entity script/resource links and explicit dependencies are resolved throughout nested child hierarchies. Missing references are retained as diagnostics, while malformed manifests, corrupt resource files, unsupported format versions, and other fatal graph errors abort loading without exposing a partially registered project.
 

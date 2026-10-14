@@ -50,6 +50,29 @@ def _unwrap(val: Any) -> Any:
     return val
 
 
+def _check_component_target(kernel, entity_id, target):
+    """Reject views detached by replacement, reload, deletion or transaction rollback."""
+    if not hasattr(kernel, "is_valid_runtime_id"):
+        return
+    if not kernel.is_valid_runtime_id(entity_id):
+        raise AttributeError("Component view belongs to a deleted entity")
+    resource = kernel.resources.get(kernel._resolve_handle(entity_id), {})
+    pending = [resource.get("data", {}).get("components", {})]
+    seen = set()
+    while pending:
+        value = pending.pop()
+        if value is target:
+            return
+        if id(value) in seen:
+            continue
+        seen.add(id(value))
+        if isinstance(value, dict):
+            pending.extend(value.values())
+        elif isinstance(value, list):
+            pending.extend(value)
+    raise AttributeError("Component view is detached; retrieve the component again")
+
+
 class TrackedList(MutableSequence):
     """Wraps a list and tracks in-place mutations back to the Kernel and entity."""
 
@@ -60,10 +83,15 @@ class TrackedList(MutableSequence):
         entity_id: RuntimeID,
         component_name: str = "",
     ) -> None:
-        self._target = target
+        self._data = target
         self._kernel = kernel
         self._entity_id = entity_id
         self._component_name = component_name
+
+    @property
+    def _target(self):
+        _check_component_target(self._kernel, self._entity_id, self._data)
+        return self._data
 
     def __getitem__(self, index: Any) -> Any:
         val = self._target[index]
@@ -170,7 +198,12 @@ class ComponentProxy(MutableMapping):
         object.__setattr__(self, "_kernel", kernel)
         object.__setattr__(self, "_entity_id", entity_id)
         object.__setattr__(self, "_component_name", component_name)
-        object.__setattr__(self, "_target", target)
+        object.__setattr__(self, "_data", target)
+
+    @property
+    def _target(self):
+        _check_component_target(self._kernel, self._entity_id, self._data)
+        return self._data
 
     @property
     def entity_id(self) -> RuntimeID:

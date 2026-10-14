@@ -473,6 +473,9 @@ def rename_script_function_display_name(
             code=InvalidResourceDataError,
         )
 
+    if hasattr(kernel, "update_script_source"):
+        return kernel.update_script_source(rid, new_code)
+
     mutated_data = dict(script_data)
     mutated_data["code"] = new_code
     mutated_data["symbols"] = new_symbols

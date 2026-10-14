@@ -18,7 +18,6 @@ from LBE import (
     Kernel,
     LBEReferenceSyntaxError,
     ReferencePreprocessor,
-    RuntimeBinder,
 )
 
 
@@ -274,7 +273,7 @@ class TestRuntimeExecutionAndProxyBinding:
             f"target.health.current += bonus_heal\n"
         )
 
-        env = kernel.execute_script(script, extra_globals={"bonus_heal": 25})
+        kernel.execute_script(script, extra_globals={"bonus_heal": 25})
         assert kernel.get_entity_proxy(entity_id).health.current == 75
 
     def test_execute_script_fails_cleanly_on_nonexistent_reference(self, tmp_path):

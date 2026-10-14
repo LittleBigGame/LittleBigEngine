@@ -20,7 +20,6 @@ from LBE import (
 )
 from LBE.types import (
     InvalidResourceDataError,
-    RuntimeIDNotFoundOnMemoryError,
 )
 
 
@@ -535,7 +534,7 @@ class TestStage1Remediations:
         kernel = Kernel(tmp_path)
         code_v1 = "def update(e, dt): e.stats.score += 1\n"
         s_id = kernel.create_script_resource(name="Scorer", code=code_v1)
-        storage_id = kernel.get_storage_id(s_id)
+        kernel.get_storage_id(s_id)
         kernel.save_dirty_resources()
 
         e_id = kernel.create_entity(name="Player", components={"Stats": {"score": 0}})
@@ -543,7 +542,7 @@ class TestStage1Remediations:
 
         kernel.tick(dt=1.0)
         assert (s_id, "update") in kernel._method_sig_cache
-        assert kernel._method_sig_cache[(s_rid_update := (s_id, "update"))][0] == 2
+        assert kernel._method_sig_cache[((s_id, "update"))][0] == 2
 
         # Mutate resource: cache entry for s_id must be evicted
         code_v2 = "def update(dt): self.stats.score += 5\n"

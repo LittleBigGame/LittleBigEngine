@@ -12,6 +12,10 @@ import sys
 from pathlib import Path
 
 
+DEFAULT_APPLICATION_ID = "2e4b8702e1e9514338d026d79d39f704"
+DEFAULT_WORLD_PATH = Path(__file__).resolve().parent / "Example World"
+
+
 def populate_demo_world_if_empty(kernel) -> None:
     """Populate the world with a bootstrapped root hierarchy:
     Application (Root)
@@ -265,8 +269,13 @@ def main() -> None:
     parser.add_argument(
         "--world",
         type=str,
-        default="./Example World",
-        help="Path to the world project folder (default: './Example World')",
+        default=str(DEFAULT_WORLD_PATH),
+        help="Path to the world project folder (default: Example World beside main.py)",
+    )
+    parser.add_argument(
+        "--application-id",
+        default=DEFAULT_APPLICATION_ID,
+        help="Persistent ID of the Application root to open",
     )
     parser.add_argument(
         "--headless",
@@ -282,21 +291,20 @@ def main() -> None:
     args = parser.parse_args()
 
     world_path = Path(args.world)
-    world_path.mkdir(parents=True, exist_ok=True)
+    if not world_path.is_dir():
+        print(f"[Error] Project folder '{world_path}' does not exist.")
+        return
 
     from LBE import Kernel, Error
     kernel = Kernel(world_path)
-    load_res = kernel.load_project()
+    load_res = kernel.load_project(root_storage_id=args.application_id)
     if isinstance(load_res, Error):
         print(f"\n[Error] Failed to load project '{world_path}': {load_res.message} - {load_res.description}\n")
         return
 
-    if not any(kernel.is_entity(rid) for rid in kernel.resources):
-        populate_demo_world_if_empty(kernel)
-        kernel.save_dirty_resources()
-        kernel.save_project()
-    else:
-        print(f"Loaded existing project '{kernel.folder_location.name}' with {len(kernel.resources)} resources.")
+    print(f"Loaded Application {args.application_id} with {len(kernel.resources)} resources.")
+    if load_res["broken_references"]:
+        print(f"[Warning] Application has {load_res['broken_references']} broken references; see kernel diagnostics.")
 
     if args.headless:
         run_headless_simulation(kernel, ticks=args.ticks)

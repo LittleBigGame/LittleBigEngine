@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-import copy
+from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Callable
 
 from LBE.kernel import Kernel
 from LBE.proxy import EntityProxy
-from LBE.types import Error, RuntimeID, StorageID
+from LBE.types import Error, RuntimeID, StorageID, InvalidResourceDataError
+from LBE.logger import logger
 
 
 class EditorSession:
@@ -32,6 +33,22 @@ class EditorSession:
         # Multi-Inspector Active Focus and Locking
         self._inspectors: list[Any] = []
         self.active_inspector: Any | None = None
+        self.errors: list[Error] = []
+        self._reported_script_errors: set[tuple] = set()
+
+    def report_errors(self, result, notify: bool = True) -> None:
+        """Keep actionable failures available to the UI without aborting other listeners."""
+        failures = [result] if isinstance(result, Error) else result if isinstance(result, list) else []
+        for error in failures:
+            if isinstance(error, Error):
+                self.errors.append(error)
+                logger.error(error.message, channel="editor", error=error)
+        del self.errors[:-100]
+        if failures and notify:
+            self._notify_state_changed()
+
+    def _report_listener_failure(self, error: Exception) -> None:
+        self.report_errors(Error("Editor listener failed", str(error), {}, InvalidResourceDataError), notify=False)
 
     @property
     def selected_entity_id(self) -> RuntimeID | None:
@@ -146,29 +163,29 @@ class EditorSession:
         for callback in list(self._selection_listeners):
             try:
                 callback(entity_id)
-            except Exception:
-                pass
+            except Exception as error:
+                self._report_listener_failure(error)
 
     def _notify_state_changed(self) -> None:
         for callback in list(self._change_listeners):
             try:
                 callback()
-            except Exception:
-                pass
+            except Exception as error:
+                self._report_listener_failure(error)
 
     def _notify_tick(self, dt: float) -> None:
         for callback in list(self._tick_listeners):
             try:
                 callback(dt)
-            except Exception:
-                pass
+            except Exception as error:
+                self._report_listener_failure(error)
 
     def _notify_play_changed(self, is_playing: bool) -> None:
         for callback in list(self._play_listeners):
             try:
                 callback(is_playing)
-            except Exception:
-                pass
+            except Exception as error:
+                self._report_listener_failure(error)
 
     def toggle_play(self) -> bool:
         """Toggle simulation playback on or off."""
@@ -180,7 +197,12 @@ class EditorSession:
         """Advance the simulation by dt and notify tick listeners."""
         effective_dt = dt * self.sim_speed
         self.sim_time += effective_dt
-        self.kernel.tick(effective_dt)
+        self.report_errors(self.kernel.tick(effective_dt))
+        for script_id, error in self.kernel.get_diagnostics().get("script_reload_errors", {}).items():
+            key = (script_id, error.description)
+            if key not in self._reported_script_errors:
+                self._reported_script_errors.add(key)
+                self.report_errors(error)
         self._notify_tick(effective_dt)
 
     def refresh(self) -> None:
@@ -242,29 +264,38 @@ class EditorSession:
 
     def delete_entity(self, entity_id: RuntimeID, delete_from_disk: bool = False) -> bool | Error:
         """Delete an entity and its subtree from memory (and optionally disk)."""
+        if hasattr(entity_id, "id"):
+            entity_id = entity_id.id
         if not self.kernel.is_entity(entity_id):
             return False
 
-        if self._selected_entity_id == entity_id:
-            self._selected_entity_id = None
-            self._notify_selection_changed(None)
+        # Collect storage IDs for disk cleanup if requested before in-memory deletion
+        disk_files: list[Path] = []
+        if delete_from_disk and hasattr(self.kernel, "folder_location"):
+            def _collect_sids(curr_id: RuntimeID) -> None:
+                resolved = self.kernel._resolve_handle(curr_id) if hasattr(self.kernel, "_resolve_handle") else curr_id
+                sid = self.kernel.resource_storage_ids.get(resolved)
+                if sid is not None:
+                    disk_files.append(self.kernel.folder_location / f"{sid.hex()}.json")
+                for child_id in self.kernel.get_entity_children(curr_id):
+                    _collect_sids(child_id)
+            _collect_sids(entity_id)
 
-        parent_id = self.kernel.get_entity_parent(entity_id)
-        if parent_id is not None:
-            self.kernel.remove_entity_child(parent_id, entity_id)
-
-        children = list(self.kernel.get_entity_children(entity_id))
-        for child_id in children:
-            self.delete_entity(child_id, delete_from_disk=delete_from_disk)
-
-        storage_id = self.kernel.resource_storage_ids.get(entity_id)
-        if storage_id is not None and delete_from_disk and hasattr(self.kernel, "folder_location"):
-            disk_file = self.kernel.folder_location / f"{storage_id.hex()}.json"
-            disk_file.unlink(missing_ok=True)
-
-        del_res = self.kernel.delete_resource(entity_id)
+        del_res = self.kernel.delete_entity(entity_id)
         if isinstance(del_res, Error):
             return del_res
+        if not del_res:
+            return False
+
+        if delete_from_disk:
+            for f in disk_files:
+                f.unlink(missing_ok=True)
+
+        if self._selected_entity_id is not None and (
+            self._selected_entity_id == entity_id or not self.kernel.is_valid_runtime_id(self._selected_entity_id)
+        ):
+            self._selected_entity_id = None
+            self._notify_selection_changed(None)
 
         self._notify_state_changed()
         return True
@@ -327,6 +358,7 @@ class EditorSession:
         err = self.kernel.mutate_component(entity_id, component_name, new_data)
         if not isinstance(err, Error):
             self._notify_state_changed()
+        self.report_errors(err)
         return err
 
     def add_component(
@@ -339,6 +371,7 @@ class EditorSession:
         err = self.kernel.set_component(entity_id, component_name, initial_data or {})
         if not isinstance(err, Error):
             self._notify_state_changed()
+        self.report_errors(err)
         return err
 
     def remove_component(
@@ -350,6 +383,7 @@ class EditorSession:
         err = self.kernel.remove_component(entity_id, component_name)
         if not isinstance(err, Error):
             self._notify_state_changed()
+        self.report_errors(err)
         return err
 
     # -------------------------------------------------------------------------
@@ -372,6 +406,7 @@ class EditorSession:
         err = self.kernel.attach_script(entity_id, script_id)
         if not isinstance(err, Error):
             self._notify_state_changed()
+        self.report_errors(err)
         return err
 
     def detach_script(
@@ -383,6 +418,7 @@ class EditorSession:
         err = self.kernel.detach_script(entity_id, script_id)
         if not isinstance(err, Error):
             self._notify_state_changed()
+        self.report_errors(err)
         return err
 
     # -------------------------------------------------------------------------
@@ -392,24 +428,28 @@ class EditorSession:
     def save_resource(self, runtime_id: RuntimeID) -> None | Error | list[Error]:
         """Save a specific resource to disk."""
         res = self.kernel.save_resource(runtime_id)
+        self.report_errors(res, notify=False)
         self._notify_state_changed()
         return res
 
     def save_dirty_resources(self) -> None | list[Error]:
         """Save all currently dirty resources to disk."""
         res = self.kernel.save_dirty_resources()
+        self.report_errors(res, notify=False)
         self._notify_state_changed()
         return res
 
     def save_all_resources(self) -> None | list[Error]:
         """Save all loaded resources to disk."""
         res = self.kernel.save_all_resources()
+        self.report_errors(res, notify=False)
         self._notify_state_changed()
         return res
 
     def reload_resource(self, runtime_id: RuntimeID) -> None | Error:
         """Reload a resource from disk."""
         res = self.kernel.reload_resource(runtime_id)
+        self.report_errors(res, notify=False)
         self._notify_state_changed()
         return res
 
@@ -420,6 +460,7 @@ class EditorSession:
             err = self.kernel.reload_resource(rid)
             if isinstance(err, Error):
                 errors.append(err)
+        self.report_errors(errors, notify=False)
         self._notify_state_changed()
         return errors
 

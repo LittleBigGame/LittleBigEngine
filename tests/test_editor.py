@@ -17,12 +17,11 @@ Derives tests from observable user requirements and editor contracts:
 """
 
 import dearpygui.dearpygui as dpg
-import pytest
 
 from editor.app import EditorApp
 from editor.inspector_panel import InspectorPanel
 from editor.session import EditorSession
-from LBE import Error, Kernel, Script
+from LBE import Error, Kernel
 
 
 class TestEditorSessionLifecycleAndSelection:
@@ -226,7 +225,7 @@ class TestEditorAppHeadlessSmoke:
     def test_editor_app_headless_lifecycle(self, tmp_path):
         kernel = Kernel(tmp_path)
         e1 = kernel.create_entity(name="Hero", components={"Health": {"current": 100}})
-        e2 = kernel.create_entity(name="Chest", components={"Treasure": {"gold": 500}})
+        kernel.create_entity(name="Chest", components={"Treasure": {"gold": 500}})
         kernel.save_dirty_resources()
 
         app = EditorApp(kernel=kernel, auto_build=True)

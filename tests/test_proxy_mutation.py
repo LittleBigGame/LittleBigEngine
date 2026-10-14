@@ -28,7 +28,6 @@ from LBE import (
 )
 from LBE.proxy import _unwrap
 from LBE.types import (
-    ComponentNotFoundOnEntityError,
     EntityTypeMismatchError,
     RuntimeIDNotFoundOnMemoryError,
 )
@@ -558,11 +557,30 @@ class TestPlannedEngineFeatures:
         with pytest.raises(AttributeError):
             bound.chug_potion(5)
 
-    @pytest.mark.skip(reason="Planned test: Transactional rollback on failed dependency graph loading")
-    def test_planned_failed_dependency_load_transactional_cleanup(self):
+    def test_planned_failed_dependency_load_transactional_cleanup(self, tmp_path):
         # When loading a tree of dependent resources, a failure in a child node must roll back
         # any partially loaded parent nodes from kernel.resources.
-        pass
+        k1 = Kernel(tmp_path)
+        parent_id = k1.create_entity(name="Parent")
+        assert not isinstance(parent_id, Error)
+        child_id = k1.create_entity(name="Child", parent_id=parent_id)
+        assert not isinstance(child_id, Error)
+        parent_sid = k1.get_storage_id(parent_id)
+        child_sid = k1.get_storage_id(child_id)
+        assert not isinstance(parent_sid, Error)
+        assert not isinstance(child_sid, Error)
+        assert k1.save_dirty_resources() is None
+
+        # Corrupt child JSON on disk
+        child_file = tmp_path / f"{child_sid.hex()}.json"
+        child_file.write_text("{corrupt json payload", encoding="utf-8")
+
+        k2 = Kernel(tmp_path)
+        res = k2.load_resource(parent_sid, is_fatal=True)
+        assert isinstance(res, Error)
+        # Parent must be rolled back and not present in kernel.resources
+        assert k2.resources == {}
+        assert parent_sid not in k2.resource_runtime_ids
 
     def test_planned_runtime_id_recycle_generation_safety(self, tmp_path):
         kernel = Kernel(tmp_path)

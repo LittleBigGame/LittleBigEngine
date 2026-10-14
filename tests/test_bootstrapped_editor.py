@@ -37,7 +37,7 @@ from editor.vector_glyphs import (
     draw_branch_lines,
     draw_dashed_rect,
 )
-from LBE import Error, Kernel
+from LBE import Kernel
 from main import populate_demo_world_if_empty
 
 
@@ -121,7 +121,7 @@ class TestRootScoping:
         assert "Game" in dpg.get_item_configuration(roots_scoped[0])["label"]
         # Editor is completely hidden from the hierarchy view!
         all_labels = [dpg.get_item_configuration(i).get("label", "") for i in roots_scoped]
-        assert not any("Editor" in l for l in all_labels)
+        assert not any("Editor" in label for label in all_labels)
 
         # Reset scope to None -> restores Application
         session.set_view_root(None)

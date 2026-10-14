@@ -328,7 +328,7 @@ class TestReactivePanelSynchronization:
         roots = dpg.get_item_children(panel.content_tag, 1)
         assert len(roots) > 0
         root_labels = [dpg.get_item_configuration(r).get("label", "") for r in roots]
-        assert any("Application" in l for l in root_labels)
+        assert any("Application" in label for label in root_labels)
 
         panel.subtree_filter = "UI & Tools"
         assert panel.subtree_filter == "UI & Tools"

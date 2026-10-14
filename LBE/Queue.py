@@ -1,4 +1,4 @@
-from .types import *
+from .types import RuntimeID
 
 
 class CommandQueue(list):
@@ -6,6 +6,6 @@ class CommandQueue(list):
         """CommandQueue is responsible for managing a queue of commands."""
         super(CommandQueue, self).__init__(items)
 
-    def add_command(self, command_id: CommandID, caller: CallerID, receiver: ReceiverID, data: dict):
+    def add_command(self, command_id: str, caller: RuntimeID, receiver: RuntimeID, data: dict):
         """Add a command to the queue."""
         self.append((command_id, caller, receiver, data))

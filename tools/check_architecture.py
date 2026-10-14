@@ -6,14 +6,11 @@ import ast
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-CORE_FILES = (
-    PROJECT_ROOT / "LBE" / "kernel.py",
-    PROJECT_ROOT / "LBE" / "types.py",
-    PROJECT_ROOT / "LBE" / "integrity.py",
-)
+CORE_FILES = tuple(sorted(p for p in (PROJECT_ROOT / "LBE").glob("*.py") if p.is_file()))
 FORBIDDEN_ROOTS = {
     "pygame", "PyQt5", "PyQt6", "PySide2", "PySide6", "tkinter",
     "editor", "rendering", "graphics", "physics", "audio", "gui",
+    "dearpygui", "raylib", "pyray",
 }
 
 

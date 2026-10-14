@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import math
 from pathlib import Path
+from typing import Any
 import dearpygui.dearpygui as dpg
 import pytest
 
@@ -25,8 +26,7 @@ from editor.app import EditorApp
 from editor.session import EditorSession
 from editor.ui_bridge import UIBridgePanel
 from editor.viewport_panel import ViewportPanel
-from LBE import Error, Kernel, Script, UI_SCHEMAS, Validate
-from LBE.types import InvalidResourceDataError, RuntimeID
+from LBE import Error, Kernel
 from main import populate_demo_world_if_empty
 
 
@@ -74,7 +74,7 @@ class TestOverheadUIBillboardSceneView:
                 "Transform": {"x": 100.0, "y": 100.0, "rot_z": 45.0},
             },
         )
-        healthbar = session.create_child_entity(
+        session.create_child_entity(
             parent_id=player,
             name="HealthBar",
             components={
@@ -155,7 +155,7 @@ class TestOverheadUIBillboardSceneView:
         # There should NOT be any hierarchy connection line linking parent to overhead UI child
         # Hierarchy lines have color (80, 160, 220, 130)
         lines = [it for it in items if dpg.get_item_type(it) == "mvAppItemType::mvDrawLine"]
-        hier_lines = [l for l in lines if colors_match(dpg.get_item_configuration(l).get("color"), (80, 160, 220, 130))]
+        hier_lines = [line for line in lines if colors_match(dpg.get_item_configuration(line).get("color"), (80, 160, 220, 130))]
         assert len(hier_lines) == 0
 
     def test_overhead_ui_rotation_locked_screen_aligned(self, tmp_path: Path, dpg_context):
@@ -183,7 +183,7 @@ class TestOverheadUIBillboardSceneView:
 
         # Verify parent rotation indicator line has angle 77.5 deg
         lines = [it for it in items if dpg.get_item_type(it) == "mvAppItemType::mvDrawLine"]
-        heading_lines = [l for l in lines if colors_match(dpg.get_item_configuration(l).get("color"), (255, 255, 255, 220))]
+        heading_lines = [line for line in lines if colors_match(dpg.get_item_configuration(line).get("color"), (255, 255, 255, 220))]
         assert len(heading_lines) == 1
         hcfg = dpg.get_item_configuration(heading_lines[0])
         p1 = hcfg["p1"]

@@ -8,18 +8,12 @@ Derives tests from observable user requirements and kernel contracts:
 5. Planned future features (event bubbling, handle generation safety, transactional rollback).
 """
 
-from pathlib import Path
 import pytest
 
 from LBE import (
-    ComponentProxy,
     Entity,
-    EntityProxy,
     Error,
     Kernel,
-    Script,
-    UI_COMPONENT_ALIASES,
-    UI_COMPONENT_NAMES,
     UI_SCHEMAS,
     Validate,
 )
@@ -887,9 +881,27 @@ class TestPlannedUIFeatures:
         # UI proxies or event listeners from dispatching events to the recycled entity.
         pass
 
-    @pytest.mark.skip(reason="Planned test: UI entity subtree spawning transactional rollback")
-    def test_planned_ui_subtree_spawning_transactional_rollback(self):
+    def test_planned_ui_subtree_spawning_transactional_rollback(self, tmp_path):
         # If an error occurs midway through instantiating a complex UI template subtree,
         # all already-created entities in that subtree should be cleanly rolled back.
-        pass
+        kernel = Kernel(tmp_path)
+        existing_id = kernel.create_entity(name="ExistingRoot")
+        assert not isinstance(existing_id, Error)
+
+        initial_resources = dict(kernel.resources)
+        initial_runtime_ids = dict(kernel.resource_runtime_ids)
+
+        with pytest.raises(RuntimeError, match="Midway UI creation failure"):
+            with kernel.transaction():
+                panel_id = kernel.create_ui_entity("SettingsPanel", "container")
+                assert not isinstance(panel_id, Error)
+                btn_id = kernel.create_ui_entity("SubmitBtn", "button", parent_id=panel_id)
+                assert not isinstance(btn_id, Error)
+                raise RuntimeError("Midway UI creation failure")
+
+        assert kernel.resources == initial_resources
+        assert kernel.resource_runtime_ids == initial_runtime_ids
+        assert kernel.is_valid_runtime_id(existing_id)
+        assert len(kernel.resources) == 1
+
 

@@ -21,14 +21,12 @@ Derives tests from observable user requirements and kernel contracts:
 import pytest
 
 from LBE import (
-    ComponentProxy,
     EntityProxy,
     Error,
     Kernel,
     Script,
     ScriptProxy,
     BoundScriptProxy,
-    extract_script_symbols,
     Validate,
 )
 from LBE.types import (

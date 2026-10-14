@@ -33,13 +33,12 @@ Derives tests from observable user requirements and contracts:
 
 import dearpygui.dearpygui as dpg
 import pytest
-from pathlib import Path
 
 from editor.app import EditorApp
 from editor.hierarchy_panel import HierarchyPanel
 from editor.session import EditorSession
 from editor.ui_bridge import UIBridgePanel
-from LBE import Error, Kernel, Script
+from LBE import Error, Kernel
 
 
 @pytest.fixture
@@ -80,25 +79,25 @@ class TestUIBridgeHeadlessRenderingAndTranslation:
         session = EditorSession(kernel)
 
         root = session.create_ui_entity(name="MainMenu", component_type="UIContainer")
-        btn = session.create_ui_entity(
+        session.create_ui_entity(
             name="StartBtn",
             component_type="UIButton",
             parent_id=root,
             component_props={"label": "Start Game", "width": 120, "height": 40},
         )
-        slider = session.create_ui_entity(
+        session.create_ui_entity(
             name="VolumeSlider",
             component_type="UISlider",
             parent_id=root,
             component_props={"label": "Master Volume", "min": 0.0, "max": 100.0, "value": 75.0},
         )
-        txt_in = session.create_ui_entity(
+        session.create_ui_entity(
             name="PlayerNameInput",
             component_type="UITextInput",
             parent_id=root,
             component_props={"label": "Name", "text": "Hero", "hint": "Enter hero name"},
         )
-        txt = session.create_ui_entity(
+        session.create_ui_entity(
             name="StatusLabel",
             component_type="UIText",
             parent_id=root,
@@ -155,14 +154,14 @@ class TestUIBridgeHeadlessRenderingAndTranslation:
         root = session.create_ui_entity(name="TextContainer", component_type="UIContainer")
 
         # Normalized float RGB (0.0 to 1.0)
-        t_float = session.create_ui_entity(
+        session.create_ui_entity(
             name="FloatColorText",
             component_type="UIText",
             parent_id=root,
             component_props={"content": "Float", "color": [1.0, 0.5, 0.0]},
         )
         # Integer RGB (0 to 255)
-        t_int = session.create_ui_entity(
+        session.create_ui_entity(
             name="IntColorText",
             component_type="UIText",
             parent_id=root,
@@ -237,7 +236,7 @@ class TestUIBridgeHeadlessRenderingAndTranslation:
         session = EditorSession(kernel)
 
         root_a = session.create_ui_entity(name="HUD_A", component_type="UIContainer")
-        btn_a = session.create_ui_entity(
+        session.create_ui_entity(
             name="BtnA",
             component_type="UIButton",
             parent_id=root_a,
@@ -245,7 +244,7 @@ class TestUIBridgeHeadlessRenderingAndTranslation:
         )
 
         root_b = session.create_ui_entity(name="Menu_B", component_type="UIContainer")
-        btn_b = session.create_ui_entity(
+        session.create_ui_entity(
             name="BtnB",
             component_type="UIButton",
             parent_id=root_b,
@@ -459,7 +458,7 @@ class TestUIBridgeInteractiveEventDispatch:
         session = EditorSession(kernel)
 
         root = session.create_ui_entity(name="UIRoot", component_type="UIContainer")
-        btn = session.create_ui_entity(
+        session.create_ui_entity(
             name="BrokenBtn",
             component_type="UIButton",
             parent_id=root,
@@ -488,12 +487,12 @@ class TestSubtreeSeparationInHierarchyPanel:
         session = EditorSession(kernel)
 
         # Game world entities
-        player = session.create_entity(name="Player", components={"Transform": {"x": 0, "y": 0}})
-        enemy = session.create_entity(name="Enemy", components={"Transform": {"x": 10, "y": 0}})
+        session.create_entity(name="Player", components={"Transform": {"x": 0, "y": 0}})
+        session.create_entity(name="Enemy", components={"Transform": {"x": 10, "y": 0}})
 
         # UI tree
         ui_root = session.create_ui_entity(name="RootContainer", component_type="UIContainer")
-        ui_btn = session.create_ui_entity(name="ActionBtn", component_type="UIButton", parent_id=ui_root)
+        session.create_ui_entity(name="ActionBtn", component_type="UIButton", parent_id=ui_root)
 
         # Clear selection so prefix '▶ ' does not alter label tests
         session.select_entity(None)
@@ -508,24 +507,24 @@ class TestSubtreeSeparationInHierarchyPanel:
         # 1. 'All' mode contains both game world and UI entities
         panel.subtree_filter = "All"
         all_labels = get_rendered_labels()
-        assert any("Player" in l for l in all_labels)
-        assert any("Enemy" in l for l in all_labels)
-        assert any("RootContainer" in l for l in all_labels)
+        assert any("Player" in label for label in all_labels)
+        assert any("Enemy" in label for label in all_labels)
+        assert any("RootContainer" in label for label in all_labels)
 
         # 2. 'Game World' mode contains ONLY game entities, excludes UI
         panel.subtree_filter = "Game World"
         game_labels = get_rendered_labels()
-        assert any("Player" in l for l in game_labels)
-        assert any("Enemy" in l for l in game_labels)
-        assert not any("RootContainer" in l for l in game_labels)
-        assert not any("ActionBtn" in l for l in game_labels)
+        assert any("Player" in label for label in game_labels)
+        assert any("Enemy" in label for label in game_labels)
+        assert not any("RootContainer" in label for label in game_labels)
+        assert not any("ActionBtn" in label for label in game_labels)
 
         # 3. 'UI & Tools' mode contains ONLY UI entities, excludes game entities
         panel.subtree_filter = "UI & Tools"
         ui_labels = get_rendered_labels()
-        assert not any("Player" in l for l in ui_labels)
-        assert not any("Enemy" in l for l in ui_labels)
-        assert any("RootContainer" in l for l in ui_labels)
+        assert not any("Player" in label for label in ui_labels)
+        assert not any("Enemy" in label for label in ui_labels)
+        assert any("RootContainer" in label for label in ui_labels)
 
     def test_game_entity_with_child_ui_element_subtree_separation(self, tmp_path, dpg_context):
         kernel = Kernel(tmp_path)
@@ -533,7 +532,7 @@ class TestSubtreeSeparationInHierarchyPanel:
 
         player = session.create_entity(name="PlayerEntity")
         # Attach UI element as child of game entity (e.g. overhead nameplate / health bar)
-        nameplate = session.create_ui_entity(name="NameplateUI", component_type="UIContainer", parent_id=player)
+        session.create_ui_entity(name="NameplateUI", component_type="UIContainer", parent_id=player)
         session.select_entity(None)
 
         panel = HierarchyPanel(session)
@@ -597,9 +596,9 @@ class TestSubtreeSeparationInHierarchyPanel:
             for c in dpg.get_item_children(panel.content_tag, 1)
         ]
         # Should match PlayfieldTerrain, but NOT EnemySpawner or PlayButton (which is UI)
-        assert any("PlayfieldTerrain" in l for l in labels)
-        assert not any("EnemySpawner" in l for l in labels)
-        assert not any("PlayButton" in l for l in labels)
+        assert any("PlayfieldTerrain" in label for label in labels)
+        assert not any("EnemySpawner" in label for label in labels)
+        assert not any("PlayButton" in label for label in labels)
 
 
 class TestEditorAppUIBridgeIntegration:
@@ -610,7 +609,7 @@ class TestEditorAppUIBridgeIntegration:
         session = EditorSession(kernel)
 
         root = session.create_ui_entity(name="HudRoot", component_type="UIContainer")
-        btn = session.create_ui_entity(name="FireBtn", component_type="UIButton", parent_id=root)
+        session.create_ui_entity(name="FireBtn", component_type="UIButton", parent_id=root)
         kernel.save_dirty_resources()
 
         app = EditorApp(kernel=kernel, auto_build=True)
@@ -669,8 +668,8 @@ class TestUIPersistenceRoundtripViaUIBridge:
             component_props={"label": "Opacity", "min": 0.0, "max": 1.0, "value": 0.95},
         )
         root_sid = kernel1.get_storage_id(root)
-        btn_sid = kernel1.get_storage_id(btn)
-        slider_sid = kernel1.get_storage_id(slider)
+        kernel1.get_storage_id(btn)
+        kernel1.get_storage_id(slider)
 
         session1.save_all_resources()
 
@@ -714,7 +713,7 @@ class TestDynamicUIPanelWindowMountingAndLifecycle:
                 "UIPanel": {"title": "Utility Tools", "width": 340.0, "height": 220.0, "closable": True},
             },
         )
-        btn_eid = session.create_entity(
+        session.create_entity(
             name="HealAction",
             parent_id=panel_eid,
             components={

@@ -44,14 +44,11 @@ import pytest
 
 from LBE import Error, Kernel
 from LBE.types import (
-    BrokenReference,
     Entity,
     FailedToSaveResourceOnDiskError,
     InvalidProjectManifestError,
     ProjectManifest,
     ProjectLoadError,
-    Script,
-    StorageIDNotFoundOnDiskError,
 )
 from main import populate_demo_world_if_empty
 
@@ -416,9 +413,10 @@ class TestDeterministicRootDiscovery:
         assert k2.manifest.root_entity_ids == [orphan_sid.hex()]
         assert orphan_sid in k2.resource_runtime_ids
 
-    def test_root_discovery_rejects_corrupt_resource_without_writing_manifest(self, tmp_path: Path):
+    @pytest.mark.parametrize("corrupt_data", [b"{broken json", b"\xff"])
+    def test_root_discovery_rejects_corrupt_resource_without_writing_manifest(self, tmp_path: Path, corrupt_data):
         corrupt_resource = tmp_path / f"{'a' * 32}.json"
-        corrupt_resource.write_text("{broken json", encoding="utf-8")
+        corrupt_resource.write_bytes(corrupt_data)
 
         kernel = Kernel(tmp_path)
         result = kernel.load_project()
@@ -638,11 +636,137 @@ class TestStartupLoadingContract:
         assert corrupt_manifest.read_text(encoding="utf-8") == corrupt_content
         assert not any(kernel.is_entity(r) for r in kernel.resources)
 
+    @pytest.mark.parametrize("root_ids", [[], ["a" * 32]])
+    def test_main_preserves_existing_empty_or_missing_root_project(self, tmp_path: Path, monkeypatch, root_ids):
+        import main as entrypoint
+
+        manifest_path = tmp_path / "project.json"
+        original = json.dumps({"format_version": 1, "name": "Existing", "root_entity_ids": root_ids})
+        manifest_path.write_text(original, encoding="utf-8")
+        loaded_kernels = []
+        monkeypatch.setattr("sys.argv", ["main.py", "--world", str(tmp_path), "--headless"])
+        monkeypatch.setattr(entrypoint, "run_headless_simulation", lambda kernel, **kwargs: loaded_kernels.append(kernel))
+
+        entrypoint.main()
+
+        assert loaded_kernels == []
+        assert manifest_path.read_text(encoding="utf-8") == original
+        assert list(tmp_path.glob("*.json")) == [manifest_path]
+
+    def test_main_opens_only_the_requested_application_id_across_restarts(self, tmp_path: Path, monkeypatch):
+        import main as entrypoint
+
+        original_kernel = Kernel(tmp_path)
+        other_id = original_kernel.create_entity(name="Application")
+        selected_id = original_kernel.create_entity(name="My Renamed Application")
+        child_id = original_kernel.create_entity(name="Game", parent_id=selected_id)
+        selected_sid = original_kernel.get_storage_id(selected_id)
+        child_sid = original_kernel.get_storage_id(child_id)
+        other_sid = original_kernel.get_storage_id(other_id)
+        assert original_kernel.save_dirty_resources() is None
+        files_before = {path.name for path in tmp_path.glob("*.json")}
+
+        loaded_kernels = []
+        monkeypatch.setattr("sys.argv", [
+            "main.py", "--world", str(tmp_path), "--application-id", selected_sid.hex(), "--headless"
+        ])
+        monkeypatch.setattr(entrypoint, "run_headless_simulation", lambda kernel, **kwargs: loaded_kernels.append(kernel))
+        for _ in range(2):
+            entrypoint.main()
+
+        assert len(loaded_kernels) == 2
+        for kernel in loaded_kernels:
+            assert set(kernel.resource_runtime_ids) == {selected_sid, child_sid}
+            assert other_sid not in kernel.resource_runtime_ids
+        assert {path.name for path in tmp_path.glob("*.json")} == files_before
+
+    def test_selected_root_missing_from_disk_fails_without_loading_other_roots(self, tmp_path: Path):
+        original_kernel = Kernel(tmp_path)
+        selected_id = original_kernel.create_entity(name="Chosen")
+        original_kernel.create_entity(name="Other")
+        selected_sid = original_kernel.get_storage_id(selected_id)
+        assert original_kernel.save_dirty_resources() is None
+        (tmp_path / f"{selected_sid.hex()}.json").unlink()
+
+        kernel = Kernel(tmp_path)
+        result = kernel.load_project(root_storage_id=selected_sid)
+
+        assert isinstance(result, Error)
+        assert kernel.resources == {}
+        assert kernel.manifest is None
+
+    def test_saving_selected_root_preserves_unloaded_manifest_roots(self, tmp_path: Path):
+        original_kernel = Kernel(tmp_path)
+        selected_id = original_kernel.create_entity(name="Selected")
+        other_id = original_kernel.create_entity(name="Other")
+        selected_sid = original_kernel.get_storage_id(selected_id)
+        other_sid = original_kernel.get_storage_id(other_id)
+        assert original_kernel.save_dirty_resources() is None
+
+        kernel = Kernel(tmp_path)
+        assert isinstance(kernel.load_project(root_storage_id=selected_sid), dict)
+        assert other_sid not in kernel.resource_runtime_ids
+        assert kernel.save_dirty_resources() is None
+
+        manifest = json.loads((tmp_path / "project.json").read_text(encoding="utf-8"))
+        assert set(manifest["root_entity_ids"]) == {selected_sid.hex(), other_sid.hex()}
+
+    def test_selected_root_requires_manifest_without_discovering_or_creating(self, tmp_path: Path):
+        kernel = Kernel(tmp_path)
+        result = kernel.load_project(root_storage_id="a" * 32)
+
+        assert isinstance(result, Error)
+        assert kernel.resources == {}
+        assert list(tmp_path.iterdir()) == []
+
+
+class TestPersistenceSaveFailures:
+    def test_saving_preserves_missing_root_references(self, tmp_path: Path):
+        manifest_path = tmp_path / "project.json"
+        missing_root = "a" * 32
+        manifest_path.write_text(
+            json.dumps({"format_version": 1, "root_entity_ids": [missing_root]}), encoding="utf-8"
+        )
+        kernel = Kernel(tmp_path)
+        assert isinstance(kernel.load_project(), dict)
+        kernel.create_entity(name="NewRoot")
+
+        assert kernel.save_dirty_resources() is None
+
+        saved_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        assert missing_root in saved_manifest["root_entity_ids"]
+
+    def test_resource_save_failure_does_not_publish_new_manifest(self, tmp_path: Path, monkeypatch):
+        kernel = Kernel(tmp_path)
+        kernel.create_entity(name="UnsavedRoot")
+        save_error = Error("Save failed", "Injected failure", {}, FailedToSaveResourceOnDiskError)
+        monkeypatch.setattr(kernel, "save_resource", lambda runtime_id: save_error)
+
+        assert kernel.save_dirty_resources() == [save_error]
+        assert not (tmp_path / "project.json").exists()
+        assert kernel.manifest is None
+
+    def test_manifest_save_failure_preserves_in_memory_manifest(self, tmp_path: Path, monkeypatch):
+        kernel = Kernel(tmp_path)
+        previous_manifest = ProjectManifest(name="Previous", root_entity_ids=["a" * 32])
+        kernel.manifest = previous_manifest
+        kernel.create_entity(name="NewRoot")
+
+        def fail_replace(path, target):
+            raise OSError("Injected replacement failure")
+
+        monkeypatch.setattr(Path, "replace", fail_replace)
+        assert isinstance(kernel.save_project(), Error)
+        assert kernel.manifest is previous_manifest
+        assert kernel.manifest.root_entity_ids == ["a" * 32]
+        assert not (tmp_path / "project.tmp").exists()
+
 
 class TestPersistenceSafetyAndPlannedFeatures:
     """Safety guarantees completed in Phase 1 and explicitly deferred future work."""
 
-    def test_transactional_rollback_on_failed_fatal_load(self, tmp_path: Path):
+    @pytest.mark.parametrize("corrupt_data", [b"{broken json", b"\xff"])
+    def test_transactional_rollback_on_failed_fatal_load(self, tmp_path: Path, corrupt_data):
         k1 = Kernel(tmp_path)
         child_id = k1.create_entity(name="BrokenChild")
         child_sid = k1.get_storage_id(child_id)
@@ -652,7 +776,7 @@ class TestPersistenceSafetyAndPlannedFeatures:
         k1.mark_dirty(root_id)
         k1.save_dirty_resources()
 
-        (tmp_path / f"{child_sid.hex()}.json").write_text("{broken json", encoding="utf-8")
+        (tmp_path / f"{child_sid.hex()}.json").write_bytes(corrupt_data)
 
         k2 = Kernel(tmp_path)
         result = k2.load_resource(root_sid, is_fatal=True)
@@ -663,7 +787,8 @@ class TestPersistenceSafetyAndPlannedFeatures:
         assert k2.resource_storage_ids == {}
         assert k2.runtime_idx == 0
 
-    def test_project_load_rolls_back_all_roots_on_corrupt_resource(self, tmp_path: Path):
+    @pytest.mark.parametrize("corrupt_data", [b"{broken json", b"\xff"])
+    def test_project_load_rolls_back_all_roots_on_corrupt_resource(self, tmp_path: Path, corrupt_data):
         k1 = Kernel(tmp_path)
         good_id = k1.create_entity(name="GoodRoot")
         bad_id = k1.create_entity(name="BadRoot")
@@ -672,7 +797,7 @@ class TestPersistenceSafetyAndPlannedFeatures:
         k1.save_dirty_resources()
         k1.save_project()
 
-        (tmp_path / f"{bad_sid.hex()}.json").write_text("{broken json", encoding="utf-8")
+        (tmp_path / f"{bad_sid.hex()}.json").write_bytes(corrupt_data)
         manifest = json.loads((tmp_path / "project.json").read_text(encoding="utf-8"))
         manifest["root_entity_ids"] = [good_sid.hex(), bad_sid.hex()]
         (tmp_path / "project.json").write_text(json.dumps(manifest), encoding="utf-8")
@@ -722,3 +847,22 @@ class TestPersistenceSafetyAndPlannedFeatures:
         assert isinstance(result, dict)
         assert child_sid in k2.resource_runtime_ids
         assert script_sid in k2.resource_runtime_ids
+
+    def test_entity_first_reached_as_dependency_still_loads_its_children(self, tmp_path: Path):
+        k1 = Kernel(tmp_path)
+        root_id = k1.create_entity(name="Root")
+        child_id = k1.create_entity(name="Child", parent_id=root_id)
+        grandchild_id = k1.create_entity(name="Grandchild", parent_id=child_id)
+        child_sid = k1.get_storage_id(child_id)
+        grandchild_sid = k1.get_storage_id(grandchild_id)
+        k1.resources[root_id]["dependencies"] = [child_sid.hex()]
+        k1.mark_dirty(root_id)
+        assert k1.save_dirty_resources() is None
+
+        k2 = Kernel(tmp_path)
+        result = k2.load_project()
+
+        assert isinstance(result, dict)
+        assert result["broken_references"] == 0
+        assert child_sid in k2.resource_runtime_ids
+        assert grandchild_sid in k2.resource_runtime_ids

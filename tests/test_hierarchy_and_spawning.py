@@ -8,7 +8,6 @@ Derives tests from observable user requirements and kernel contracts:
 5. Script Integration with Hierarchy & Queries (script querying children, script spawning during tick).
 """
 
-import pytest
 
 from LBE import (
     EntityProxy,
@@ -79,7 +78,7 @@ class TestHierarchyLinkingAndUnlinking:
 
         parent.add_child(child)
         p_sid = parent.storage_id
-        c_sid = child.storage_id
+        child.storage_id
 
         assert kernel.save_dirty_resources() is None
         assert not kernel.is_dirty(p_id)
@@ -286,9 +285,9 @@ class TestWorldQueries:
     def test_world_query_filtering(self, tmp_path):
         kernel = Kernel(tmp_path)
         e1 = kernel.create_entity(name="E1", components={"Position": {"x": 0}, "Velocity": {"vx": 1}})
-        e2 = kernel.create_entity(name="E2", components={"Position": {"x": 10}})
+        kernel.create_entity(name="E2", components={"Position": {"x": 10}})
         e3 = kernel.create_entity(name="E3", components={"Position": {"x": 20}, "Velocity": {"vx": -1}, "AI": {}})
-        e4 = kernel.create_entity(name="E4", components={"Other": {}})
+        kernel.create_entity(name="E4", components={"Other": {}})
 
         # Query via Kernel
         matching_ids = kernel.query("Position", "Velocity")

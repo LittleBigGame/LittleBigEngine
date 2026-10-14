@@ -7,11 +7,11 @@
 
 ## 1. Verified Implemented Capabilities
 
-The LittleBigEngine codebase is verified with **294 automated tests passing** in [`pytest`](file:///f:/ModEngine/tests) (294 passed, 24 skipped planned tests, 1 xpass).
+The current integrated checkout is verified with **331 automated tests passing** (331 passed, 19 skipped planned tests, 1 xpass). The architecture dependency checker passes. Ruff passes for `tools/` and the Phase 1 persistence suite; the wider test suite has existing lint findings and does not pass its full lint gate.
 
 ### Phase 1: Project persistence and deterministic startup loading
 
-Verified with **31 passing tests** in [`tests/test_project_persistence.py`](file:///f:/ModEngine/tests/test_project_persistence.py), with three future architectural tests explicitly skipped:
+Verified with **44 passing tests** in [`tests/test_project_persistence.py`](file:///f:/ModEngine/tests/test_project_persistence.py), with three future architectural tests explicitly skipped:
 
 - `project.json` stores format version 1, project name, settings, and sorted persistent IDs for root entities.
 - Existing projects load before demo-world population, preventing a new demo hierarchy on every startup.
@@ -21,6 +21,15 @@ Verified with **31 passing tests** in [`tests/test_project_persistence.py`](file
 - Fatal resource-graph loads and project loads roll back newly registered runtime resources.
 - Dependencies and attached script/resource references belonging to nested child entities load recursively with the scene hierarchy.
 - Orphaned entities whose recorded parent no longer exists are recoverable as discovered roots.
+- Existing empty projects and projects with missing roots are not replaced with a new demo world during startup.
+- Saving retains unresolved root references. A failed resource write prevents publication of an updated manifest, and a failed manifest write retains the previous in-memory manifest.
+- Invalid UTF-8 resource files produce structured load errors and trigger rollback. A resource reached first as a dependency can still have its descendants loaded later through a hierarchy link.
+
+### Example World application selection
+
+`main.py` opens Application `2e4b8702e1e9514338d026d79d39f704` by persistent ID. The default world path is resolved beside `main.py`; `--world` and `--application-id` can select a different project/root. A missing manifest or selected root produces an error without creating a replacement application. Generic `Kernel.load_project()` still supports full-root loading and legacy discovery; its optional `root_storage_id` selects a single declared root while preserving unloaded roots on later saves.
+
+The 62 older Application trees and 1,366 exclusive resources were removed from the active Example World into a recoverable archive. The full pre-cleanup world is backed up at `F:\ModEngine-backups\application-cleanup-20261014-202325\Example World`. One Application remains; startup mounts its 24 resources with no broken references. Unrelated/shared stored resources were preserved.
 
 Deferred beyond Phase 1: manifest migration between future schema versions, generation-safe runtime handles, and file-watcher-driven manifest hot reload.
 

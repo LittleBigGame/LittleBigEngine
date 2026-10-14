@@ -35,7 +35,6 @@ from __future__ import annotations
 
 import ast
 from pathlib import Path
-from typing import Any
 import dearpygui.dearpygui as dpg
 import pytest
 
@@ -43,7 +42,6 @@ from editor import (
     EditorApp,
     PillData,
     get_available_function_pills,
-    get_pill_theme,
     parse_reference_pill,
     rename_script_function_display_name,
 )
@@ -887,9 +885,27 @@ class TestPlannedPillCapabilities:
 
     test_planned_stale_handle_safety_when_script_destroyed = test_planned_stale_handle_safety_when_referenced_script_destroyed
 
-    @pytest.mark.skip(
-        reason="Planned test: Transactional rollback cleans up loaded parents if a nested script resource fails load validation"
-    )
-    def test_planned_transactional_rollback_on_failed_script_load(self) -> None:
-        """Future: If a script dependency fails disk validation, partially registered parents are rolled back."""
-        pass
+    def test_planned_transactional_rollback_on_failed_script_load(self, tmp_path) -> None:
+        """If a script dependency fails disk validation, partially registered parents are rolled back."""
+        k1 = Kernel(tmp_path)
+        script_id = k1.create_script_resource(name="CombatLogic", code="def _fn_fight():\n    return 42\n")
+        assert not isinstance(script_id, Error)
+        entity_id = k1.create_entity(name="Warrior")
+        assert not isinstance(entity_id, Error)
+        assert k1.attach_script(entity_id, script_id) is None
+        entity_sid = k1.get_storage_id(entity_id)
+        script_sid = k1.get_storage_id(script_id)
+        assert not isinstance(entity_sid, Error)
+        assert not isinstance(script_sid, Error)
+        assert k1.save_dirty_resources() is None
+
+        # Corrupt the script JSON file on disk
+        script_file = tmp_path / f"{script_sid.hex()}.json"
+        script_file.write_text("{corrupt script payload", encoding="utf-8")
+
+        k2 = Kernel(tmp_path)
+        res = k2.load_resource(entity_sid, is_fatal=True)
+        assert isinstance(res, Error)
+        # Partially registered parent entity must be rolled back
+        assert k2.resources == {}
+        assert entity_sid not in k2.resource_runtime_ids

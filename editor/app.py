@@ -7,6 +7,7 @@ from typing import Any
 import dearpygui.dearpygui as dpg
 
 from LBE.kernel import Kernel
+from LBE.types import RuntimeID
 from .hierarchy_panel import HierarchyPanel
 from .inspector_panel import InspectorPanel
 from .session import EditorSession
@@ -237,6 +238,8 @@ class EditorApp:
             f"Dirty Resources: {dirty_count}  |  "
             f"Storage Folder: {folder}"
         )
+        if self.session.errors:
+            status_text += f"  |  Error: {self.session.errors[-1].message}: {self.session.errors[-1].description}"
         dpg.set_value("app_status_text", status_text)
 
     def _on_viewport_resize(self) -> None:

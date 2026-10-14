@@ -42,14 +42,21 @@ class LogRecord:
 class Logger:
     def __init__(
         self,
-        min_level: int = TRACE,
+        min_level: int = INFO,
         channel_filter: set[str] | None = None,
         auto_pretty_print: bool = True,
+        max_records: int = 1000,
     ):
         self.min_level = min_level
         self.channel_filter = channel_filter  # If set, only print records from these channels
         self.auto_pretty_print = auto_pretty_print
+        if max_records < 1:
+            raise ValueError("max_records must be positive")
+        self.max_records = max_records
         self.records: list[LogRecord] = []
+
+    def is_enabled(self, level: int, channel: str = "kernel") -> bool:
+        return level >= self.min_level and (self.channel_filter is None or channel in self.channel_filter)
 
     def set_min_level(self, level: int) -> None:
         """Set minimum level to output to console."""
@@ -71,7 +78,9 @@ class Logger:
         before: Any = None,
         after: Any = None,
     ) -> LogRecord:
-        """Store log record and conditionally print."""
+        """Store enabled records in a bounded history and optionally print them."""
+        if not self.is_enabled(level, channel):
+            return None
         record = LogRecord(
             level=level,
             message=message,
@@ -84,6 +93,8 @@ class Logger:
             after=after,
         )
         self.records.append(record)
+        if len(self.records) > self.max_records:
+            del self.records[:len(self.records) - self.max_records]
 
         # Apply print filters
         if level >= self.min_level:

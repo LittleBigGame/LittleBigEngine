@@ -48,9 +48,7 @@ class HierarchyPanel:
         self._node_tags: dict[RuntimeID, int | str] = {}
 
         self._unsubscribe_state = self.session.subscribe_state_changed(self.rebuild)
-        self._unsubscribe_selection = self.session.subscribe_selection_changed(
-            lambda _: self.rebuild()
-        )
+        self._unsubscribe_selection = lambda: None
 
     @property
     def subtree_filter(self) -> str:
@@ -245,10 +243,10 @@ class HierarchyPanel:
             dpg.configure_item(f"{self.tag}_filter_tools", label=tools_lbl)
             dpg.bind_item_theme(f"{self.tag}_filter_tools", get_card_theme(selected=(self._subtree_filter == "UI & Tools")))
 
-        for reg in self._handler_registries[2:]:
+        for reg in self._handler_registries[1:]:
             if dpg.does_item_exist(reg):
                 dpg.delete_item(reg)
-        self._handler_registries = self._handler_registries[:2]
+        self._handler_registries = self._handler_registries[:1]
 
         if preserve_open_states and not self.use_vector_cards:
             for eid, tag in self._node_tags.items():
