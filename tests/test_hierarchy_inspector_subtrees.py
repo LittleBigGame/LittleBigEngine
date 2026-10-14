@@ -357,13 +357,8 @@ class TestReactivePanelSynchronization:
         game_filter_id = _find_entity_by_name(kernel, "GameFilter", parent_id=filter_bar_id)
         assert game_filter_id is not None
 
-        s_comp = session.get_components(search_id)["UITextInput"]
-        s_comp["hint"] = "Filter by name..."
-        session.mutate_component(search_id, "UITextInput", s_comp)
-
-        gf_comp = session.get_components(game_filter_id)["UIButton"]
-        gf_comp["label"] = "Gameplay"
-        session.mutate_component(game_filter_id, "UIButton", gf_comp)
+        session.mutate_component(search_id, "UITextInput", {"hint": "Filter by name..."})
+        session.mutate_component(game_filter_id, "UIButton", {"label": "Gameplay"})
 
         panel.rebuild()
 
@@ -462,9 +457,7 @@ class TestReactivePanelSynchronization:
         title_id = _find_entity_by_name(kernel, "TitleText", parent_id=hb_id)
         assert title_id is not None
 
-        t_comp = session.get_components(title_id)["UIText"]
-        t_comp["content"] = "Entity Details"
-        session.mutate_component(title_id, "UIText", t_comp)
+        session.mutate_component(title_id, "UIText", {"content": "Entity Details"})
 
         insp.rebuild()
         title, _, _ = insp._get_header_props()

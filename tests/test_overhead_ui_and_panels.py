@@ -591,9 +591,7 @@ class TestRemediations:
         assert cfg.get("no_close") is True
 
         # Update panel to unminimized and closable, then rebuild
-        comps = session.get_components(panel)
-        comps["UIPanel"]["minimized"] = False
-        comps["UIPanel"]["closable"] = True
+        session.mutate_component(panel, "UIPanel", {"minimized": False, "closable": True})
         ui_bridge.rebuild()
 
         cfg_updated = dpg.get_item_configuration(win_tag)

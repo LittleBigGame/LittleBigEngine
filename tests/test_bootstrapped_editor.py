@@ -290,8 +290,9 @@ class TestLayeredContextMenu:
         assert dup_comps["Health"]["current"] == 90
 
         # Verify deep-copy (mutating duplicate does not affect original)
-        dup_comps["Transform"]["x"] = 999.0
+        session.mutate_component(dup_id, "Transform", {"x": 999.0})
         assert session.get_components(child_id)["Transform"]["x"] == 42.0
+        assert session.get_components(dup_id)["Transform"]["x"] == 999.0
 
         # 3. Action: Delete
         _on_delete(session, entity_id=child_id, popup_tag="popup_context_menu")

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import copy
 import functools
+from collections.abc import Mapping, MutableMapping, MutableSequence, Sequence
+from types import MappingProxyType
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -11,7 +13,151 @@ if TYPE_CHECKING:
     from .kernel import Kernel
 
 
-class ComponentProxy(dict):
+class ReadOnlySequence(Sequence):
+    """An immutable, deeply read-only view over a sequence (list/tuple)."""
+
+    __slots__ = ("_data",)
+
+    def __init__(self, data: Any) -> None:
+        self._data = tuple(_unwrap(item) if isinstance(item, (ComponentProxy, TrackedList)) else item for item in data)
+
+    def __getitem__(self, index: Any) -> Any:
+        return self._data[index]
+
+    def __len__(self) -> int:
+        return len(self._data)
+
+    def __repr__(self) -> str:
+        return repr(list(self._data))
+
+    def __eq__(self, other: Any) -> bool:
+        if isinstance(other, (str, bytes)):
+            return False
+        if isinstance(other, (Sequence, list, tuple)):
+            return tuple(self) == tuple(other)
+        return False
+
+
+def _unwrap(val: Any) -> Any:
+    if isinstance(val, ComponentProxy):
+        return val.to_dict()
+    if isinstance(val, TrackedList):
+        return val.to_list()
+    if isinstance(val, Mapping):
+        return {k: _unwrap(v) for k, v in val.items()}
+    if isinstance(val, (list, tuple, ReadOnlySequence, Sequence)) and not isinstance(val, (str, bytes)):
+        return [_unwrap(v) for v in val]
+    return val
+
+
+class TrackedList(MutableSequence):
+    """Wraps a list and tracks in-place mutations back to the Kernel and entity."""
+
+    def __init__(
+        self,
+        target: list[Any],
+        kernel: Kernel | Any,
+        entity_id: RuntimeID,
+        component_name: str = "",
+    ) -> None:
+        self._target = target
+        self._kernel = kernel
+        self._entity_id = entity_id
+        self._component_name = component_name
+
+    def __getitem__(self, index: Any) -> Any:
+        val = self._target[index]
+        if isinstance(index, slice):
+            return [_unwrap(v) for v in val]
+        if isinstance(val, dict) and not isinstance(val, ComponentProxy):
+            name = f"{self._component_name}[{index}]" if self._component_name else f"[{index}]"
+            return ComponentProxy(self._kernel, self._entity_id, name, val)
+        if isinstance(val, list) and not isinstance(val, TrackedList):
+            name = f"{self._component_name}[{index}]" if self._component_name else f"[{index}]"
+            return TrackedList(val, kernel=self._kernel, entity_id=self._entity_id, component_name=name)
+        return val
+
+    def __setitem__(self, index: Any, value: Any) -> None:
+        if isinstance(index, slice):
+            self._target[index] = [_unwrap(v) for v in value]
+        else:
+            self._target[index] = _unwrap(value)
+        self._kernel.mark_dirty(self._entity_id)
+
+    def __delitem__(self, index: Any) -> None:
+        del self._target[index]
+        self._kernel.mark_dirty(self._entity_id)
+
+    def __len__(self) -> int:
+        return len(self._target)
+
+    def insert(self, index: int, value: Any) -> None:
+        self._target.insert(index, _unwrap(value))
+        self._kernel.mark_dirty(self._entity_id)
+
+    def append(self, value: Any) -> None:
+        self._target.append(_unwrap(value))
+        self._kernel.mark_dirty(self._entity_id)
+
+    def extend(self, values: Any) -> None:
+        items = list(values)
+        if items:
+            self._target.extend(_unwrap(v) for v in items)
+            self._kernel.mark_dirty(self._entity_id)
+
+    def pop(self, index: int = -1) -> Any:
+        res = self._target.pop(index)
+        self._kernel.mark_dirty(self._entity_id)
+        return res
+
+    def remove(self, value: Any) -> None:
+        self._target.remove(value)
+        self._kernel.mark_dirty(self._entity_id)
+
+    def clear(self) -> None:
+        if self._target:
+            self._target.clear()
+            self._kernel.mark_dirty(self._entity_id)
+
+    def reverse(self) -> None:
+        self._target.reverse()
+        self._kernel.mark_dirty(self._entity_id)
+
+    def sort(self, *args: Any, **kwargs: Any) -> None:
+        self._target.sort(*args, **kwargs)
+        self._kernel.mark_dirty(self._entity_id)
+
+    def __iter__(self):
+        for i in range(len(self._target)):
+            yield self[i]
+
+    def __contains__(self, value: Any) -> bool:
+        return value in self._target
+
+    def to_list(self) -> list[Any]:
+        return [_unwrap(v) for v in self._target]
+
+    def __copy__(self) -> list[Any]:
+        return self.to_list()
+
+    def __deepcopy__(self, memo: Any) -> list[Any]:
+        return copy.deepcopy(self.to_list(), memo)
+
+    def __eq__(self, other: Any) -> bool:
+        if isinstance(other, TrackedList):
+            return self._target == other._target
+        if isinstance(other, list):
+            return self._target == other
+        return False
+
+    def __ne__(self, other: Any) -> bool:
+        return not self.__eq__(other)
+
+    def __repr__(self) -> str:
+        return f"TrackedList({self._target!r})"
+
+
+class ComponentProxy(MutableMapping):
     """Wraps a component dictionary and tracks mutations back to the Kernel and entity."""
 
     def __init__(
@@ -25,7 +171,6 @@ class ComponentProxy(dict):
         object.__setattr__(self, "_entity_id", entity_id)
         object.__setattr__(self, "_component_name", component_name)
         object.__setattr__(self, "_target", target)
-        super().__init__(target)
 
     @property
     def entity_id(self) -> RuntimeID:
@@ -44,17 +189,21 @@ class ComponentProxy(dict):
                 f"{self._component_name}.{key}",
                 val,
             )
+        if isinstance(val, list) and not isinstance(val, TrackedList):
+            return TrackedList(
+                val,
+                kernel=self._kernel,
+                entity_id=self._entity_id,
+                component_name=f"{self._component_name}.{key}",
+            )
         return val
 
     def __setitem__(self, key: Any, value: Any) -> None:
-        target_val = value.to_dict() if isinstance(value, ComponentProxy) else value
-        self._target[key] = target_val
-        super().__setitem__(key, target_val)
+        self._target[key] = _unwrap(value)
         self._kernel.mark_dirty(self._entity_id)
 
     def __delitem__(self, key: Any) -> None:
         del self._target[key]
-        super().__delitem__(key)
         self._kernel.mark_dirty(self._entity_id)
 
     def __getattr__(self, name: str) -> Any:
@@ -102,23 +251,23 @@ class ComponentProxy(dict):
         return [(k, self[k]) for k in self._target]
 
     def pop(self, key: Any, *args: Any) -> Any:
-        had_key = key in self._target
-        res = self._target.pop(key, *args)
-        super().pop(key, *args)
-        if had_key:
+        if key in self._target:
+            res = self._target.pop(key)
             self._kernel.mark_dirty(self._entity_id)
-        return res
+            return res
+        if args:
+            return args[0]
+        raise KeyError(key)
 
     def popitem(self) -> tuple[Any, Any]:
         res = self._target.popitem()
-        super().pop(res[0], None)
         self._kernel.mark_dirty(self._entity_id)
         return res
 
     def clear(self) -> None:
-        self._target.clear()
-        super().clear()
-        self._kernel.mark_dirty(self._entity_id)
+        if self._target:
+            self._target.clear()
+            self._kernel.mark_dirty(self._entity_id)
 
     def setdefault(self, key: Any, default: Any = None) -> Any:
         if key not in self._target:
@@ -127,9 +276,11 @@ class ComponentProxy(dict):
         return self[key]
 
     def update(self, *args: Any, **kwargs: Any) -> None:
-        self._target.update(*args, **kwargs)
-        super().update(*args, **kwargs)
-        self._kernel.mark_dirty(self._entity_id)
+        other = dict(*args, **kwargs)
+        if other:
+            for k, v in other.items():
+                self._target[k] = _unwrap(v)
+            self._kernel.mark_dirty(self._entity_id)
 
     def __ior__(self, other: Any) -> ComponentProxy:
         self.update(other)
@@ -142,15 +293,7 @@ class ComponentProxy(dict):
         return copy.deepcopy(self.to_dict(), memo)
 
     def to_dict(self) -> dict[str, Any]:
-        result = {}
-        for k, v in self._target.items():
-            if isinstance(v, ComponentProxy):
-                result[k] = v.to_dict()
-            elif isinstance(v, dict):
-                result[k] = copy.deepcopy(v)
-            else:
-                result[k] = v
-        return result
+        return {k: _unwrap(v) for k, v in self._target.items()}
 
     def __eq__(self, other: Any) -> bool:
         if isinstance(other, ComponentProxy):
@@ -209,15 +352,16 @@ class EntityProxy:
     def name(self) -> str | None:
         self._ensure_alive()
         res = self._kernel.get_resource(self._entity_id)
-        if isinstance(res, dict):
+        if isinstance(res, (dict, MappingProxyType)):
             return res.get("name")
         return None
 
     @name.setter
     def name(self, val: str | None) -> None:
         self._ensure_alive()
-        res = self._kernel.get_resource(self._entity_id)
-        if isinstance(res, dict):
+        resolved_id = self._kernel._resolve_handle(self._entity_id) if hasattr(self._kernel, "_resolve_handle") else self._entity_id
+        if resolved_id in self._kernel.resources:
+            res = self._kernel.resources[resolved_id]
             if val is None:
                 res.pop("name", None)
             else:
@@ -321,7 +465,7 @@ class EntityProxy:
 
     def _find_component_name(self, name: str) -> str | None:
         components = self._kernel.get_components(self._entity_id)
-        if isinstance(components, Error) or not isinstance(components, dict):
+        if isinstance(components, Error) or not isinstance(components, (dict, MappingProxyType)):
             return None
         if name in components:
             return name
@@ -484,37 +628,37 @@ class ScriptProxy:
     @property
     def name(self) -> str | None:
         res = self._kernel.get_resource(self._script_id)
-        if isinstance(res, dict):
+        if isinstance(res, (dict, MappingProxyType)):
             return res.get("name")
         return None
 
     @property
     def data(self) -> dict[str, Any] | None:
         res = self._kernel.get_resource(self._script_id)
-        if isinstance(res, dict):
+        if isinstance(res, (dict, MappingProxyType)):
             return res.get("data")
         return None
 
     @property
     def type(self) -> int:
         res = self._kernel.get_resource(self._script_id)
-        if isinstance(res, dict):
+        if isinstance(res, (dict, MappingProxyType)):
             return res.get("type", 1)
         return 1
 
     def __getitem__(self, key: str) -> Any:
         res = self._kernel.get_resource(self._script_id)
-        if isinstance(res, dict) and key in res:
+        if isinstance(res, (dict, MappingProxyType)) and key in res:
             return res[key]
         raise KeyError(f"Script resource has no key '{key}'")
 
     def __contains__(self, key: str) -> bool:
         res = self._kernel.get_resource(self._script_id)
-        return isinstance(res, dict) and key in res
+        return isinstance(res, (dict, MappingProxyType)) and key in res
 
     def get(self, key: str, default: Any = None) -> Any:
         res = self._kernel.get_resource(self._script_id)
-        if isinstance(res, dict):
+        if isinstance(res, (dict, MappingProxyType)):
             return res.get(key, default)
         return default
 
@@ -523,7 +667,7 @@ class ScriptProxy:
         if self.data is not None:
             source_path = self.data.get("source_path", "")
             code = self.data.get("code", "")
-            needs_extract = "symbols" not in self.data or not isinstance(self.data["symbols"], dict)
+            needs_extract = "symbols" not in self.data or not isinstance(self.data["symbols"], (dict, MappingProxyType))
             if not code and source_path:
                 try:
                     p = Path(source_path)
@@ -544,7 +688,7 @@ class ScriptProxy:
                     pass
 
             if not needs_extract:
-                return self.data["symbols"]
+                return dict(self.data["symbols"])
 
             if not code and not source_path:
                 code = self.data.get("code", "")
@@ -552,10 +696,12 @@ class ScriptProxy:
             if code:
                 from .preprocessor import extract_script_symbols
                 syms = extract_script_symbols(code)
-                self.data["symbols"] = syms
+                resolved_id = self._kernel._resolve_handle(self._script_id) if hasattr(self._kernel, "_resolve_handle") else self._script_id
+                if resolved_id in self._kernel.resources:
+                    self._kernel.resources[resolved_id].setdefault("data", {})["symbols"] = syms
                 return syms
-            elif "symbols" in self.data and isinstance(self.data["symbols"], dict):
-                return self.data["symbols"]
+            elif "symbols" in self.data and isinstance(self.data["symbols"], (dict, MappingProxyType)):
+                return dict(self.data["symbols"])
         return {}
 
     def bind(self, entity: Any) -> BoundScriptProxy:

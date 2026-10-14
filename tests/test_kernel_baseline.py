@@ -1,5 +1,4 @@
-"""Characterize the uploaded prototype; broken cases remain visible as xfails."""
-
+from collections.abc import MutableMapping
 import importlib
 
 import pytest
@@ -34,9 +33,10 @@ def test_direct_component_edit_should_be_persisted_or_prevented(tmp_path):
     assert kernel.save_dirty_resources() is None
 
     component = kernel.get_component(entity, "Health")
-    assert isinstance(component, dict)
+    assert isinstance(component, MutableMapping)
+    assert not isinstance(component, dict)
     component["current"] = 55
-    assert kernel.is_dirty(entity)  # currently false; requires a decided mutation contract
+    assert kernel.is_dirty(entity)
 
 
 @pytest.mark.xfail(reason="Known defect: Queue references undefined CommandID / CallerID / ReceiverID")

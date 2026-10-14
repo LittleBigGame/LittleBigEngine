@@ -9,7 +9,10 @@ Derives tests from observable user requirements and kernel contracts:
 6. Planned tests for unimplemented engine features.
 """
 
+from collections.abc import MutableMapping, MutableSequence
 import copy
+import json
+from types import MappingProxyType
 
 import pytest
 
@@ -18,9 +21,12 @@ from LBE import (
     EntityProxy,
     Error,
     Kernel,
+    ReadOnlySequence,
     ScriptProxy,
+    TrackedList,
     extract_script_symbols,
 )
+from LBE.proxy import _unwrap
 from LBE.types import (
     ComponentNotFoundOnEntityError,
     EntityTypeMismatchError,
@@ -610,3 +616,419 @@ class TestPlannedEngineFeatures:
         # A live system update that fails compilation must roll back to the previously active
         # implementation without engine corruption.
         pass
+
+
+class TestPhase3SingleControlledMutationAndReadOnlyViews:
+    """Comprehensive test suite for Phase 3 mutation contracts and read-only views."""
+
+    def test_component_proxy_is_not_dict_subclass(self, tmp_path):
+        kernel = Kernel(tmp_path)
+        entity = kernel.create_entity(components={"Health": {"current": 100, "max": 100}})
+        assert not isinstance(entity, Error)
+
+        comp = kernel.get_component(entity, "Health")
+        assert isinstance(comp, MutableMapping)
+        assert not isinstance(comp, dict)
+        assert not issubclass(ComponentProxy, dict)
+        assert issubclass(ComponentProxy, MutableMapping)
+
+        # Single store verification: wrap only _target
+        assert hasattr(comp, "_target")
+        assert comp._target == {"current": 100, "max": 100}
+        assert not hasattr(super(ComponentProxy, comp), "__getitem__") or type(comp).__bases__ == (MutableMapping,)
+
+    def test_component_proxy_mapping_methods(self, tmp_path):
+        kernel = Kernel(tmp_path)
+        entity = kernel.create_entity(components={"Stats": {"atk": 10, "def": 5}})
+        assert not isinstance(entity, Error)
+        kernel.save_dirty_resources()
+        assert not kernel.is_dirty(entity)
+
+        comp = kernel.get_component(entity, "Stats")
+        assert len(comp) == 2
+        assert "atk" in comp
+        assert "speed" not in comp
+        assert list(comp.keys()) == ["atk", "def"]
+        assert list(comp.values()) == [10, 5]
+        assert list(comp.items()) == [("atk", 10), ("def", 5)]
+        assert comp.get("atk") == 10
+        assert comp.get("missing", 99) == 99
+        assert comp.to_dict() == {"atk": 10, "def": 5}
+        assert not kernel.is_dirty(entity)
+
+        # Mutate via __setitem__
+        comp["atk"] = 25
+        assert kernel.is_dirty(entity)
+        assert comp["atk"] == 25
+        assert comp._target["atk"] == 25
+        kernel.save_dirty_resources()
+
+        # Mutate via __delitem__
+        del comp["def"]
+        assert kernel.is_dirty(entity)
+        assert "def" not in comp
+        assert "def" not in comp._target
+
+    def test_tracked_list_mutations_mark_dirty_and_persist(self, tmp_path):
+        kernel = Kernel(tmp_path)
+        entity = kernel.create_entity(components={"Inventory": {"items": ["sword", "shield"]}})
+        assert not isinstance(entity, Error)
+        kernel.save_dirty_resources()
+        assert not kernel.is_dirty(entity)
+
+        comp = kernel.get_component(entity, "Inventory")
+        items = comp["items"]
+        assert isinstance(items, TrackedList)
+        assert isinstance(items, MutableSequence)
+        assert not isinstance(items, list)
+        assert not kernel.is_dirty(entity)
+
+        # append
+        items.append("potion")
+        assert kernel.is_dirty(entity)
+        assert items[-1] == "potion"
+        assert comp._target["items"] == ["sword", "shield", "potion"]
+        kernel.save_dirty_resources()
+
+        # extend
+        items.extend(["bow", "arrow"])
+        assert kernel.is_dirty(entity)
+        assert len(items) == 5
+        kernel.save_dirty_resources()
+
+        # insert
+        items.insert(0, "ring")
+        assert kernel.is_dirty(entity)
+        assert items[0] == "ring"
+        kernel.save_dirty_resources()
+
+        # pop
+        popped = items.pop(0)
+        assert popped == "ring"
+        assert kernel.is_dirty(entity)
+        kernel.save_dirty_resources()
+
+        # remove
+        items.remove("shield")
+        assert kernel.is_dirty(entity)
+        assert "shield" not in items
+        kernel.save_dirty_resources()
+
+        # __setitem__
+        items[0] = "greatsword"
+        assert kernel.is_dirty(entity)
+        assert items[0] == "greatsword"
+        kernel.save_dirty_resources()
+
+        # reverse & sort
+        items.reverse()
+        assert kernel.is_dirty(entity)
+        kernel.save_dirty_resources()
+        items.sort()
+        assert kernel.is_dirty(entity)
+        kernel.save_dirty_resources()
+
+        # __delitem__
+        del items[0]
+        assert kernel.is_dirty(entity)
+        kernel.save_dirty_resources()
+
+        # clear
+        items.clear()
+        assert kernel.is_dirty(entity)
+        assert len(items) == 0
+        kernel.save_dirty_resources()
+
+    def test_tracked_list_and_proxy_recursive_unwrap(self, tmp_path):
+        kernel = Kernel(tmp_path)
+        entity = kernel.create_entity(
+            components={
+                "Party": {
+                    "members": [{"name": "Alice", "hp": 100}, {"name": "Bob", "hp": 80}],
+                    "tags": ["heroes", "active"],
+                }
+            }
+        )
+        assert not isinstance(entity, Error)
+        kernel.save_dirty_resources()
+
+        comp = kernel.get_component(entity, "Party")
+        assert isinstance(comp["members"], TrackedList)
+        assert isinstance(comp["members"][0], ComponentProxy)
+        assert isinstance(comp["tags"], TrackedList)
+
+        # Mutate nested member through proxy
+        comp["members"][0].hp = 95
+        assert kernel.is_dirty(entity)
+        kernel.save_dirty_resources()
+
+        # to_dict recursively unwraps everything into plain dicts and lists
+        plain = comp.to_dict()
+        assert type(plain) is dict
+        assert type(plain["members"]) is list
+        assert type(plain["members"][0]) is dict
+        assert type(plain["tags"]) is list
+        assert plain == {
+            "members": [{"name": "Alice", "hp": 95}, {"name": "Bob", "hp": 80}],
+            "tags": ["heroes", "active"],
+        }
+
+        # Reload kernel and verify persisted primitives
+        k2 = Kernel(tmp_path)
+        loaded = k2.load_entity(kernel.get_storage_id(entity))
+        assert not isinstance(loaded, Error)
+        comp2 = k2.get_component(loaded, "Party")
+        assert comp2.to_dict() == plain
+
+    def test_get_components_returns_immutable_mapping_proxy(self, tmp_path):
+        kernel = Kernel(tmp_path)
+        entity = kernel.create_entity(components={"Transform": {"x": 10.0, "y": 20.0}})
+        assert not isinstance(entity, Error)
+
+        comps = kernel.get_components(entity)
+        assert isinstance(comps, MappingProxyType)
+        assert isinstance(comps["Transform"], MappingProxyType)
+        assert comps["Transform"]["x"] == 10.0
+
+        # Direct assignment on components container raises TypeError
+        with pytest.raises(TypeError):
+            comps["Transform"] = {}
+
+        # Direct assignment on component dictionary raises TypeError
+        with pytest.raises(TypeError):
+            comps["Transform"]["x"] = 99.0
+
+        # Stale/invalid handle returns Error
+        err = kernel.get_components(999999)
+        assert isinstance(err, Error)
+        assert err.code == RuntimeIDNotFoundOnMemoryError
+
+    def test_get_resource_returns_immutable_mapping_proxy(self, tmp_path):
+        kernel = Kernel(tmp_path)
+        entity = kernel.create_entity(name="TestEntity", components={"Pos": {"x": 1.0}})
+        assert not isinstance(entity, Error)
+
+        res = kernel.get_resource(entity)
+        assert isinstance(res, MappingProxyType)
+        assert res["name"] == "TestEntity"
+
+        # Direct assignment on resource dictionary raises TypeError
+        with pytest.raises(TypeError):
+            res["name"] = "HackedName"
+
+        with pytest.raises(TypeError):
+            res["data"] = {}
+
+        # Stale/invalid handle returns Error
+        err = kernel.get_resource(999999)
+        assert isinstance(err, Error)
+        assert err.code == RuntimeIDNotFoundOnMemoryError
+
+    def test_kernel_mutate_component_merges_and_marks_dirty(self, tmp_path):
+        kernel = Kernel(tmp_path)
+        entity = kernel.create_entity(components={"Transform": {"x": 10.0, "y": 20.0, "z": 0.0}})
+        assert not isinstance(entity, Error)
+        kernel.save_dirty_resources()
+        assert not kernel.is_dirty(entity)
+
+        # Mutate component with new partial data
+        err = kernel.mutate_component(entity, "Transform", {"x": 99.0, "z": 5.0})
+        assert err is None
+        assert kernel.is_dirty(entity)
+
+        # Confirm merged state preserves unspecified key 'y'
+        comps = kernel.get_components(entity)
+        assert comps["Transform"]["x"] == 99.0
+        assert comps["Transform"]["y"] == 20.0
+        assert comps["Transform"]["z"] == 5.0
+
+        # Mutate non-existent component creates it
+        err2 = kernel.mutate_component(entity, "Armor", {"defense": 30})
+        assert err2 is None
+        comps2 = kernel.get_components(entity)
+        assert comps2["Armor"]["defense"] == 30
+
+        # Invalid handle returns Error
+        err3 = kernel.mutate_component(999999, "Transform", {"x": 1.0})
+        assert isinstance(err3, Error)
+        assert err3.code == RuntimeIDNotFoundOnMemoryError
+
+        # Invalid component data returns Error
+        err4 = kernel.mutate_component(entity, "Transform", "not-a-dict")
+        assert isinstance(err4, Error)
+
+    def test_kernel_set_component_clears_script_cache(self, tmp_path):
+        kernel = Kernel(tmp_path)
+        entity = kernel.create_entity(components={"Transform": {"x": 0.0}})
+        assert not isinstance(entity, Error)
+        resolved_id = kernel._resolve_handle(entity)
+
+        # Populate a dummy script cache entry for resolved_id
+        kernel._script_cache[resolved_id] = ("code", None, set())
+        assert resolved_id in kernel._script_cache
+
+        # set_component invalidates the script cache
+        kernel.set_component(entity, "Transform", {"x": 10.0})
+        assert resolved_id not in kernel._script_cache
+
+        # mutate_component also invalidates the script cache
+        kernel._script_cache[resolved_id] = ("code2", None, set())
+        assert resolved_id in kernel._script_cache
+        kernel.mutate_component(entity, "Transform", {"x": 20.0})
+        assert resolved_id not in kernel._script_cache
+
+    def test_entity_proxy_controlled_mutation_paths(self, tmp_path):
+        kernel = Kernel(tmp_path)
+        entity = kernel.create_entity(name="Hero", components={"Health": {"current": 100}})
+        assert not isinstance(entity, Error)
+        kernel.save_dirty_resources()
+
+        proxy = kernel.get_entity_proxy(entity)
+        assert isinstance(proxy, EntityProxy)
+
+        # Mutate via proxy dot/dict component access
+        proxy.Health.current = 80
+        assert kernel.is_dirty(entity)
+        assert proxy.Health["current"] == 80
+        kernel.save_dirty_resources()
+
+        # Mutate name property
+        proxy.name = "Champion"
+        assert kernel.is_dirty(entity)
+        assert proxy.name == "Champion"
+        assert kernel.get_resource(entity)["name"] == "Champion"
+        kernel.save_dirty_resources()
+
+        # Add component via proxy.set
+        err = proxy.set("Mana", {"current": 50})
+        assert err is None
+        assert kernel.is_dirty(entity)
+        assert proxy.Mana.current == 50
+        kernel.save_dirty_resources()
+
+        # Remove component via proxy.remove
+        removed = proxy.remove("Mana")
+        assert removed == {"current": 50}
+        assert kernel.is_dirty(entity)
+        assert not proxy.has("Mana")
+
+
+class TestPhase3NegativeAndEdgeCaseRemediations:
+    """Rigorous verification tests for Phase 3 review feedback."""
+
+    def test_mapping_proxy_json_serialization_requires_unwrap(self, tmp_path):
+        kernel = Kernel(tmp_path)
+        entity = kernel.create_entity(name="Hero", components={"Transform": {"x": 1.0, "y": 2.0}})
+        assert not isinstance(entity, Error)
+
+        res = kernel.get_resource(entity)
+        assert isinstance(res, MappingProxyType)
+
+        # Standard json.dumps on raw mappingproxy raises TypeError
+        with pytest.raises(TypeError):
+            json.dumps(res)
+
+        # Unwrapping via _unwrap produces serializable pure primitives
+        unwrapped = _unwrap(res)
+        serialized = json.dumps(unwrapped)
+        assert isinstance(serialized, str)
+        assert "Hero" in serialized
+
+    def test_read_only_view_deep_list_immutability(self, tmp_path):
+        kernel = Kernel(tmp_path)
+        entity = kernel.create_entity(
+            components={"Inventory": {"items": ["sword", "shield"]}}
+        )
+        assert not isinstance(entity, Error)
+        kernel.save_dirty_resources()
+        assert not kernel.is_dirty(entity)
+
+        comps = kernel.get_components(entity)
+        items = comps["Inventory"]["items"]
+        assert isinstance(items, ReadOnlySequence)
+        assert items == ["sword", "shield"]
+        assert ["sword", "shield"] == items
+
+        # In-place list mutations are strictly blocked
+        with pytest.raises(AttributeError):
+            items.append("helmet")
+
+        with pytest.raises(TypeError):
+            items[0] = "axe"
+
+        # Entity remains clean
+        assert not kernel.is_dirty(entity)
+
+    def test_unpacked_slot_id_vs_packed_handle_resolution(self, tmp_path):
+        kernel = Kernel(tmp_path)
+        entity = kernel.create_entity(name="Actor", components={"Pos": {"x": 5.0}})
+        assert not isinstance(entity, Error)
+        slot, gen = kernel._unpack_handle(entity)
+
+        # Accessing via bare slot index resolves to active packed handle
+        res_by_slot = kernel.get_resource(slot)
+        assert not isinstance(res_by_slot, Error)
+        assert res_by_slot["name"] == "Actor"
+
+        comps_by_slot = kernel.get_components(slot)
+        assert not isinstance(comps_by_slot, Error)
+        assert comps_by_slot["Pos"]["x"] == 5.0
+
+        # Unallocated or invalid slot index returns clean Error
+        err = kernel.get_resource(999999)
+        assert isinstance(err, Error)
+        assert err.code == RuntimeIDNotFoundOnMemoryError
+
+    def test_get_resource_deep_data_immutability(self, tmp_path):
+        kernel = Kernel(tmp_path)
+        entity = kernel.create_entity(name="Actor", components={"Pos": {"x": 5.0}})
+        assert not isinstance(entity, Error)
+
+        res = kernel.get_resource(entity)
+        assert isinstance(res["data"], MappingProxyType)
+        assert isinstance(res["data"]["components"], MappingProxyType)
+
+        with pytest.raises(TypeError):
+            res["data"]["components"] = {}
+
+        with pytest.raises(TypeError):
+            res["data"]["components"]["Pos"] = {}
+
+    def test_readonly_sequence_string_bytes_inequality(self):
+        seq = ReadOnlySequence(["a", "b"])
+        assert not (seq == "ab")
+        assert not ("ab" == seq)
+
+        seq_bytes = ReadOnlySequence([65, 66])
+        assert not (seq_bytes == b"AB")
+        assert not (b"AB" == seq_bytes)
+
+    def test_get_entity_resources_is_readonly(self, tmp_path):
+        kernel = Kernel(tmp_path)
+        entity = kernel.create_entity(name="Actor")
+        assert not isinstance(entity, Error)
+
+        kernel.add_entity_resource(entity, "0123456789abcdef0123456789abcdef")
+        resources = kernel.get_entity_resources(entity)
+        assert isinstance(resources, ReadOnlySequence)
+        assert len(resources) == 1
+
+        with pytest.raises(AttributeError):
+            resources.append("illegal")
+
+    def test_component_proxy_mutation_invalidates_script_cache(self, tmp_path):
+        kernel = Kernel(tmp_path)
+        entity = kernel.create_entity(components={"Health": {"current": 100}})
+        assert not isinstance(entity, Error)
+        resolved_id = kernel._resolve_handle(entity)
+
+        # Seed script cache
+        kernel._script_cache[resolved_id] = ("cached_code", None, set())
+        assert resolved_id in kernel._script_cache
+
+        # Mutate via ComponentProxy
+        comp = kernel.get_component(entity, "Health")
+        comp.current = 50
+
+        # Cache was invalidated via mark_dirty
+        assert resolved_id not in kernel._script_cache

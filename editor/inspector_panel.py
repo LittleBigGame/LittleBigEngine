@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
+import copy
 import json
 from typing import Any
 import dearpygui.dearpygui as dpg
 
 from LBE.types import Error, RuntimeID
+from LBE.proxy import _unwrap
 from .context_menu import open_context_menu
 from .pills import (
     PillData,
@@ -57,7 +60,7 @@ class InspectorPanel:
                 continue
             comps = self.session.get_components(rid)
             p_comp = comps.get("Panel") or comps.get("panel")
-            if isinstance(p_comp, dict) and p_comp.get("panel_type") == "inspector":
+            if isinstance(p_comp, Mapping) and p_comp.get("panel_type") == "inspector":
                 return rid
             if self.session.get_entity_name(rid) == "Inspector Panel":
                 return rid
@@ -82,15 +85,15 @@ class InspectorPanel:
                     sub_comps = self.session.get_components(sub_id)
                     if sub_name == "TitleText" or "UIText" in sub_comps:
                         tc = sub_comps.get("UIText") or sub_comps.get("uitext", {})
-                        if isinstance(tc, dict) and "content" in tc and tc["content"]:
+                        if isinstance(tc, Mapping) and "content" in tc and tc["content"]:
                             title = str(tc["content"])
                     elif sub_name == "FocusBtn":
                         bc = sub_comps.get("UIButton") or sub_comps.get("uibutton", {})
-                        if isinstance(bc, dict) and "label" in bc and bc["label"]:
+                        if isinstance(bc, Mapping) and "label" in bc and bc["label"]:
                             focus_label = str(bc["label"])
                     elif sub_name == "LockBtn":
                         bc = sub_comps.get("UIButton") or sub_comps.get("uibutton", {})
-                        if isinstance(bc, dict):
+                        if isinstance(bc, Mapping):
                             if "label" in bc and bc["label"]:
                                 lock_label = str(bc["label"])
         return title, focus_label, lock_label
@@ -100,10 +103,7 @@ class InspectorPanel:
         self.is_locked = not self.is_locked
         panel_id = self._find_panel_entity()
         if panel_id is not None:
-            panel_comps = self.session.get_components(panel_id)
-            p_comp = panel_comps.get("Panel", {})
-            p_comp["locked"] = self.is_locked
-            self.session.mutate_component(panel_id, "Panel", p_comp)
+            self.session.mutate_component(panel_id, "Panel", {"locked": self.is_locked})
 
             for child_id in self.session.get_children(panel_id):
                 c_name = self.session.get_entity_name(child_id)
@@ -111,11 +111,11 @@ class InspectorPanel:
                 if c_name == "HeaderBar" or "UIContainer" in c_comps or "uicontainer" in c_comps:
                     for sub_id in self.session.get_children(child_id):
                         if self.session.get_entity_name(sub_id) == "LockBtn":
-                            sub_comps = self.session.get_components(sub_id)
-                            bc = sub_comps.get("UIButton") or sub_comps.get("uibutton", {})
-                            if isinstance(bc, dict):
-                                bc["label"] = "Unlock" if self.is_locked else "Lock"
-                                self.session.mutate_component(sub_id, "UIButton", bc)
+                            self.session.mutate_component(
+                                sub_id,
+                                "UIButton",
+                                {"label": "Unlock" if self.is_locked else "Lock"},
+                            )
         self.rebuild()
         return self.is_locked
 
@@ -440,7 +440,7 @@ class InspectorPanel:
                 dpg.add_table_column(init_width_or_weight=0.55)
                 dpg.add_table_column(init_width_or_weight=0.45)
                 with dpg.table_row():
-                    field_count = len(comp_data) if isinstance(comp_data, dict) else 0
+                    field_count = len(comp_data) if isinstance(comp_data, Mapping) else 0
                     dpg.add_text(f"Fields ({field_count}):", color=(150, 155, 170))
                     dpg.add_button(
                         label="Remove",
@@ -449,7 +449,7 @@ class InspectorPanel:
                         user_data=(entity_id, comp_name),
                     )
 
-            if isinstance(comp_data, dict):
+            if isinstance(comp_data, Mapping):
                 self._render_fields(entity_id, comp_name, comp_data, path=[])
 
                 # Add Field helper inside component card
@@ -589,15 +589,16 @@ class InspectorPanel:
                         user_data=(entity_id, comp_name, curr_path, "str"),
                         **kwargs,
                     )
-            elif isinstance(value, dict):
+            elif isinstance(value, Mapping):
                 kwargs = {"parent": parent_container} if parent_container else {}
                 with dpg.tree_node(label=f"{field_label} (dict)", default_open=True, **kwargs) as dict_node:
                     self._render_fields(entity_id, comp_name, value, curr_path, parent_container=dict_node)
             else:
                 kwargs = {"parent": parent_container} if parent_container else {}
-                dpg.add_text(f"{field_label} ({type(value).__name__})", color=(165, 175, 195), **kwargs)
+                val_type_name = "list" if isinstance(value, (list, tuple, Sequence)) and not isinstance(value, (str, bytes)) else type(value).__name__
+                dpg.add_text(f"{field_label} ({val_type_name})", color=(165, 175, 195), **kwargs)
                 dpg.add_input_text(
-                    default_value=json.dumps(value),
+                    default_value=json.dumps(_unwrap(value)),
                     width=-1,
                     callback=self._on_field_value_changed,
                     user_data=(entity_id, comp_name, curr_path, "json"),
@@ -632,10 +633,11 @@ class InspectorPanel:
             val = app_data
 
         comps = self.session.get_components(entity_id)
-        if comp_name not in comps or not isinstance(comps[comp_name], dict):
+        if comp_name not in comps or not isinstance(comps[comp_name], Mapping):
             return
 
-        target_dict = comps[comp_name]
+        comp_data = _unwrap(comps[comp_name])
+        target_dict = comp_data
         for key in path[:-1]:
             if key not in target_dict or not isinstance(target_dict[key], dict):
                 return
@@ -645,7 +647,7 @@ class InspectorPanel:
 
         self._suppress_rebuild = True
         try:
-            self.session.mutate_component(entity_id, comp_name, comps[comp_name])
+            self.session.mutate_component(entity_id, comp_name, comp_data)
         finally:
             self._suppress_rebuild = False
 
@@ -710,8 +712,7 @@ class InspectorPanel:
 
         comps = self.session.get_components(entity_id)
         if comp_name in comps:
-            comps[comp_name][field_name] = field_val
-            self.session.mutate_component(entity_id, comp_name, comps[comp_name])
+            self.session.mutate_component(entity_id, comp_name, {field_name: field_val})
             self.rebuild()
 
     def _on_attach_script(

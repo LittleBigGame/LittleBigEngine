@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Mapping
 from typing import Any
 import dearpygui.dearpygui as dpg
 
@@ -69,7 +70,7 @@ class HierarchyPanel:
                 continue
             comps = self.session.get_components(rid)
             p_comp = comps.get("Panel") or comps.get("panel")
-            if isinstance(p_comp, dict) and p_comp.get("panel_type") == "hierarchy":
+            if isinstance(p_comp, Mapping) and p_comp.get("panel_type") == "hierarchy":
                 return rid
             if self.session.get_entity_name(rid) == "Hierarchy Panel":
                 return rid
@@ -91,14 +92,14 @@ class HierarchyPanel:
             c_comps = self.session.get_components(child_id)
             if c_name == "SearchInput" or "UITextInput" in c_comps or "uitextinput" in c_comps:
                 tc = c_comps.get("UITextInput") or c_comps.get("uitextinput", {})
-                if isinstance(tc, dict) and "hint" in tc and tc["hint"]:
+                if isinstance(tc, Mapping) and "hint" in tc and tc["hint"]:
                     hint = str(tc["hint"])
             elif c_name == "FilterBar" or "UIContainer" in c_comps or "uicontainer" in c_comps:
                 for sub_id in self.session.get_children(child_id):
                     sub_name = self.session.get_entity_name(sub_id)
                     sub_comps = self.session.get_components(sub_id)
                     bc = sub_comps.get("UIButton") or sub_comps.get("uibutton", {})
-                    lbl = str(bc.get("label", "")) if isinstance(bc, dict) and "label" in bc else ""
+                    lbl = str(bc.get("label", "")) if isinstance(bc, Mapping) and "label" in bc else ""
                     if sub_name == "AllFilter" and lbl:
                         all_lbl = lbl
                     elif sub_name == "GameFilter" and lbl:

@@ -1,4 +1,6 @@
+from collections.abc import Mapping
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any, Callable
 import copy
 import inspect
@@ -14,7 +16,15 @@ from .integrity import (
     UI_COMPONENT_ALIASES,
     UI_EVENT_HANDLER_REGEX,
 )
-from .proxy import ComponentProxy, EntityProxy, ScriptProxy
+from .proxy import ComponentProxy, EntityProxy, ScriptProxy, ReadOnlySequence, _unwrap
+
+
+def _make_readonly_view(obj: Any) -> Any:
+    if isinstance(obj, Mapping):
+        return MappingProxyType({k: _make_readonly_view(v) for k, v in obj.items()})
+    if isinstance(obj, (list, tuple, ReadOnlySequence)):
+        return ReadOnlySequence([_make_readonly_view(v) for v in obj])
+    return obj
 
 
 PROJECT_FORMAT_VERSION = 1
@@ -126,8 +136,8 @@ class Kernel(object):
         )
         return sid
 
-    def get_resource(self, runtime_id: RuntimeID) -> Any | Error:
-        """Get the loaded resource data for a given Runtime ID."""
+    def get_resource(self, runtime_id: RuntimeID) -> MappingProxyType | Error:
+        """Get the loaded resource data for a given Runtime ID as a read-only view."""
         if not self.is_valid_runtime_id(runtime_id):
             err = Error(
                 message="Resource not found",
@@ -146,8 +156,7 @@ class Kernel(object):
                 code=RuntimeIDNotFoundOnMemoryError,
             )
             logger.trace("Failed to get resource from memory", channel="resources", error=err, entity_id=runtime_id)
-            return err
-        return self.resources[resolved_id]
+        return _make_readonly_view(self.resources[resolved_id])
 
     def mutate_resource(self, runtime_id: RuntimeID, new_data: dict[str, Any]) -> None | Error:
         """Update a resource's payload in memory and trace the before/after mutation."""
@@ -272,6 +281,10 @@ class Kernel(object):
             logger.trace("Failed to mark resource dirty: not in memory", channel="storage", error=err, entity_id=runtime_id)
             return err
         self.dirty_runtime_ids.add(resolved_id)
+        self._script_cache.pop(resolved_id, None)
+        self._script_module_cache.pop(resolved_id, None)
+        self._script_mtime_cache.pop(resolved_id, None)
+        self._method_sig_cache = {k: v for k, v in self._method_sig_cache.items() if k[0] != resolved_id}
         logger.trace(f"Resource {resolved_id} marked dirty", channel="storage", entity_id=resolved_id, action="marked_dirty")
         return None
 
@@ -1282,7 +1295,18 @@ class Kernel(object):
 
     def get_component(self, entity_id: RuntimeID, component_name: str) -> ComponentProxy | Error:
         """Retrieve a component dictionary proxy from an Entity by ID."""
-        if entity_id not in self.resources:
+        if not self.is_valid_runtime_id(entity_id):
+            err = Error(
+                message="Entity not found",
+                description=f"Runtime ID {entity_id} is invalid or stale (referencing a deleted resource)!",
+                data={"entity_id": entity_id},
+                code=RuntimeIDNotFoundOnMemoryError,
+            )
+            logger.trace("Failed to get component: entity not found", channel="entities", error=err, entity_id=entity_id)
+            return err
+
+        resolved_id = self._resolve_handle(entity_id)
+        if resolved_id not in self.resources:
             err = Error(
                 message="Entity not found",
                 description=f"RuntimeID {entity_id} was not found in memory!",
@@ -1292,7 +1316,7 @@ class Kernel(object):
             logger.trace("Failed to get component: entity not found", channel="entities", error=err, entity_id=entity_id)
             return err
 
-        res = self.resources[entity_id]
+        res = self.resources[resolved_id]
         if res.get("type") != Entity:
             err = Error(
                 message="Resource is not an entity",
@@ -1323,7 +1347,7 @@ class Kernel(object):
         )
         return ComponentProxy(self, entity_id, component_name, components[component_name])
 
-    def set_component(self, entity_id: RuntimeID, component_name: str, component_data: dict) -> None | Error:
+    def set_component(self, entity_id: RuntimeID, component_name: str, component_data: dict[str, Any]) -> None | Error:
         """Attach or update a component dictionary on an Entity by ID."""
         if hasattr(component_data, "to_dict"):
             component_data = component_data.to_dict()
@@ -1337,6 +1361,11 @@ class Kernel(object):
             )
             logger.trace("Failed to set component: invalid component name", channel="entities", error=err, entity_id=entity_id)
             return err
+
+        if isinstance(component_data, (Mapping, ComponentProxy)):
+            component_data = _unwrap(component_data)
+        elif hasattr(component_data, "to_dict"):
+            component_data = component_data.to_dict()
 
         if not isinstance(component_data, dict):
             err = Error(
@@ -1353,7 +1382,18 @@ class Kernel(object):
             logger.trace("Failed to set component: UI component validation failed", channel="entities", error=ui_err, entity_id=entity_id)
             return ui_err
 
-        if entity_id not in self.resources:
+        if not self.is_valid_runtime_id(entity_id):
+            err = Error(
+                message="Entity not found",
+                description=f"RuntimeID {entity_id} is invalid or stale (referencing a deleted resource)!",
+                data={"entity_id": entity_id},
+                code=RuntimeIDNotFoundOnMemoryError,
+            )
+            logger.trace("Failed to set component: entity not found", channel="entities", error=err, entity_id=entity_id)
+            return err
+
+        resolved_id = self._resolve_handle(entity_id)
+        if resolved_id not in self.resources:
             err = Error(
                 message="Entity not found",
                 description=f"RuntimeID {entity_id} was not found in memory!",
@@ -1363,7 +1403,7 @@ class Kernel(object):
             logger.trace("Failed to set component: entity not found", channel="entities", error=err, entity_id=entity_id)
             return err
 
-        res = self.resources[entity_id]
+        res = self.resources[resolved_id]
         if res.get("type") != Entity:
             err = Error(
                 message="Resource is not an entity",
@@ -1379,7 +1419,11 @@ class Kernel(object):
         after = copy.deepcopy(component_data)
         components[component_name] = after
 
-        self.dirty_runtime_ids.add(entity_id)
+        self.dirty_runtime_ids.add(resolved_id)
+        self._script_cache.pop(resolved_id, None)
+        self._script_module_cache.pop(resolved_id, None)
+        self._script_mtime_cache.pop(resolved_id, None)
+        self._method_sig_cache = {k: v for k, v in self._method_sig_cache.items() if k[0] != resolved_id}
 
         logger.trace(
             f"Set component '{component_name}' on Entity {entity_id}",
@@ -1392,18 +1436,125 @@ class Kernel(object):
         )
         return None
 
+    def mutate_component(self, entity_id: RuntimeID, component_name: str, new_data: dict[str, Any]) -> None | Error:
+        """Update or merge a component's payload with validation, script cache invalidation, and tracing."""
+        if isinstance(new_data, (Mapping, ComponentProxy)):
+            new_data = _unwrap(new_data)
+        elif hasattr(new_data, "to_dict"):
+            new_data = new_data.to_dict()
+
+        if not isinstance(component_name, str):
+            err = Error(
+                message="Invalid component name",
+                description=f"Component name must be a string, got {type(component_name).__name__} instead!",
+                data={"entity_id": entity_id, "component_name": component_name},
+                code=InvalidResourceDataError,
+            )
+            logger.trace("Failed to mutate component: invalid component name", channel="entities", error=err, entity_id=entity_id)
+            return err
+
+        if not isinstance(new_data, dict):
+            err = Error(
+                message="Invalid component data",
+                description=f"Component data must be a dictionary, got {type(new_data).__name__} instead!",
+                data={"entity_id": entity_id, "component_name": component_name, "new_data": new_data},
+                code=InvalidResourceDataError,
+            )
+            logger.trace("Failed to mutate component: invalid component data", channel="entities", error=err, entity_id=entity_id)
+            return err
+
+        if not self.is_valid_runtime_id(entity_id):
+            err = Error(
+                message="Entity not found",
+                description=f"RuntimeID {entity_id} is invalid or stale (referencing a deleted resource)!",
+                data={"entity_id": entity_id},
+                code=RuntimeIDNotFoundOnMemoryError,
+            )
+            logger.trace("Failed to mutate component: entity not found", channel="entities", error=err, entity_id=entity_id)
+            return err
+
+        resolved_id = self._resolve_handle(entity_id)
+        if resolved_id not in self.resources:
+            err = Error(
+                message="Entity not found",
+                description=f"RuntimeID {entity_id} was not found in memory!",
+                data={"entity_id": entity_id},
+                code=RuntimeIDNotFoundOnMemoryError,
+            )
+            logger.trace("Failed to mutate component: entity not found", channel="entities", error=err, entity_id=entity_id)
+            return err
+
+        res = self.resources[resolved_id]
+        if res.get("type") != Entity:
+            err = Error(
+                message="Resource is not an entity",
+                description=f"RuntimeID {entity_id} has type {res.get('type')}, expected Entity ({Entity})!",
+                data={"entity_id": entity_id, "type": res.get("type")},
+                code=EntityTypeMismatchError,
+            )
+            logger.trace("Failed to mutate component: not an entity", channel="entities", error=err, entity_id=entity_id)
+            return err
+
+        components = res.setdefault("data", {}).setdefault("components", {})
+        existing = components.get(component_name)
+        if isinstance(existing, dict):
+            merged = copy.deepcopy(existing)
+            merged.update(new_data)
+        else:
+            merged = copy.deepcopy(new_data)
+
+        ui_err = Validate.ui_component(component_name, merged)
+        if isinstance(ui_err, Error):
+            logger.trace("Failed to mutate component: UI component validation failed", channel="entities", error=ui_err, entity_id=entity_id)
+            return ui_err
+
+        before = copy.deepcopy(existing)
+        after = merged
+        components[component_name] = after
+
+        self.dirty_runtime_ids.add(resolved_id)
+        self._script_cache.pop(resolved_id, None)
+        self._script_module_cache.pop(resolved_id, None)
+        self._script_mtime_cache.pop(resolved_id, None)
+        self._method_sig_cache = {k: v for k, v in self._method_sig_cache.items() if k[0] != resolved_id}
+
+        logger.trace(
+            f"Mutated component '{component_name}' on Entity {entity_id}",
+            channel="entities",
+            entity_id=entity_id,
+            action="mutate_component",
+            before=before,
+            after=after,
+            data={"component_name": component_name},
+        )
+        return None
+
     def has_component(self, entity_id: RuntimeID, component_name: str) -> bool:
         """Check if an Entity by ID has a specific component."""
-        if entity_id not in self.resources:
+        if not self.is_valid_runtime_id(entity_id):
             return False
-        res = self.resources[entity_id]
+        resolved_id = self._resolve_handle(entity_id)
+        if resolved_id not in self.resources:
+            return False
+        res = self.resources[resolved_id]
         if res.get("type") != Entity:
             return False
         return component_name in res.get("data", {}).get("components", {})
 
     def remove_component(self, entity_id: RuntimeID, component_name: str) -> dict | Error:
         """Remove a component from an Entity by ID and return its previous value."""
-        if entity_id not in self.resources:
+        if not self.is_valid_runtime_id(entity_id):
+            err = Error(
+                message="Entity not found",
+                description=f"RuntimeID {entity_id} is invalid or stale (referencing a deleted resource)!",
+                data={"entity_id": entity_id},
+                code=RuntimeIDNotFoundOnMemoryError,
+            )
+            logger.trace("Failed to remove component: entity not found", channel="entities", error=err, entity_id=entity_id)
+            return err
+
+        resolved_id = self._resolve_handle(entity_id)
+        if resolved_id not in self.resources:
             err = Error(
                 message="Entity not found",
                 description=f"RuntimeID {entity_id} was not found in memory!",
@@ -1413,7 +1564,7 @@ class Kernel(object):
             logger.trace("Failed to remove component: entity not found", channel="entities", error=err, entity_id=entity_id)
             return err
 
-        res = self.resources[entity_id]
+        res = self.resources[resolved_id]
         if res.get("type") != Entity:
             err = Error(
                 message="Resource is not an entity",
@@ -1436,7 +1587,11 @@ class Kernel(object):
             return err
 
         before = components.pop(component_name)
-        self.dirty_runtime_ids.add(entity_id)
+        self.dirty_runtime_ids.add(resolved_id)
+        self._script_cache.pop(resolved_id, None)
+        self._script_module_cache.pop(resolved_id, None)
+        self._script_mtime_cache.pop(resolved_id, None)
+        self._method_sig_cache = {k: v for k, v in self._method_sig_cache.items() if k[0] != resolved_id}
 
         logger.trace(
             f"Removed component '{component_name}' from Entity {entity_id}",
@@ -1449,9 +1604,19 @@ class Kernel(object):
         )
         return before
 
-    def get_components(self, entity_id: RuntimeID) -> dict[str, dict] | Error:
-        """Get all components of an Entity by ID."""
-        if entity_id not in self.resources:
+    def get_components(self, entity_id: RuntimeID) -> MappingProxyType | Error:
+        """Get all components of an Entity by ID as a nested read-only view."""
+        if not self.is_valid_runtime_id(entity_id):
+            err = Error(
+                message="Entity not found",
+                description=f"RuntimeID {entity_id} is invalid or stale (referencing a deleted resource)!",
+                data={"entity_id": entity_id},
+                code=RuntimeIDNotFoundOnMemoryError,
+            )
+            return err
+
+        resolved_id = self._resolve_handle(entity_id)
+        if resolved_id not in self.resources:
             err = Error(
                 message="Entity not found",
                 description=f"RuntimeID {entity_id} was not found in memory!",
@@ -1460,7 +1625,7 @@ class Kernel(object):
             )
             return err
 
-        res = self.resources[entity_id]
+        res = self.resources[resolved_id]
         if res.get("type") != Entity:
             err = Error(
                 message="Resource is not an entity",
@@ -1470,11 +1635,22 @@ class Kernel(object):
             )
             return err
 
-        return res.get("data", {}).get("components", {})
+        components = res.get("data", {}).get("components", {})
+        return _make_readonly_view(components)
 
-    def get_entity_resources(self, entity_id: RuntimeID) -> list[str | bytes] | Error:
-        """Get the referenced resources list of an Entity by ID."""
-        if entity_id not in self.resources:
+    def get_entity_resources(self, entity_id: RuntimeID) -> ReadOnlySequence | Error:
+        """Get the referenced resources list of an Entity by ID as a read-only view."""
+        if not self.is_valid_runtime_id(entity_id):
+            err = Error(
+                message="Entity not found",
+                description=f"Runtime ID {entity_id} is invalid or stale (referencing a deleted resource)!",
+                data={"entity_id": entity_id},
+                code=RuntimeIDNotFoundOnMemoryError,
+            )
+            return err
+
+        resolved_id = self._resolve_handle(entity_id)
+        if resolved_id not in self.resources:
             err = Error(
                 message="Entity not found",
                 description=f"RuntimeID {entity_id} was not found in memory!",
@@ -1483,7 +1659,7 @@ class Kernel(object):
             )
             return err
 
-        res = self.resources[entity_id]
+        res = self.resources[resolved_id]
         if res.get("type") != Entity:
             err = Error(
                 message="Resource is not an entity",
@@ -1493,7 +1669,7 @@ class Kernel(object):
             )
             return err
 
-        return res.get("data", {}).get("resources", [])
+        return _make_readonly_view(res.get("data", {}).get("resources", []))
 
     def add_entity_resource(self, entity_id: RuntimeID, resource_ref: str | bytes) -> None | Error:
         """Add a resource reference to an Entity by ID."""
@@ -1935,7 +2111,7 @@ class Kernel(object):
         if isinstance(res, Error):
             return res
 
-        actual_type = res.get("type") if isinstance(res, dict) else None
+        actual_type = res.get("type") if isinstance(res, (dict, MappingProxyType)) else None
         if actual_type != resource_type:
             err = Error(
                 message="Resource type mismatch",
@@ -2383,7 +2559,7 @@ class Kernel(object):
         script_rids = self.get_entity_scripts(entity_id)
         for s_rid in script_rids:
             s_res = self.get_resource(s_rid)
-            if isinstance(s_res, Error) or not isinstance(s_res, dict):
+            if isinstance(s_res, Error) or not isinstance(s_res, (dict, MappingProxyType)):
                 continue
 
             s_data = s_res.get("data", {})

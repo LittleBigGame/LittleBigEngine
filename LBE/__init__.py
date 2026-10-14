@@ -8,6 +8,6 @@ from .integrity import (
     UI_COMPONENT_ALIASES,
     UI_EVENT_HANDLER_REGEX,
 )
-from .proxy import EntityProxy, ComponentProxy, WorldProxy, ScriptProxy, BoundScriptProxy
+from .proxy import EntityProxy, ComponentProxy, WorldProxy, ScriptProxy, BoundScriptProxy, TrackedList, ReadOnlySequence
 from .preprocessor import ReferencePreprocessor, RuntimeBinder, LBEReferenceSyntaxError, extract_script_symbols
 from .kernel import *

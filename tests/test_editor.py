@@ -20,6 +20,7 @@ import dearpygui.dearpygui as dpg
 import pytest
 
 from editor.app import EditorApp
+from editor.inspector_panel import InspectorPanel
 from editor.session import EditorSession
 from LBE import Error, Kernel, Script
 
@@ -292,3 +293,24 @@ class TestEditorAppHeadlessSmoke:
         unsub()
         session.step_simulation(0.016)
         assert len(ticks) == 2
+
+    def test_inspector_panel_renders_sequence_component_without_error(self, tmp_path):
+        kernel = Kernel(tmp_path)
+        session = EditorSession(kernel)
+        entity = session.create_entity(
+            name="Hero",
+            components={"Inventory": {"items": ["sword", "shield", "potion"]}},
+        )
+        assert not isinstance(entity, Error)
+        session.select_entity(entity)
+
+        # In DPG context, build inspector panel and verify rebuild handles sequences cleanly
+        dpg.create_context()
+        try:
+            panel = InspectorPanel(session, tag="test_seq_inspector")
+            panel.build()
+            assert dpg.does_item_exist("test_seq_inspector")
+            # Trigger rebuild to ensure no TypeError occurs when serializing sequence
+            panel.rebuild()
+        finally:
+            dpg.destroy_context()

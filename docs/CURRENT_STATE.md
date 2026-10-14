@@ -1,13 +1,28 @@
 # Current State of LittleBigEngine
 
-**Date:** 13 October 2026  
-**Status:** Core Kernel, Tracked Proxies, Reference Preprocessor, Entity Script Execution, Hierarchy & Queries, Spawning, Dear PyGui Editor, Stable Function Identity, Engine-Native UI Subtrees, UI Bridge, Visual Reference Pill Tokens, Bootstrapped Workstation, Dynamic UIPanel Windows, and World-Space Overhead UI Billboards verified.
+**Date:** 14 October 2026
+**Status:** Phase 1 project persistence and deterministic startup loading are verified alongside the existing kernel and editor capabilities.
 
 ---
 
 ## 1. Verified Implemented Capabilities
 
-The LittleBigEngine codebase is verified with **259 automated unit tests** passing in [`pytest`](file:///f:/ModEngine/tests) (259 passed, 21 skipped planned tests, 1 xpass):
+The LittleBigEngine codebase is verified with **294 automated tests passing** in [`pytest`](file:///f:/ModEngine/tests) (294 passed, 24 skipped planned tests, 1 xpass).
+
+### Phase 1: Project persistence and deterministic startup loading
+
+Verified with **31 passing tests** in [`tests/test_project_persistence.py`](file:///f:/ModEngine/tests/test_project_persistence.py), with three future architectural tests explicitly skipped:
+
+- `project.json` stores format version 1, project name, settings, and sorted persistent IDs for root entities.
+- Existing projects load before demo-world population, preventing a new demo hierarchy on every startup.
+- Projects without a manifest discover roots deterministically and write a manifest only after successful discovery and loading.
+- Missing roots, children, and dependencies are reported through structured `BrokenReference` diagnostics without discarding otherwise usable resources.
+- Invalid or unsupported manifests fail visibly and are not overwritten by startup bootstrapping.
+- Fatal resource-graph loads and project loads roll back newly registered runtime resources.
+- Dependencies and attached script/resource references belonging to nested child entities load recursively with the scene hierarchy.
+- Orphaned entities whose recorded parent no longer exists are recoverable as discovered roots.
+
+Deferred beyond Phase 1: manifest migration between future schema versions, generation-safe runtime handles, and file-watcher-driven manifest hot reload.
 
 ### Step 1: Tracked Mutations & Proxies
 - **Transparent Dirty Tracking:** [`ComponentProxy`](file:///f:/ModEngine/LBE/proxy.py#L12-L165) wraps component state dicts. Any mutation via attribute set/delete (`proxy.speed = 10`, `del proxy.temp`), dictionary set/delete (`proxy["speed"] = 10`), or dict mutation methods (`pop`, `update`, `clear`, `setdefault`, `__ior__`) automatically marks the parent entity runtime ID dirty via [`Kernel.mark_dirty`](file:///f:/ModEngine/LBE/kernel.py#L134-L147).
@@ -105,8 +120,8 @@ Verified with **26 automated tests** in [`tests/test_hierarchy_inspector_subtree
 
 1. **Command Queue Prototype Cleanup:**  
    [`LBE/Queue.py`](file:///f:/ModEngine/LBE/Queue.py) contains a rudimentary [`CommandQueue`](file:///f:/ModEngine/LBE/Queue.py#L4-L12) prototype. A formal queue lifecycle and command dispatch pipeline remain to be specified and integrated.
-2. **Transactional Dependency Graph Loading:**  
-   If a nested child resource fails validation or disk read during recursive graph loading, resources loaded prior to the failure are not currently rolled back transactionally.
+2. **Transactional Editing Beyond Project Load:**
+   Fatal resource-graph and whole-project loads now roll back newly registered resources. Multi-resource editor mutations, non-fatal incremental graph loads, reparenting and deletion still need an agreed transaction model.
 3. **Generation-Safe RuntimeID Recycling:**  
    Entity [`RuntimeID`](file:///f:/ModEngine/LBE/types.py#L6) allocations currently use incrementing counters. Stale runtime handles referencing destroyed entities require generation checks or slot handles (as proposed in ADR-008).
 4. **Hot-Reload Rollback on Script Syntax Error:**  

@@ -15,6 +15,7 @@ The package's own imports use modern `type` syntax; older Python interpreters wi
 
 - `tests/test_kernel_baseline.py`: smoke-tested existing entity create/set/save/reload and two-way IDs; includes explicitly **xfail** known defects. `xfail` is not a fix or proof the defect has disappeared.
 - `tests/test_api_contract.py`: checks selected currently exposed surface signatures, to detect accidental API removals until an approved migration.
+- `tests/test_project_persistence.py`: verifies the format-version-1 project manifest, deterministic legacy root discovery, startup idempotency, broken-reference diagnostics, recursive child dependencies and fatal-load rollback.
 - `tools/check_architecture.py`: AST-based check for forbidden dependencies in the kernel/integrity/types, not a general architecture theorem prover.
 - GitHub Actions runs these checks when code is pushed or a PR is opened. It does not itself enforce branch protection: configure required checks and reviews in GitHub settings if desired.
 - Ruff checking is initially restricted to support code (`tools/` and `tests/`) because legacy source has not been lint-refactored.

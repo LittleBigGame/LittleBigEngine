@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 import math
 from typing import Any
 import dearpygui.dearpygui as dpg
@@ -314,7 +315,7 @@ class ViewportPanel:
         alias = target[2:] if target.startswith("ui") else f"ui{target}"
         for k, v in comps.items():
             kl = k.lower()
-            if (kl == target or kl == alias) and isinstance(v, dict):
+            if (kl == target or kl == alias) and isinstance(v, Mapping):
                 return v
         return None
 
@@ -323,7 +324,7 @@ class ViewportPanel:
         if not comps:
             return None
         for name, data in comps.items():
-            if name.lower() == "transform" and isinstance(data, dict):
+            if name.lower() == "transform" and isinstance(data, Mapping):
                 return {
                     "x": float(data.get("x", 0.0)),
                     "y": float(data.get("y", 0.0)),
@@ -367,7 +368,7 @@ class ViewportPanel:
 
         # Draw AI aggro radius if present
         ai_comp = comps.get("AI") or comps.get("ai")
-        if isinstance(ai_comp, dict) and "aggro_radius" in ai_comp:
+        if isinstance(ai_comp, Mapping) and "aggro_radius" in ai_comp:
             aggro_r = float(ai_comp["aggro_radius"]) * self.cam_zoom
             dpg.draw_circle(
                 center=(sx, sy),
@@ -597,7 +598,7 @@ class ViewportPanel:
             comps = self.session.get_components(rid)
             if self._is_overhead_ui_entity(comps):
                 is_canvas_selectable = any(
-                    isinstance(c, dict) and (c.get("canvas_selectable") is True or c.get("selectable") is True)
+                    isinstance(c, Mapping) and (c.get("canvas_selectable") is True or c.get("selectable") is True)
                     for c in comps.values()
                 )
                 if not is_canvas_selectable:

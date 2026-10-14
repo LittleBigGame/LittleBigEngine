@@ -8,11 +8,13 @@ Universal right-click menu operating in 3 structured layers:
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 import copy
 from typing import Any
 import dearpygui.dearpygui as dpg
 
 from LBE.types import RuntimeID
+from LBE.proxy import _unwrap
 from .session import EditorSession
 
 
@@ -157,7 +159,7 @@ def _on_add_child(session: EditorSession, parent_id: RuntimeID, popup_tag: str) 
 
 def _on_duplicate(session: EditorSession, entity_id: RuntimeID, popup_tag: str) -> None:
     _close_popup(popup_tag)
-    comps = copy.deepcopy(session.get_components(entity_id))
+    comps = _unwrap(session.get_components(entity_id))
     parent = session.kernel.get_entity_parent(entity_id)
     name = f"{session.get_entity_name(entity_id)}_Copy"
     session.create_entity(name=name, parent_id=parent, components=comps)

@@ -45,6 +45,14 @@ This is a dependency/ownership model, not a required directory tree. The **kerne
 - Mutable project state has **one reliable mutation contract**: tracked write API, transactional editing or tracked proxies; ordinary read access must not silently defeat saves.
 - Support versioned schema, migration path and clear errors. Differentiate source, stored project state, runtime state, and generated cache.
 
+### Implemented Phase 1 project contract
+
+The current implementation uses `project.json` format version 1 as the project entry point. It contains the project name, settings, and sorted 32-character hexadecimal persistent IDs for root entities. Startup loads this manifest before deciding whether a new demo world is needed.
+
+When a legacy resource folder has no manifest, root entities are discovered deterministically from stored child links. A manifest is written only after the discovered graph loads successfully. Entity script/resource links and explicit dependencies are resolved throughout nested child hierarchies. Missing references are retained as diagnostics, while malformed manifests, corrupt resource files, unsupported format versions, and other fatal graph errors abort loading without exposing a partially registered project.
+
+This phase does not implement schema migration, generation-aware runtime handles, or automatic file-watcher reload. Those remain separate architectural changes.
+
 ## LBE references (design, not yet implemented)
 Stored LBE-extended Python may contain a special expression:
 

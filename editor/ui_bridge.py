@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 import dearpygui.dearpygui as dpg
 
@@ -381,7 +382,7 @@ class UIBridgePanel:
 
     def _get_ui_comp(self, comps: dict[str, Any], type_name: str) -> dict[str, Any] | None:
         for k, v in comps.items():
-            if k.lower() == type_name.lower() and isinstance(v, dict):
+            if k.lower() == type_name.lower() and isinstance(v, Mapping):
                 return v
         return None
 

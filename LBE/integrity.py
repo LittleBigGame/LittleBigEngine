@@ -1,3 +1,4 @@
+from collections.abc import Mapping
 import re
 from typing import Any
 
@@ -406,10 +407,10 @@ class Validate:
             return None
 
         # Exempt internal workstation panels from standard UIPanel validation:
-        if canonical_name == "UIPanel" and isinstance(component_data, dict) and "panel_type" in component_data:
+        if canonical_name == "UIPanel" and isinstance(component_data, Mapping) and "panel_type" in component_data:
             return None
 
-        if not isinstance(component_data, dict):
+        if not isinstance(component_data, Mapping):
             err = Error(
                 message="Invalid UI component data",
                 description=f"UI component '{canonical_name}' data must be a dictionary, got {type(component_data).__name__} instead!",

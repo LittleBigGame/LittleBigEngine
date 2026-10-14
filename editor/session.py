@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+from types import MappingProxyType
 from typing import Any, Callable
 
 from LBE.kernel import Kernel
@@ -292,28 +293,27 @@ class EditorSession:
     def get_entity_name(self, entity_id: RuntimeID) -> str:
         """Return the friendly name of an entity or a fallback label."""
         res = self.kernel.get_resource(entity_id)
-        if isinstance(res, dict) and res.get("name"):
+        if isinstance(res, (dict, MappingProxyType)) and res.get("name"):
             return str(res["name"])
         return f"Entity_{entity_id}"
 
     def set_entity_name(self, entity_id: RuntimeID, name: str) -> None:
         """Update an entity's name and mark dirty if changed."""
-        res = self.kernel.get_resource(entity_id)
-        if isinstance(res, dict):
+        proxy = self.kernel.get_entity_proxy(entity_id)
+        if not isinstance(proxy, Error):
             new_name = name.strip() if name else f"Entity_{entity_id}"
-            if res.get("name") != new_name:
-                res["name"] = new_name
-                self.kernel.mark_dirty(entity_id)
+            if proxy.name != new_name:
+                proxy.name = new_name
                 self._notify_state_changed()
 
     # -------------------------------------------------------------------------
     # Component Operations
     # -------------------------------------------------------------------------
 
-    def get_components(self, entity_id: RuntimeID) -> dict[str, dict]:
+    def get_components(self, entity_id: RuntimeID) -> MappingProxyType | dict[str, dict]:
         """Get all components for an entity as a dictionary."""
         comps = self.kernel.get_components(entity_id)
-        if isinstance(comps, dict):
+        if isinstance(comps, (dict, MappingProxyType)):
             return comps
         return {}
 
@@ -324,7 +324,7 @@ class EditorSession:
         new_data: dict[str, Any],
     ) -> None | Error:
         """Update or replace a component's payload and mark dirty."""
-        err = self.kernel.set_component(entity_id, component_name, new_data)
+        err = self.kernel.mutate_component(entity_id, component_name, new_data)
         if not isinstance(err, Error):
             self._notify_state_changed()
         return err
