@@ -126,7 +126,7 @@ def _resolve_script_id(self, script_id: RuntimeID | StorageID | str) -> tuple[St
 
 def create_script_resource(
     self,
-    name: str,
+    name: str = "Script",
     source_path: str = "",
     code: str = "",
     requires: list[str] | None = None,

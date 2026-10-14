@@ -106,15 +106,15 @@ class EditorApp:
 
         dpg.create_context()
 
-        # Ensure default dock layout exists so all panels start docked immediately
-        ini_file = Path("dpg.ini")
-        if not ini_file.exists():
-            ini_file.write_text(DEFAULT_DPG_INI, encoding="utf-8")
+        # Ensure default dock layout exists in project folder so all panels start docked immediately
+        self.ini_file = Path(self.kernel.folder_location) / "editor_layout.ini"
+        if not self.ini_file.exists():
+            self.ini_file.write_text(DEFAULT_DPG_INI, encoding="utf-8")
 
         dpg.configure_app(
             docking=True,
             docking_space=True,
-            init_file=str(ini_file),
+            init_file=str(self.ini_file),
             load_init_file=True,
             auto_save_init_file=True,
         )
@@ -307,8 +307,8 @@ class EditorApp:
     def destroy(self) -> None:
         """Tear down and destroy Dear PyGui context."""
         try:
-            if self._viewport_created:
-                dpg.save_init_file("dpg.ini")
+            if self._viewport_created and hasattr(self, "ini_file"):
+                dpg.save_init_file(str(self.ini_file))
         except Exception:
             pass
         for insp in getattr(self, "extra_inspectors", []):

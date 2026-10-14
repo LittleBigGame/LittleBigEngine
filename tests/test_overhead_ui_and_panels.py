@@ -725,12 +725,43 @@ class TestPlannedOverheadUIAndPanelFeatures:
         """DPG docking layouts and floating window coordinates for UIPanel should persist in project settings."""
         pass
 
-    @pytest.mark.skip(reason="Planned test: Stale handle safety when dynamic UIPanel window triggers an event after entity deletion")
-    def test_planned_uipanel_stale_handle_safety_on_async_dpg_event(self):
+    def test_planned_uipanel_stale_handle_safety_on_async_dpg_event(self, tmp_path: Path, dpg_context):
         """Async DPG callbacks arriving after an entity is deleted from memory must be safely ignored without raising exceptions."""
-        pass
+        kernel = Kernel(tmp_path)
+        session = EditorSession(kernel)
+        bridge = UIBridgePanel(session)
 
-    @pytest.mark.skip(reason="Planned test: Hot-reload rollback preserves previous UIPanel state on script syntax error")
-    def test_planned_uipanel_script_hot_reload_syntax_error_rollback(self):
+        # Create a UIPanel with a child UIButton
+        panel = kernel.create_entity(name="Tools", components={"UIPanel": {"title": "Tools", "width": 200.0, "height": 100.0}})
+        btn = kernel.create_entity(name="ActionButton", parent_id=panel, components={"UIButton": {"label": "Click Me", "on_click": "tools_action"}})
+        bridge.build()
+        bridge.rebuild()
+
+        # Delete the button entity (tombstone handle)
+        session.delete_entity(btn)
+
+        # Simulating callback arriving for the deleted entity: trigger_ui_event must return Error without raising
+        res = kernel.trigger_ui_event(btn, "on_click")
+        assert isinstance(res, Error)
+
+        # Calling _on_button_clicked must not raise uncaught exceptions
+        bridge._on_button_clicked(btn)
+        bridge.destroy()
+
+    def test_planned_uipanel_script_hot_reload_syntax_error_rollback(self, tmp_path: Path):
         """Syntax errors in scripts driving dynamic UIPanel widgets should roll back to the previous valid bytecode."""
-        pass
+        import copy
+        kernel = Kernel(tmp_path)
+        script = kernel.create_script_resource(name="PanelLogic", code="def handle_click(): return 42")
+        mod = kernel.get_script_module(script)
+        assert mod["handle_click"]() == 42
+
+        # Corrupt code with syntax error
+        data = copy.deepcopy(kernel.resources[script]["data"])
+        data["code"] = "def bad_syntax(:"
+        assert kernel.mutate_resource(script, data) is None
+
+        # Prior valid bytecode module remains intact
+        assert kernel.get_script_module(script) is mod
+        assert kernel.get_script_module(script)["handle_click"]() == 42
+        assert script in kernel.get_diagnostics()["script_reload_errors"]

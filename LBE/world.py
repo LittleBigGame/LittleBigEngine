@@ -12,6 +12,7 @@ import copy
 
 from .logger import logger
 from .integrity import Validate
+from .ui import ValidateUI
 from .proxy import ComponentProxy, EntityProxy, ReadOnlySequence, _unwrap
 from .views import _make_readonly_view
 from .types import (
@@ -265,7 +266,7 @@ def set_component(self, entity_id: RuntimeID, component_name: str, component_dat
         logger.trace("Failed to set component: invalid component data", channel="entities", error=err, entity_id=entity_id)
         return err
 
-    ui_err = Validate.ui_component(component_name, component_data)
+    ui_err = ValidateUI.validate_ui_component(component_name, component_data)
     if isinstance(ui_err, Error):
         logger.trace("Failed to set component: UI component validation failed", channel="entities", error=ui_err, entity_id=entity_id)
         return ui_err
@@ -392,7 +393,7 @@ def mutate_component(self, entity_id: RuntimeID, component_name: str, new_data: 
     else:
         merged = copy.deepcopy(new_data)
 
-    ui_err = Validate.ui_component(component_name, merged)
+    ui_err = ValidateUI.validate_ui_component(component_name, merged)
     if isinstance(ui_err, Error):
         logger.trace("Failed to mutate component: UI component validation failed", channel="entities", error=ui_err, entity_id=entity_id)
         return ui_err

@@ -881,9 +881,20 @@ class TestSubtreeFailureCasesAndContracts:
 class TestPlannedHierarchyInspectorFeatures:
     """Planned tests for unimplemented future capabilities."""
 
-    @pytest.mark.skip(reason="Planned test: Two-way binding between DPG text input value and ECS SearchInput component")
-    def test_planned_two_way_search_input_ecs_binding(self):
-        pass
+    def test_planned_two_way_search_input_ecs_binding(self, tmp_path, dpg_context):
+        """Two-way binding between DPG search input value and ECS SearchInput component."""
+        kernel = Kernel(tmp_path)
+        session = EditorSession(kernel)
+        panel_id = session.create_entity("Hierarchy Panel", components={"Panel": {"title": "Hierarchy", "panel_type": "hierarchy"}})
+        search_id = session.create_entity("SearchInput", parent_id=panel_id, components={"UITextInput": {"hint": "Search...", "text": ""}})
+
+        hp = HierarchyPanel(session)
+        hp.build()
+        hp._on_search_changed(hp.search_tag, "Player")
+
+        # Verify SearchInput component was reactively mutated in ECS
+        assert session.get_components(search_id)["UITextInput"]["text"] == "Player"
+        hp.destroy()
 
     @pytest.mark.skip(reason="Planned test: Drag-and-drop hierarchy card re-parenting updating ECS hierarchy links")
     def test_planned_hierarchy_card_drag_drop_reparenting(self):
@@ -924,6 +935,20 @@ class TestPlannedHierarchyInspectorFeatures:
 
     test_planned_generation_safe_runtime_handle_recycling = test_planned_stale_handle_safety_during_panel_rebuild
 
-    @pytest.mark.skip(reason="Planned test: Failed hot-reload rollback preserves prior UI subtree on script syntax error")
-    def test_planned_failed_hot_reload_rollback_ui_subtrees(self):
-        pass
+    def test_planned_failed_hot_reload_rollback_ui_subtrees(self, tmp_path):
+        """Failed hot-reload rollback preserves prior UI subtree and script module on script syntax error."""
+        import copy
+        kernel = Kernel(tmp_path)
+        script = kernel.create_script_resource(name="TreeHandler", code="def filter_nodes(): return ['A', 'B']")
+        mod = kernel.get_script_module(script)
+        assert mod["filter_nodes"]() == ["A", "B"]
+
+        # Corrupt code with syntax error
+        data = copy.deepcopy(kernel.resources[script]["data"])
+        data["code"] = "def bad_filter(:"
+        assert kernel.mutate_resource(script, data) is None
+
+        # Prior valid module remains active
+        assert kernel.get_script_module(script) is mod
+        assert kernel.get_script_module(script)["filter_nodes"]() == ["A", "B"]
+        assert script in kernel.get_diagnostics()["script_reload_errors"]

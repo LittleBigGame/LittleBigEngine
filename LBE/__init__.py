@@ -3,6 +3,7 @@ from .types import *
 from .logger import *
 from .integrity import (
     Validate,
+    ValidateUI,
     UI_SCHEMAS,
     UI_COMPONENT_NAMES,
     UI_COMPONENT_ALIASES,

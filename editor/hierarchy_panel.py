@@ -706,4 +706,15 @@ class HierarchyPanel:
 
     def _on_search_changed(self, sender: str | int, app_data: str) -> None:
         self._filter_query = app_data.strip()
+        panel_id = self._find_panel_entity()
+        if panel_id is not None:
+            for child_id in self.session.get_children(panel_id):
+                if self.session.get_entity_name(child_id) == "SearchInput":
+                    comps = self.session.get_components(child_id)
+                    tc = comps.get("UITextInput") or comps.get("uitextinput")
+                    if tc is not None:
+                        new_data = dict(tc)
+                        new_data["text"] = self._filter_query
+                        self.session.mutate_component(child_id, "UITextInput", new_data)
+                    break
         self.rebuild()

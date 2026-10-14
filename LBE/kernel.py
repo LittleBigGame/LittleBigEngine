@@ -300,7 +300,7 @@ class Kernel:
 
     def create_script_resource(
         self,
-        name: str,
+        name: str = "Script",
         source_path: str = "",
         code: str = "",
         requires: list[str] | None = None,
@@ -368,8 +368,9 @@ class Kernel:
         entity_id: RuntimeID | Any,
         event_name: str = "on_click",
         *args: Any,
+        bubble: bool = True,
         **kwargs: Any,
     ) -> Any | Error:
-        """Trigger a UI event handler on an Entity."""
-        return ui.trigger_ui_event(self, entity_id, event_name, *args, **kwargs)
+        """Trigger a UI event handler on an Entity with optional bubbling."""
+        return ui.trigger_ui_event(self, entity_id, event_name, *args, bubble=bubble, **kwargs)
 

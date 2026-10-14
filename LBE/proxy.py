@@ -240,6 +240,9 @@ class ComponentProxy(MutableMapping):
         self._kernel.mark_dirty(self._entity_id)
 
     def __getattr__(self, name: str) -> Any:
+        if name == "_target":
+            _check_component_target(self._kernel, self._entity_id, self._data)
+            return self._data
         if name.startswith("_"):
             raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
         if name in self._target:
@@ -486,15 +489,15 @@ class EntityProxy:
             raise res
         return EntityProxy(self._kernel, res)
 
-    def click(self, *args: Any, **kwargs: Any) -> Any | Error:
+    def click(self, *args: Any, bubble: bool = True, **kwargs: Any) -> Any | Error:
         """Trigger the on_click UI event for this entity."""
         self._ensure_alive()
-        return self._kernel.trigger_ui_event(self._entity_id, "on_click", *args, **kwargs)
+        return self._kernel.trigger_ui_event(self._entity_id, "on_click", *args, bubble=bubble, **kwargs)
 
-    def trigger(self, event_name: str, *args: Any, **kwargs: Any) -> Any | Error:
+    def trigger(self, event_name: str, *args: Any, bubble: bool = True, **kwargs: Any) -> Any | Error:
         """Trigger an arbitrary UI event for this entity."""
         self._ensure_alive()
-        return self._kernel.trigger_ui_event(self._entity_id, event_name, *args, **kwargs)
+        return self._kernel.trigger_ui_event(self._entity_id, event_name, *args, bubble=bubble, **kwargs)
 
     def _find_component_name(self, name: str) -> str | None:
         components = self._kernel.get_components(self._entity_id)

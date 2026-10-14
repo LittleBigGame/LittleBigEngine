@@ -16,6 +16,7 @@ from LBE import (
     Kernel,
     UI_SCHEMAS,
     Validate,
+    ValidateUI,
 )
 from LBE.types import (
     EntityTypeMismatchError,
@@ -154,10 +155,34 @@ class TestUIComponentSchemaValidation:
         assert isinstance(Validate.ui_component("UISlider", {"max": "10"}), Error)
         assert isinstance(Validate.ui_component("UISlider", {"max": False}), Error)
 
-        # min > max
-        assert isinstance(Validate.ui_component("UISlider", {"min": 10.0, "max": 5.0}), Error)
+        # min > max returns InvalidResourceDataError
+        err_min_max = Validate.ui_component("UISlider", {"min": 10.0, "max": 5.0})
+        assert isinstance(err_min_max, Error)
+        assert err_min_max.code == InvalidResourceDataError
+        assert "min (10.0) cannot be greater than max (5.0)" in err_min_max.description
 
-        # value
+        # value > max returns InvalidResourceDataError
+        err_val_max = Validate.ui_component("UISlider", {"min": 0.0, "max": 10.0, "value": 15.0})
+        assert isinstance(err_val_max, Error)
+        assert err_val_max.code == InvalidResourceDataError
+        assert "outside" in err_val_max.description
+
+        # value < min returns InvalidResourceDataError
+        err_val_min = Validate.ui_component("UISlider", {"min": 0.0, "max": 10.0, "value": -5.0})
+        assert isinstance(err_val_min, Error)
+        assert err_val_min.code == InvalidResourceDataError
+        assert "outside" in err_val_min.description
+
+        # default schema boundaries (min=0.0, max=1.0)
+        err_default_max = Validate.ui_component("UISlider", {"value": 1.5})
+        assert isinstance(err_default_max, Error)
+        assert err_default_max.code == InvalidResourceDataError
+
+        err_default_min = Validate.ui_component("UISlider", {"value": -0.5})
+        assert isinstance(err_default_min, Error)
+        assert err_default_min.code == InvalidResourceDataError
+
+        # value non-numeric types
         assert isinstance(Validate.ui_component("UISlider", {"value": "0.5"}), Error)
         assert isinstance(Validate.ui_component("UISlider", {"value": True}), Error)
 
@@ -170,7 +195,10 @@ class TestUIComponentSchemaValidation:
         # on_change ref
         assert isinstance(Validate.ui_component("UISlider", {"on_change": "invalid_ref"}), Error)
 
+        # Valid sliders succeed
         assert Validate.ui_component("UISlider", {"min": 0.0, "max": 100.0, "value": 50.0, "step": 1.0}) is None
+        assert Validate.ui_component("UISlider", {"min": -10.0, "max": 10.0, "value": 5.0}) is None
+        assert ValidateUI.validate_ui_component("UISlider", {"min": -10.0, "max": 10.0, "value": 5.0}) is None
 
     def test_uitextinput_invalid_fields_rejected(self):
         assert isinstance(Validate.ui_component("UITextInput", {"label": 123}), Error)
@@ -280,6 +308,31 @@ class TestUIComponentSchemaValidation:
         # Internal workstation panels are exempted from UIPanel schema
         assert Validate.ui_component("panel", {"panel_type": "scene_view", "width": 10.0}) is None
         assert Validate.ui_component("UIPanel", {"panel_type": "console", "resizable": True}) is None
+
+    def test_validate_ui_extraction_and_delegation(self):
+        """Verifies ValidateUI.validate_ui_component operates directly and Validate.ui_component delegates to it."""
+        # Valid UI component directly via ValidateUI
+        assert ValidateUI.validate_ui_component("UISlider", {"min": -10.0, "max": 10.0, "value": 5.0}) is None
+        assert ValidateUI.validate_ui_component("UIButton", {"label": "Click Me", "enabled": True}) is None
+        assert ValidateUI.validate_ui_component("UIContainer", {"layout": "grid", "columns": 3}) is None
+
+        # Invalid component directly via ValidateUI
+        err_direct = ValidateUI.validate_ui_component("UISlider", {"min": 10.0, "max": 5.0})
+        assert isinstance(err_direct, Error)
+        assert err_direct.code == InvalidResourceDataError
+
+        # Delegation via Validate.ui_component returns equivalent results
+        assert Validate.ui_component("UISlider", {"min": -10.0, "max": 10.0, "value": 5.0}) is None
+        err_delegated = Validate.ui_component("UISlider", {"min": 10.0, "max": 5.0})
+        assert isinstance(err_delegated, Error)
+        assert err_delegated.code == InvalidResourceDataError
+        assert err_delegated.description == err_direct.description
+
+        # Non-UI components and non-string inputs pass silently on both
+        assert ValidateUI.validate_ui_component("Transform", {"x": 10}) is None
+        assert Validate.ui_component("Transform", {"x": 10}) is None
+        assert ValidateUI.validate_ui_component(999, {}) is None
+        assert Validate.ui_component(999, {}) is None
 
     def test_wiring_in_validate_resource_data(self):
         payload_bad = {
@@ -426,6 +479,29 @@ class TestUIEntityCreationAndHierarchy:
 
         # Invalid props failing validation
         assert isinstance(kernel.create_ui_entity("Bad", component_type="button", component_props={"width": -100}), Error)
+
+        # Slider min > max rejected with InvalidResourceDataError
+        err_slider_minmax = kernel.create_ui_entity("BadSlider1", component_type="slider", component_props={"min": 10.0, "max": 0.0})
+        assert isinstance(err_slider_minmax, Error)
+        assert err_slider_minmax.code == InvalidResourceDataError
+
+        # Slider value > max rejected with InvalidResourceDataError
+        err_slider_valmax = kernel.create_ui_entity("BadSlider2", component_type="slider", component_props={"min": 0.0, "max": 10.0, "value": 15.0})
+        assert isinstance(err_slider_valmax, Error)
+        assert err_slider_valmax.code == InvalidResourceDataError
+
+        # Slider value < min rejected with InvalidResourceDataError
+        err_slider_valmin = kernel.create_ui_entity("BadSlider3", component_type="slider", component_props={"min": 0.0, "max": 10.0, "value": -1.0})
+        assert isinstance(err_slider_valmin, Error)
+        assert err_slider_valmin.code == InvalidResourceDataError
+
+        # Valid slider within range min=-10.0, max=10.0, value=5.0 succeeds
+        good_slider_id = kernel.create_ui_entity("GoodSlider", component_type="slider", component_props={"min": -10.0, "max": 10.0, "value": 5.0})
+        assert not isinstance(good_slider_id, Error)
+        slider_proxy = kernel.get_entity_proxy(good_slider_id)
+        assert slider_proxy.uislider.min == -10.0
+        assert slider_proxy.uislider.max == 10.0
+        assert slider_proxy.uislider.value == 5.0
 
     def test_create_ui_entity_hierarchy_wiring_with_runtime_id(self, tmp_path):
         kernel = Kernel(tmp_path)
@@ -869,17 +945,124 @@ class TestUIEndToEndPersistenceRoundtrip:
 class TestPlannedUIFeatures:
     """Specifies forward-looking test contracts for planned engine capabilities."""
 
-    @pytest.mark.skip(reason="Planned test: UI event bubbling / propagation up the hierarchy tree")
-    def test_planned_ui_event_bubbling_up_hierarchy(self):
-        # When a UI event is triggered on a child entity that does not handle it,
-        # it should bubble up to parent containers until handled or reaching the root.
-        pass
+    def test_planned_ui_event_bubbling_up_hierarchy(self, tmp_path):
+        kernel = Kernel(tmp_path)
 
-    @pytest.mark.skip(reason="Planned test: Generation-safe RuntimeID recycling in UI event dispatcher")
-    def test_planned_generation_safe_ui_handle_invalidation(self):
-        # Destroying a UI entity and recycling its RuntimeID slot must prevent stale
-        # UI proxies or event listeners from dispatching events to the recycled entity.
-        pass
+        # 1. Create root container entity with an attached script that handles on_click
+        script_code = (
+            'def handle_root_click(entity):\n'
+            '    entity.uicontainer.collapsed = True\n'
+            '    entity.stats.clicks += 1\n'
+            '    return "bubbled_to_root"\n'
+        )
+        script_id = kernel.create_script_resource(name="RootEvents", code=script_code)
+        assert not isinstance(script_id, Error)
+        sid_hex = kernel.get_storage_id(script_id).hex()
+
+        root_id = kernel.create_ui_entity(
+            name="RootContainer",
+            component_type="container",
+        )
+        assert not isinstance(root_id, Error)
+        kernel.set_component(root_id, "Stats", {"clicks": 0})
+        kernel.set_component(root_id, "ScriptEvents", {"on_click": f"<|1|{sid_hex}|>.handle_root_click"})
+
+        # 2. Create intermediate container entity (no handler)
+        mid_id = kernel.create_ui_entity(
+            name="MidContainer",
+            component_type="container",
+            parent_id=root_id,
+        )
+        assert not isinstance(mid_id, Error)
+
+        # 3. Create child button entity (no handler)
+        btn_id = kernel.create_ui_entity(
+            name="ChildBtn",
+            component_type="button",
+            parent_id=mid_id,
+            component_props={"label": "Click Me", "on_click": ""},
+        )
+        assert not isinstance(btn_id, Error)
+
+        root_proxy = kernel.get_entity_proxy(root_id)
+        assert root_proxy.uicontainer.collapsed is False
+        assert root_proxy.stats.clicks == 0
+
+        # 4. Test bubble=False: triggering on child button returns None without executing root handler
+        res_no_bubble = kernel.trigger_ui_event(btn_id, "on_click", bubble=False)
+        assert res_no_bubble is None
+        assert root_proxy.uicontainer.collapsed is False
+        assert root_proxy.stats.clicks == 0
+
+        # Also verify via proxy.click(bubble=False)
+        btn_proxy = kernel.get_entity_proxy(btn_id)
+        assert btn_proxy.click(bubble=False) is None
+        assert root_proxy.uicontainer.collapsed is False
+        assert root_proxy.stats.clicks == 0
+
+        # 5. Trigger on_click on child button entity with bubble=True -> verify event bubbles up
+        res_bubble = kernel.trigger_ui_event(btn_id, "on_click", bubble=True)
+        assert res_bubble == "bubbled_to_root"
+        assert root_proxy.uicontainer.collapsed is True
+        assert root_proxy.stats.clicks == 1
+
+        # Also verify via proxy.click() which defaults to bubble=True
+        res_proxy_click = btn_proxy.click()
+        assert res_proxy_click == "bubbled_to_root"
+        assert root_proxy.stats.clicks == 2
+
+    def test_planned_generation_safe_ui_handle_invalidation(self, tmp_path):
+        kernel = Kernel(tmp_path)
+
+        script_code = (
+            'def _fn_on_click(entity):\n'
+            '    return "clicked"\n'
+        )
+        script_id = kernel.create_script_resource(name="GenSafeEvents", code=script_code)
+        assert not isinstance(script_id, Error)
+        sid_hex = kernel.get_storage_id(script_id).hex()
+
+        # Create UI entity
+        stale_handle = kernel.create_ui_entity(
+            name="TargetButton",
+            component_type="button",
+            component_props={"label": "Action", "on_click": f"<|1|{sid_hex}|>._fn_on_click"},
+        )
+        assert not isinstance(stale_handle, Error)
+        assert kernel.is_valid_runtime_id(stale_handle)
+
+        # Delete the UI entity (tombstones the handle and advances slot generation)
+        del_res = kernel.delete_entity(stale_handle)
+        assert not isinstance(del_res, Error)
+        assert not kernel.is_valid_runtime_id(stale_handle)
+
+        # Call kernel.trigger_ui_event(stale_handle, "on_click") -> returns Error with code RuntimeIDNotFoundOnMemoryError
+        err = kernel.trigger_ui_event(stale_handle, "on_click")
+        assert isinstance(err, Error)
+        assert err.code == RuntimeIDNotFoundOnMemoryError
+
+        # Recycle the slot with a new entity (generation bump)
+        new_handle = kernel.create_ui_entity(
+            name="ReplacementButton",
+            component_type="button",
+            component_props={"label": "New Action", "on_click": f"<|1|{sid_hex}|>._fn_on_click"},
+        )
+        assert not isinstance(new_handle, Error)
+        assert kernel.is_valid_runtime_id(new_handle)
+
+        slot_old, gen_old = kernel._unpack_handle(stale_handle)
+        slot_new, gen_new = kernel._unpack_handle(new_handle)
+        assert slot_old == slot_new, "Expected slot index to be recycled"
+        assert gen_new > gen_old, "Expected slot generation to advance"
+
+        # The new entity executes properly
+        res = kernel.trigger_ui_event(new_handle, "on_click")
+        assert res == "clicked"
+
+        # The old stale handle still returns RuntimeIDNotFoundOnMemoryError
+        stale_err = kernel.trigger_ui_event(stale_handle, "on_click")
+        assert isinstance(stale_err, Error)
+        assert stale_err.code == RuntimeIDNotFoundOnMemoryError
 
     def test_planned_ui_subtree_spawning_transactional_rollback(self, tmp_path):
         # If an error occurs midway through instantiating a complex UI template subtree,

@@ -829,12 +829,20 @@ class TestPlannedPillCapabilities:
         """Future: Renaming an internal symbol UID should automatically update call-sites in dependent scripts."""
         pass
 
-    @pytest.mark.skip(
-        reason="Planned test: Failed hot reload rollback preserves prior bytecode when live reloaded script contains syntax error"
-    )
-    def test_planned_hot_reload_rollback_on_syntax_error(self) -> None:
-        """Future: If updated script source fails syntax check, previous valid bytecode remains active in memory."""
-        pass
+    def test_planned_hot_reload_rollback_on_syntax_error(self, tmp_path: Path) -> None:
+        """If updated script source fails syntax check, previous valid bytecode remains active in memory."""
+        import copy
+        kernel = Kernel(tmp_path)
+        script = kernel.create_script_resource(name="MathUtils", code="def _fn_value(): return 7")
+        previous = kernel.get_script_module(script)
+        assert previous["_fn_value"]() == 7
+
+        data = copy.deepcopy(kernel.resources[script]["data"])
+        data["code"] = "def broken(:"
+        assert kernel.mutate_resource(script, data) is None
+        assert kernel.get_script_module(script) is previous
+        assert kernel.get_script_module(script)["_fn_value"]() == 7
+        assert script in kernel.get_diagnostics()["script_reload_errors"]
 
     def test_planned_stale_handle_safety_when_referenced_script_destroyed(self, tmp_path: Path) -> None:
         """Deleting a script resource safely invalidates proxies without crashing callers."""

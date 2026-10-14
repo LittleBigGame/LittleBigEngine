@@ -39,6 +39,5 @@ def test_direct_component_edit_should_be_persisted_or_prevented(tmp_path):
     assert kernel.is_dirty(entity)
 
 
-@pytest.mark.xfail(reason="Known defect: Queue references undefined CommandID / CallerID / ReceiverID")
 def test_queue_module_should_import():
     importlib.import_module("LBE.Queue")

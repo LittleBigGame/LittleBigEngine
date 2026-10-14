@@ -629,11 +629,20 @@ class TestPlannedEngineFeatures:
         assert proxy_b.name == "EntityB"
         assert proxy_b.Transform["x"] == 99.0
 
-    @pytest.mark.skip(reason="Planned test: Hot reload rollback preserves stable system state on syntax error")
-    def test_planned_hot_reload_rollback_on_syntax_error(self):
-        # A live system update that fails compilation must roll back to the previously active
-        # implementation without engine corruption.
-        pass
+    def test_planned_hot_reload_rollback_on_syntax_error(self, tmp_path: Path):
+        """A live system update that fails compilation must roll back to the previously active implementation without engine corruption."""
+        import copy
+        kernel = Kernel(tmp_path)
+        script = kernel.create_script_resource(name="LogicSystem", code="def compute(val): return val * 2")
+        mod = kernel.get_script_module(script)
+        assert mod["compute"](10) == 20
+
+        data = copy.deepcopy(kernel.resources[script]["data"])
+        data["code"] = "def broken(:"
+        assert kernel.mutate_resource(script, data) is None
+        assert kernel.get_script_module(script) is mod
+        assert kernel.get_script_module(script)["compute"](10) == 20
+        assert script in kernel.get_diagnostics()["script_reload_errors"]
 
 
 class TestPhase3SingleControlledMutationAndReadOnlyViews:

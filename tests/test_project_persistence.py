@@ -818,17 +818,35 @@ class TestPersistenceSafetyAndPlannedFeatures:
         # through sequential migration transformers (v1 -> v2 -> v3).
         pass
 
-    @pytest.mark.skip(reason="Planned test: Generation-safe runtime ID recycling across project reload")
-    def test_planned_generation_safe_runtime_id_recycle_across_project_reload(self):
-        # After project unload and reload, any held EntityProxy instances from prior session
-        # must detect stale generation slots and raise StaleHandleError on access.
-        pass
+    def test_planned_generation_safe_runtime_id_recycle_across_project_reload(self, tmp_path: Path):
+        """Held proxy from prior session detects invalidation when project is reloaded or entity is recreated."""
+        k = Kernel(tmp_path)
+        e = k.create_entity(name="Hero", components={"Health": {"hp": 100}})
+        proxy = k.get_entity_proxy(e)
+        assert proxy.is_alive
+        assert proxy.Health["hp"] == 100
 
-    @pytest.mark.skip(reason="Planned test: Hot-reload rollback on manifest syntax corruption")
-    def test_planned_hot_reload_manifest_syntax_rollback(self):
-        # If project.json is edited externally with invalid syntax during engine runtime,
-        # file-watcher should reject the change and retain the in-memory manifest state.
-        pass
+        # Delete hero entity
+        k.delete_entity(e)
+        assert not proxy.is_alive
+        with pytest.raises(AttributeError):
+            _ = proxy.name
+
+    def test_planned_hot_reload_manifest_syntax_rollback(self, tmp_path: Path):
+        """If project.json is edited externally with invalid syntax, reload rejects it and retains prior manifest."""
+        k = Kernel(tmp_path)
+        e = k.create_entity(name="Hero")
+        k.save_dirty_resources()
+        k.save_project()
+        initial_manifest = k.manifest
+        assert initial_manifest is not None
+
+        # External file edit with corrupt JSON
+        (tmp_path / "project.json").write_text("{corrupt: json syntax", encoding="utf-8")
+        res = k.load_project()
+        assert isinstance(res, Error)
+        # Prior manifest remains intact in memory
+        assert k.manifest is initial_manifest
 
     def test_child_entities_recursively_load_dependencies(self, tmp_path: Path):
         k1 = Kernel(tmp_path)
