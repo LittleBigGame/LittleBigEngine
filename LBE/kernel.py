@@ -289,6 +289,10 @@ class Kernel:
         """Resolve a resource by type and hex StorageID into a proxy or loaded resource."""
         return scripts.resolve_proxy(self, resource_type, storage_id_hex)
 
+    def resolve_reference(self, storage_id_hex: str) -> Any | Error:
+        """Resolve a universal 128-bit persistent StorageID (hex string) into a callable, proxy, or resource."""
+        return scripts.resolve_reference(self, storage_id_hex)
+
     def execute_script(
         self,
         source: str,

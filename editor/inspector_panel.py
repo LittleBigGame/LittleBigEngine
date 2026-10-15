@@ -348,6 +348,11 @@ class InspectorPanel:
                 with dpg.group(horizontal=True, parent=self.content_tag):
                     dpg.add_text(f"  - Script [ID: {script_id}]")
                     dpg.add_button(
+                        label="View Code",
+                        callback=lambda s, a, u: self.session.select_script(u),
+                        user_data=script_id,
+                    )
+                    dpg.add_button(
                         label="Detach",
                         callback=self._on_detach_script,
                         user_data=(entity_id, script_id),
@@ -628,7 +633,7 @@ class InspectorPanel:
             getter_ref = comp_data.get("getter") if isinstance(comp_data, Mapping) else None
             setter_ref = comp_data.get("setter") if isinstance(comp_data, Mapping) else None
 
-            with dpg.group(horizontal=True):
+            with dpg.group(horizontal=True) as getter_group:
                 dpg.add_text("Getter:", color=(150, 155, 170))
                 if getter_ref:
                     rendered = render_function_export_pill(
@@ -639,9 +644,11 @@ class InspectorPanel:
                     if not rendered:
                         dpg.add_text(str(getter_ref), color=(200, 200, 200))
                 else:
-                    dpg.add_text("(None)", color=(150, 155, 170))
+                    dpg.add_text("(None - Drop function pill here)", color=(130, 145, 160))
+            dpg.set_item_drop_callback(getter_group, self._on_drop_property_slot)
+            dpg.set_item_user_data(getter_group, (entity_id, comp_name, "getter"))
 
-            with dpg.group(horizontal=True):
+            with dpg.group(horizontal=True) as setter_group:
                 dpg.add_text("Setter:", color=(150, 155, 170))
                 if setter_ref:
                     rendered = render_function_export_pill(
@@ -652,7 +659,9 @@ class InspectorPanel:
                     if not rendered:
                         dpg.add_text(str(setter_ref), color=(200, 200, 200))
                 else:
-                    dpg.add_text("(None - Read-Only)", color=(150, 155, 170))
+                    dpg.add_text("(None - Read-Only / Drop function pill here)", color=(130, 145, 160))
+            dpg.set_item_drop_callback(setter_group, self._on_drop_property_slot)
+            dpg.set_item_user_data(setter_group, (entity_id, comp_name, "setter"))
 
             # -----------------------------------------------------------------
             # Raw Configuration
@@ -929,6 +938,24 @@ class InspectorPanel:
         if comp_name in comps:
             self.session.mutate_component(entity_id, comp_name, {field_name: field_val})
             self.rebuild()
+
+    def _on_drop_property_slot(
+        self, sender: Any, app_data: Any, user_data: tuple[RuntimeID, str, str]
+    ) -> None:
+        """Handle dropping a function export pill onto a Property getter or setter slot."""
+        if not isinstance(app_data, dict):
+            return
+        uuid_val = app_data.get("uuid")
+        if not uuid_val:
+            return
+        entity_id, comp_name, slot_name = user_data
+        comps = self.session.get_components(entity_id)
+        if comp_name not in comps or not isinstance(comps[comp_name], Mapping):
+            return
+        comp_data = dict(_unwrap(comps[comp_name]))
+        comp_data[slot_name] = str(uuid_val).strip()
+        self.session.mutate_component(entity_id, comp_name, comp_data)
+        self.rebuild()
 
     def _on_attach_script(
         self, sender: str | int, app_data: Any, user_data: tuple[RuntimeID, str]

@@ -47,6 +47,10 @@ def _clean_hex_uuid(val: Any) -> str | None:
     if isinstance(val, bytes):
         val = val.hex()
     s = str(val).replace("-", "").strip().lower()
+    if s.startswith("fn_"):
+        s = s[3:]
+    elif s.startswith("_fn_"):
+        s = s[4:]
     if len(s) in (32, 64):
         try:
             bytes.fromhex(s)
@@ -54,6 +58,46 @@ def _clean_hex_uuid(val: Any) -> str | None:
         except ValueError:
             return None
     return None
+
+
+def resolve_reference(self, storage_id_hex: str) -> Any | Error:
+    """Resolve a universal 128-bit persistent StorageID (hex string) into a callable, proxy, or resource."""
+    clean = _clean_hex_uuid(storage_id_hex) or str(storage_id_hex).replace("-", "").strip().lower()
+
+    if hasattr(self, "resolve_function_export"):
+        res = self.resolve_function_export(clean)
+        if not isinstance(res, Error):
+            return res[0]
+
+    try:
+        sid = bytes.fromhex(clean)
+    except ValueError as ex:
+        err = Error(
+            message="Invalid storage ID hex",
+            description=f"Failed to parse storage ID hex '{storage_id_hex}': {ex}",
+            data={"storage_id_hex": storage_id_hex, "error": str(ex)},
+            code=InvalidResourceDataError,
+        )
+        logger.trace("Failed to resolve reference: invalid hex", channel="storage", error=err)
+        return err
+
+    rid = self.get_resource_id(sid)
+    if isinstance(rid, Error):
+        rid = self.load_resource(sid)
+        if isinstance(rid, Error):
+            return rid
+
+    if self.is_entity(rid):
+        return self.get_entity_proxy(rid)
+
+    res = self.get_resource(rid)
+    if isinstance(res, Error):
+        return res
+
+    if isinstance(res, (dict, MappingProxyType)) and res.get("type") == Script:
+        return self.get_script_proxy(rid)
+
+    return res
 
 
 def resolve_proxy(self, resource_type: int, storage_id_hex: str) -> Any | Error:

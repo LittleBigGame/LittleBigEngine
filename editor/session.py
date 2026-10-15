@@ -18,6 +18,8 @@ class EditorSession:
     def __init__(self, kernel: Kernel) -> None:
         self.kernel = kernel
         self._selected_entity_id: RuntimeID | None = None
+        self._selected_script_id: RuntimeID | None = None
+        self.active_code_editor: Any | None = None
         self._selection_listeners: list[Callable[[RuntimeID | None], None]] = []
         self._change_listeners: list[Callable[[], None]] = []
         self._tick_listeners: list[Callable[[float], None]] = []
@@ -66,6 +68,17 @@ class EditorSession:
         self._selected_entity_id = entity_id
         self._route_selection_to_inspectors(entity_id)
         self._notify_selection_changed(entity_id)
+        self._notify_state_changed()
+
+    @property
+    def selected_script_id(self) -> RuntimeID | None:
+        return self._selected_script_id
+
+    def select_script(self, script_id: RuntimeID | None) -> None:
+        """Select a script resource and open it in the active code editor."""
+        self._selected_script_id = script_id
+        if self.active_code_editor is not None and script_id is not None:
+            self.active_code_editor.open_script(script_id)
         self._notify_state_changed()
 
     def set_view_root(self, entity_id: RuntimeID | None) -> None:

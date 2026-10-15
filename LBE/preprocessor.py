@@ -5,6 +5,7 @@ import io
 import re
 import tokenize
 import types
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
 from .types import Error
@@ -35,13 +36,15 @@ _SCANNER_RE = re.compile(
     r'|(?P<single_quote>(?:[rRuUbBfF]{0,2})'
     r'(?:"(?:\\.|[^"\\\r\n])*"'
     r"|'(?:\\.|[^'\\\r\n])*'))"
+    r'|(?P<valid_lbe_ref><lbe\.ref\(\s*["\'](?P<lbe_storage_id>[0-9a-fA-F]+)["\'](?:\s*,\s*["\'](?P<lbe_alias>[^"\']*)["\'])?\s*\)>)'
+    r'|(?P<malformed_lbe_ref><lbe\.ref\([^\r\n]*\)>|<lbe\.ref\([^\r\n]*)'
     r'|(?P<valid_ref><\|(?P<res_type>\d+)\|(?P<storage_id>[0-9a-fA-F]+)\|>)'
     r'|(?P<malformed><\|(?:.*?\|>|[^\r\n]*))'
 )
 
 
 class ReferencePreprocessor:
-    """Preprocesses LittleBigEngine resource reference bracket syntax `<|type|storage_id|>`."""
+    """Preprocesses LittleBigEngine resource reference bracket syntax `<lbe.ref("...")>` and `<|type|storage_id|>`."""
 
     @staticmethod
     def preprocess(
@@ -57,6 +60,13 @@ class ReferencePreprocessor:
                 return match.group(0)
             if match.group("single_quote") is not None:
                 return match.group(0)
+            if match.group("malformed_lbe_ref") is not None:
+                raise _make_syntax_error(
+                    f"Malformed LittleBigEngine reference syntax: {match.group(0)!r}",
+                    source,
+                    filename,
+                    match.start(),
+                )
             if match.group("malformed") is not None:
                 raise _make_syntax_error(
                     f"Malformed LittleBigEngine reference syntax: {match.group(0)!r}",
@@ -64,6 +74,18 @@ class ReferencePreprocessor:
                     filename,
                     match.start(),
                 )
+            if match.group("valid_lbe_ref") is not None:
+                storage_id = match.group("lbe_storage_id")
+                if len(storage_id) not in (32, 64):
+                    raise _make_syntax_error(
+                        f"Invalid reference storage ID length ({len(storage_id)} hex digits). Expected 32 or 64: {match.group(0)!r}",
+                        source,
+                        filename,
+                        match.start(),
+                    )
+                storage_id_lower = storage_id.lower()
+                dependencies.add((-1, storage_id_lower))
+                return f'__lbe_resolve_ref__("{storage_id_lower}")'
             if match.group("valid_ref") is not None:
                 storage_id = match.group("storage_id")
                 if len(storage_id) not in (32, 64):
@@ -94,12 +116,43 @@ class RuntimeBinder:
         filename: str = "<lbe_module>",
     ) -> set[tuple[int, str]]:
         transformed_code, dependencies = ReferencePreprocessor.preprocess(source, filename=filename)
+
+        def __lbe_resolve_ref__(ref_hex: str) -> Any:
+            clean = ref_hex.replace("-", "").strip().lower()
+            if hasattr(kernel, "resolve_reference"):
+                ref = kernel.resolve_reference(clean)
+                if not isinstance(ref, Error):
+                    return ref
+            if hasattr(kernel, "resolve_function_export"):
+                res = kernel.resolve_function_export(clean)
+                if not isinstance(res, Error):
+                    return res[0]
+            try:
+                sid_bytes = bytes.fromhex(clean)
+                rid = kernel.get_resource_id(sid_bytes)
+                if isinstance(rid, Error):
+                    rid = kernel.load_resource(sid_bytes)
+                if not isinstance(rid, Error):
+                    if kernel.is_entity(rid):
+                        return kernel.get_entity_proxy(rid)
+                    elif hasattr(kernel, "get_script_proxy"):
+                        r_data = kernel.get_resource(rid)
+                        if isinstance(r_data, (dict, MappingProxyType)) and r_data.get("type") == 1:
+                            return kernel.get_script_proxy(rid)
+                    return kernel.get_resource(rid)
+            except Exception:
+                pass
+            raise SyntaxError(f"Cannot resolve LittleBigEngine reference '{clean}'")
+
+        module.__dict__["__lbe_resolve_ref__"] = __lbe_resolve_ref__
+
         for res_type, storage_id_hex in dependencies:
-            var_name = f"_{res_type}_{storage_id_hex}"
-            proxy = kernel.resolve_proxy(res_type, storage_id_hex)
-            if isinstance(proxy, Error):
-                raise proxy
-            module.__dict__[var_name] = proxy
+            if res_type != -1:
+                var_name = f"_{res_type}_{storage_id_hex}"
+                proxy = kernel.resolve_proxy(res_type, storage_id_hex)
+                if isinstance(proxy, Error):
+                    raise proxy
+                module.__dict__[var_name] = proxy
 
         compiled = compile(transformed_code, filename, "exec")
         exec(compiled, module.__dict__)
@@ -145,7 +198,16 @@ def extract_script_symbols(source: str) -> dict[str, str]:
     for node in tree.body:
         if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
-        if not node.name.startswith("_fn_"):
+        is_fn_prefixed = node.name.startswith("_fn_") or node.name.startswith("fn_")
+        has_export_decorator = False
+        export_uuid: str | None = None
+        for dec in node.decorator_list:
+            if isinstance(dec, ast.Call) and getattr(dec.func, "id", "") == "export" and dec.args:
+                has_export_decorator = True
+                if isinstance(dec.args[0], ast.Constant) and isinstance(dec.args[0].value, str):
+                    export_uuid = dec.args[0].value
+
+        if not is_fn_prefixed and not has_export_decorator:
             continue
 
         while tok_idx < num_tokens:
@@ -172,7 +234,101 @@ def extract_script_symbols(source: str) -> dict[str, str]:
             cleaned = comments_by_line[colon_line].strip().strip("#").strip()
             if cleaned:
                 display_name = cleaned
+        elif is_fn_prefixed and not colon_line:
+            display_name = node.name
 
         symbols[node.name] = display_name
+        if export_uuid:
+            symbols[export_uuid.lower()] = display_name
 
     return symbols
+
+
+_REF_DISPLAY_RE = re.compile(
+    r'<lbe\.ref\(\s*["\'](?P<sid>[0-9a-fA-F]{32,64})["\'](?:\s*,\s*["\'](?P<alias>[^"\']*)["\'])?\s*\)>'
+)
+
+
+def project_source_to_display(
+    code: str,
+    symbols: dict[str, str] | None = None,
+    kernel: Any = None,
+) -> tuple[str, list[dict[str, Any]]]:
+    """Transform on-disk pure UUID source into human-readable display code for the editor.
+
+    Replaces:
+    - `def fn_<32hex>(` -> `def <display_name>(`
+    - `<lbe.ref("<32hex>")>` -> `<display_name>`
+    Returns (display_code, tokens).
+    """
+    syms = symbols or {}
+    tokens: list[dict[str, Any]] = []
+
+    def _replace_fn_def(m: re.Match) -> str:
+        fn_sym = m.group("fn_sym")
+        display = syms.get(fn_sym)
+        clean_uuid = fn_sym[3:] if fn_sym.startswith("fn_") else (fn_sym[4:] if fn_sym.startswith("_fn_") else fn_sym)
+        if not display:
+            display = syms.get(clean_uuid.lower(), fn_sym)
+        tokens.append({
+            "type": "function_def",
+            "name": display,
+            "uuid": clean_uuid.lower(),
+            "symbol": fn_sym,
+        })
+        return f"{m.group('prefix')}{display}("
+
+    # Replace function definitions
+    fn_def_re = re.compile(r'(?P<prefix>(?:def|async\s+def)\s+)(?P<fn_sym>(?:_fn_|fn_)[0-9a-fA-F]{32,64})\s*\(')
+    out = fn_def_re.sub(_replace_fn_def, code)
+
+    # Replace <lbe.ref("...")>
+    def _replace_ref(m: re.Match) -> str:
+        sid = m.group("sid").lower()
+        alias = m.group("alias")
+        display = alias
+        if not display and kernel is not None:
+            try:
+                sid_bytes = bytes.fromhex(sid)
+                if hasattr(kernel, "get_resource_id"):
+                    rid = kernel.get_resource_id(sid_bytes)
+                    if not isinstance(rid, Error) and hasattr(kernel, "get_resource"):
+                        res = kernel.get_resource(rid)
+                        if isinstance(res, (dict, MappingProxyType)) and res.get("name"):
+                            display = res["name"]
+            except Exception:
+                pass
+        if not display:
+            display = syms.get(sid, f"Ref_{sid[:8]}")
+
+        tokens.append({
+            "type": "ref",
+            "name": display,
+            "uuid": sid,
+            "raw": m.group(0),
+        })
+        return display
+
+    out = _REF_DISPLAY_RE.sub(_replace_ref, out)
+    return out, tokens
+
+
+def project_display_to_source(
+    display_code: str,
+    symbols: dict[str, str] | None = None,
+    kernel: Any = None,
+) -> str:
+    """Transform human-readable display code back to persistent on-disk UUID source."""
+    syms = symbols or {}
+    out = display_code
+
+    # Inverse mapping for function definitions: display_name -> fn_<uuid>
+    for sym_key, disp_name in syms.items():
+        if not disp_name or sym_key == disp_name:
+            continue
+        if sym_key.startswith("fn_") or sym_key.startswith("_fn_"):
+            pat = re.compile(rf'(def|async\s+def)\s+{re.escape(disp_name)}\s*\(')
+            out = pat.sub(rf'\1 {sym_key}(', out)
+
+    return out
+

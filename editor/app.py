@@ -7,6 +7,7 @@ import dearpygui.dearpygui as dpg
 
 from LBE.kernel import Kernel
 from LBE.types import RuntimeID
+from .code_editor_panel import CodeEditorPanel
 from .hierarchy_panel import HierarchyPanel
 from .inspector_panel import InspectorPanel
 from .session import EditorSession
@@ -135,6 +136,10 @@ class EditorApp:
         self.storage_panel = StoragePanel(self.session)
         self.storage_panel.build()
 
+        self.code_editor_panel = CodeEditorPanel(self.session)
+        self.code_editor_panel.build()
+        self.session.active_code_editor = self.code_editor_panel
+
         self.extra_inspectors: list[InspectorPanel] = []
         self.session.spawn_inspector = self.spawn_inspector
         self.session.active_viewport = self.viewport_panel
@@ -191,6 +196,10 @@ class EditorApp:
                 dpg.add_menu_item(
                     label="Toggle Storage",
                     callback=lambda: self.toggle_window("window_storage"),
+                )
+                dpg.add_menu_item(
+                    label="Toggle Code Editor",
+                    callback=lambda: self.toggle_window("window_code_editor"),
                 )
 
     def spawn_inspector(

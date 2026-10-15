@@ -17,12 +17,13 @@ Date: 15 October 2026. This describes verified behavior, not every future design
 | 9 — Pure-UUID Exports & Property Components | Functions export under 128-bit hex UUIDs (`@export`). Dynamic `Property` components support computed properties, converters, and references with dynamic evaluation, cycle detection, read-only enforcement, and DPG inspector presentation. |
 | 10 — Showcase Mini-Game | "The Dungeon of Alchemia" top-down showcase with WASD/arrow keyboard input, linked multi-orbit physics (`Excalibur`, `OrbOfPower`, `ShieldSatellite`), reactive enemy AI with spatial state transitions, and an interactive `AlchemistToolkit` desktop HUD. |
 | 11 — 2D Platformer & Parent Value Projection | "The Alchemical Jumper" 2D platformer default template with gravity, horizontal run, jump/double-jump impulse, AABB platform collision resolution, moving platform ride-along, coin pickups, enemy stomp, and hazard pit respawns. Scene View renders crisp rectangular platforms with grass ledges and golden coins/diamonds. Billboard UI widgets (`UISlider`) project live parent properties (`parent.LivesPercent`, `parent.HealthPercent`) dynamically. |
+| 12 — `<lbe.ref("uid")>` Syntax, Code Editor & Draggable Tokens | Validated AST/regex preprocessing for `<lbe.ref("uid")>` resolving entities and functions without `eval()`; pure 128-bit hex UUID function definitions on disk (`def fn_<uuid>`); bidirectional projection between disk source and human display names; in-editor dockable `CodeEditorPanel` with live hot-reloading; and seamless in-code token pills that appear as plain code text until hovered, revealing a crisp outline box with tooltip and drag payload for binding directly into Inspector slots. |
 
-All stabilization phases and feature extensions through Phase E + 2D Platformer are implemented.
+All stabilization phases and feature extensions through Phase 12 are implemented.
 
 ## Verification
 
-- Full suite: **465 passed, 15 skipped**, no failures or unexpected passes.
+- Full suite: **478 passed, 15 skipped**, no failures or unexpected passes.
 - Ruff: **passed** across `LBE editor tools tests main.py`.
 - Architecture import check: **passed**, all 14 engine modules.
 - Independent architecture review: **PASS**, no unresolved critical or major findings.

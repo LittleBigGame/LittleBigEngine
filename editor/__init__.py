@@ -1,14 +1,17 @@
 """LittleBigEngine Dear PyGui Editor package."""
 
 from .app import EditorApp
+from .code_editor_panel import CodeEditorPanel
 from .hierarchy_panel import HierarchyPanel
 from .inspector_panel import InspectorPanel
 from .pills import (
     PillData,
     get_available_function_pills,
+    get_code_token_pill_theme,
     get_pill_theme,
     parse_reference_pill,
     rename_script_function_display_name,
+    render_code_token_pill,
     render_function_export_pill,
 )
 from .session import EditorSession
@@ -36,6 +39,7 @@ __all__ = [
     "ACCENT_BLUE",
     "CARD_BG",
     "CARD_BORDER",
+    "CodeEditorPanel",
     "EditorApp",
     "EditorSession",
     "HierarchyPanel",
@@ -53,9 +57,11 @@ __all__ = [
     "draw_window_chrome",
     "get_available_function_pills",
     "get_card_theme",
+    "get_code_token_pill_theme",
     "get_flyout_theme",
     "get_pill_theme",
     "parse_reference_pill",
     "rename_script_function_display_name",
+    "render_code_token_pill",
     "render_function_export_pill",
 ]

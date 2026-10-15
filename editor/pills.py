@@ -46,6 +46,31 @@ def get_pill_theme() -> str:
     return tag
 
 
+def get_code_token_pill_theme() -> str:
+    """Return a Dear PyGui theme for in-code reference tokens.
+
+    Appears as pure text matching normal code color with transparent background and border.
+    On hover, reveals a crisp outline border box, subtle background, and drag indicator.
+    """
+    tag = "lbe_theme_code_token_pill"
+    if _is_theme_valid(tag):
+        return tag
+    if dpg.does_item_exist(tag):
+        dpg.delete_item(tag)
+    with dpg.theme(tag=tag):
+        with dpg.theme_component(dpg.mvButton):
+            dpg.add_theme_color(dpg.mvThemeCol_Button, (0, 0, 0, 0))
+            dpg.add_theme_color(dpg.mvThemeCol_ButtonHovered, (35, 48, 68, 220))
+            dpg.add_theme_color(dpg.mvThemeCol_ButtonActive, (45, 68, 98, 255))
+            dpg.add_theme_color(dpg.mvThemeCol_Border, (0, 0, 0, 0))
+            dpg.add_theme_color(dpg.mvThemeCol_BorderShadow, (0, 0, 0, 0))
+            dpg.add_theme_color(dpg.mvThemeCol_Text, (220, 225, 235, 255))
+            dpg.add_theme_style(dpg.mvStyleVar_FrameBorderSize, 1)
+            dpg.add_theme_style(dpg.mvStyleVar_FrameRounding, 3)
+            dpg.add_theme_style(dpg.mvStyleVar_FramePadding, 2, 0)
+    return tag
+
+
 @dataclass(slots=True)
 class PillData:
     """Projected visual pill token representation for an engine resource or script function."""
@@ -285,6 +310,51 @@ def render_function_export_pill(
     with dpg.tooltip(btn):
         dpg.add_text(f"Export UUID: {fn_uuid_hex.strip()}")
     return True
+
+
+def render_code_token_pill(
+    display_name: str,
+    uuid_hex: str,
+    token_type: str = "function",
+    kernel: Any = None,
+    callback: Any = None,
+    user_data: Any = None,
+    parent: Any = None,
+) -> int | str:
+    """Render an in-code token pill that looks like plain code text until hovered.
+
+    On hover: reveals crisp outline border box, background highlight, tooltip with persistent UUID,
+    and supports click-and-drag out of the editor via Dear PyGui drag payload.
+    """
+    clean_uuid = uuid_hex.strip().lower()
+    kwargs: dict[str, Any] = {"label": display_name}
+    if parent is not None:
+        kwargs["parent"] = parent
+    if callback is not None:
+        kwargs["callback"] = callback
+        kwargs["user_data"] = user_data if user_data is not None else clean_uuid
+
+    btn = dpg.add_button(**kwargs)
+    dpg.bind_item_theme(btn, get_code_token_pill_theme())
+
+    with dpg.tooltip(btn):
+        dpg.add_text(f"Persistent UUID: {clean_uuid}")
+        dpg.add_text(f"Name: {display_name}")
+        dpg.add_text("Drag to export / bind", color=(100, 180, 255, 255))
+
+    with dpg.drag_payload(
+        parent=btn,
+        drag_data={
+            "type": "LBE_REF",
+            "uuid": clean_uuid,
+            "name": display_name,
+            "token_type": token_type,
+        },
+        payload_type="LBE_REF_PILL",
+    ):
+        dpg.add_text(f"[{display_name}] ({clean_uuid[:8]}...)")
+
+    return btn
 
 
 def get_available_function_pills(kernel: Any) -> list[PillData]:
