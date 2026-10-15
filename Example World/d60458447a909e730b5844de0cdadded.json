@@ -1,0 +1,15 @@
+{
+    "type": 1,
+    "data": {
+        "name": "MovingPlatformScript",
+        "source_path": "",
+        "code": "def update(self, dt):\n    mp = self.MovingPlatformData\n    min_x = float(mp.get(\"min_x\", 220.0))\n    max_x = float(mp.get(\"max_x\", 400.0))\n    spd = float(mp.get(\"speed\", 60.0))\n    dir_x = float(mp.get(\"direction\", 1.0))\n\n    new_x = float(self.Transform.x) + spd * dir_x * dt\n    if new_x >= max_x:\n        new_x = max_x\n        mp[\"direction\"] = -1.0\n    elif new_x <= min_x:\n        new_x = min_x\n        mp[\"direction\"] = 1.0\n    self.Transform.x = new_x\n",
+        "requires": [
+            "Transform",
+            "Platform",
+            "MovingPlatformData"
+        ],
+        "symbols": {}
+    },
+    "name": "MovingPlatformScript"
+}

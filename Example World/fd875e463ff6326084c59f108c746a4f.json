@@ -1,0 +1,22 @@
+{
+    "type": 0,
+    "data": {
+        "components": {
+            "Transform": {
+                "x": 0.0,
+                "y": -26.0,
+                "z": 0.0
+            },
+            "UIText": {
+                "content": "Jumper Hero",
+                "bullet": false
+            }
+        },
+        "resources": [],
+        "scripts": [],
+        "children": [],
+        "parent": "9a223346e66908809f01ea6473761e40"
+    },
+    "name": "PlayerNameTag",
+    "children": []
+}

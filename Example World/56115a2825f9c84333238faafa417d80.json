@@ -1,0 +1,23 @@
+{
+    "type": 0,
+    "data": {
+        "components": {
+            "Transform": {
+                "x": 280.0,
+                "y": 185.0,
+                "z": 0.0
+            },
+            "Collectible": {
+                "type": "coin",
+                "value": 1,
+                "collected": false
+            }
+        },
+        "resources": [],
+        "scripts": [],
+        "children": [],
+        "parent": "9f5438fc0cf3339fbc662aadf414447c"
+    },
+    "name": "Coin2",
+    "children": []
+}

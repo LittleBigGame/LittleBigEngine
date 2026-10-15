@@ -1,0 +1,23 @@
+{
+    "type": 0,
+    "data": {
+        "components": {
+            "Transform": {
+                "x": 280.0,
+                "y": 220.0,
+                "z": 0.0
+            },
+            "Platform": {
+                "width": 110.0,
+                "height": 18.0,
+                "one_way": true
+            }
+        },
+        "resources": [],
+        "scripts": [],
+        "children": [],
+        "parent": "9f5438fc0cf3339fbc662aadf414447c"
+    },
+    "name": "PlatformMid",
+    "children": []
+}

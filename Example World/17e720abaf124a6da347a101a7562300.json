@@ -1,0 +1,52 @@
+{
+    "type": 0,
+    "data": {
+        "components": {
+            "Transform": {
+                "x": 441.44824787612606,
+                "y": 200.0,
+                "z": 0.0
+            },
+            "Health": {
+                "current": 50.0,
+                "max": 50.0
+            },
+            "AI": {
+                "aggro_radius": 150.0,
+                "patrol_center_x": 400.0,
+                "patrol_center_y": 200.0,
+                "radius": 45.0,
+                "angle": 22.91666666666667,
+                "state": "patrol",
+                "speed": 55.0
+            },
+            "Property:DistanceToPlayer": {
+                "getter": "a1000000000000000000000000000007",
+                "presentation": "text"
+            },
+            "Property:HealthPercent": {
+                "getter": "a1000000000000000000000000000001",
+                "setter": "a1000000000000000000000000000002",
+                "presentation": "slider",
+                "presentation_args": {
+                    "min": 0.0,
+                    "max": 100.0
+                }
+            }
+        },
+        "resources": [],
+        "scripts": [
+            "182e37d465e78c476052495bc5e47636"
+        ],
+        "children": [
+            "74b478f941040ac8bdb062eb47472ca2",
+            "89950a0e8a2adfd447177de7e4b0386f"
+        ],
+        "parent": "9f5438fc0cf3339fbc662aadf414447c"
+    },
+    "name": "Goblin",
+    "children": [
+        "74b478f941040ac8bdb062eb47472ca2",
+        "89950a0e8a2adfd447177de7e4b0386f"
+    ]
+}

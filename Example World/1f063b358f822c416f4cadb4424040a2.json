@@ -1,0 +1,22 @@
+{
+    "type": 0,
+    "data": {
+        "components": {
+            "Transform": {
+                "x": 0.0,
+                "y": -38.0,
+                "z": 0.0
+            },
+            "UIText": {
+                "content": "Hero",
+                "bullet": false
+            }
+        },
+        "resources": [],
+        "scripts": [],
+        "children": [],
+        "parent": "9a223346e66908809f01ea6473761e40"
+    },
+    "name": "HeroTag",
+    "children": []
+}

@@ -1,0 +1,31 @@
+{
+    "type": 0,
+    "data": {
+        "components": {
+            "Transform": {
+                "x": 345.0,
+                "y": 260.0,
+                "z": 0.0
+            },
+            "Platform": {
+                "width": 90.0,
+                "height": 16.0,
+                "one_way": true
+            },
+            "MovingPlatformData": {
+                "min_x": 220.0,
+                "max_x": 400.0,
+                "speed": 60.0,
+                "direction": 1.0
+            }
+        },
+        "resources": [],
+        "scripts": [
+            "d60458447a909e730b5844de0cdadded"
+        ],
+        "children": [],
+        "parent": "9f5438fc0cf3339fbc662aadf414447c"
+    },
+    "name": "MovingPlatform",
+    "children": []
+}

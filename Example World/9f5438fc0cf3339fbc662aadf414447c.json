@@ -1,0 +1,42 @@
+{
+    "type": 0,
+    "data": {
+        "components": {},
+        "resources": [],
+        "scripts": [
+            "84fd0b12731ad770c3789b6912cb2c86"
+        ],
+        "children": [
+            "9a223346e66908809f01ea6473761e40",
+            "366ea036fe2ff87653c964fc26b4c02e",
+            "60d52f10dd70ff357fd1d500c0513f5f",
+            "73048435c41e0490f1170611572e1bbf",
+            "bc43caa05c7eb055fcac4d4bec88a6f6",
+            "e6b88db56d3efe4f14f7fbc9c34de316",
+            "9499c1a4d54ef9bb33ed20db44c56c40",
+            "56115a2825f9c84333238faafa417d80",
+            "1c29458d338c732bdb33d5fa3b6c09e5",
+            "3b0da82b598ec7bbe18ac0986b7e2e03",
+            "17e720abaf124a6da347a101a7562300",
+            "fdd3cd8755fe63c4264da115398ac7a4",
+            "8a8410fc77a62c86649357dcf86a49ba"
+        ],
+        "parent": "2e4b8702e1e9514338d026d79d39f704"
+    },
+    "name": "Game",
+    "children": [
+        "9a223346e66908809f01ea6473761e40",
+        "366ea036fe2ff87653c964fc26b4c02e",
+        "60d52f10dd70ff357fd1d500c0513f5f",
+        "73048435c41e0490f1170611572e1bbf",
+        "bc43caa05c7eb055fcac4d4bec88a6f6",
+        "e6b88db56d3efe4f14f7fbc9c34de316",
+        "9499c1a4d54ef9bb33ed20db44c56c40",
+        "56115a2825f9c84333238faafa417d80",
+        "1c29458d338c732bdb33d5fa3b6c09e5",
+        "3b0da82b598ec7bbe18ac0986b7e2e03",
+        "17e720abaf124a6da347a101a7562300",
+        "fdd3cd8755fe63c4264da115398ac7a4",
+        "8a8410fc77a62c86649357dcf86a49ba"
+    ]
+}

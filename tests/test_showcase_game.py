@@ -71,7 +71,7 @@ class TestShowcaseHierarchyAndEntities:
 
     def test_showcase_hierarchy_and_entities(self, tmp_path: Path):
         kernel = Kernel(tmp_path)
-        populate_demo_world_if_empty(kernel)
+        populate_demo_world_if_empty(kernel, template="dungeon")
 
         # 1. Root Application
         roots = [
@@ -169,7 +169,7 @@ class TestShowcaseProperties:
 
     def test_showcase_properties(self, tmp_path: Path):
         kernel = Kernel(tmp_path)
-        populate_demo_world_if_empty(kernel)
+        populate_demo_world_if_empty(kernel, template="dungeon")
 
         player = _find_entity_by_name(kernel, "Player")
         goblin = _find_entity_by_name(kernel, "Goblin")
@@ -222,7 +222,7 @@ class TestShowcaseProperties:
 
     def test_property_edge_cases_and_error_handling(self, tmp_path: Path):
         kernel = Kernel(tmp_path)
-        populate_demo_world_if_empty(kernel)
+        populate_demo_world_if_empty(kernel, template="dungeon")
 
         player = _find_entity_by_name(kernel, "Player")
         assert player is not None
@@ -241,7 +241,7 @@ class TestPlayerKeyboardMovementAndBounds:
 
     def test_player_keyboard_movement_and_bounds(self, tmp_path: Path):
         kernel = Kernel(tmp_path)
-        populate_demo_world_if_empty(kernel)
+        populate_demo_world_if_empty(kernel, template="dungeon")
 
         player = _find_entity_by_name(kernel, "Player")
         assert player is not None
@@ -307,7 +307,7 @@ class TestOrbitalWeaponPhysics:
 
     def test_orbital_weapon_physics(self, tmp_path: Path):
         kernel = Kernel(tmp_path)
-        populate_demo_world_if_empty(kernel)
+        populate_demo_world_if_empty(kernel, template="dungeon")
 
         player = _find_entity_by_name(kernel, "Player")
         assert player is not None
@@ -358,7 +358,7 @@ class TestEnemyAIPatrolAndChase:
 
     def test_enemy_ai_patrol_and_chase(self, tmp_path: Path):
         kernel = Kernel(tmp_path)
-        populate_demo_world_if_empty(kernel)
+        populate_demo_world_if_empty(kernel, template="dungeon")
 
         player = _find_entity_by_name(kernel, "Player")
         goblin = _find_entity_by_name(kernel, "Goblin")
@@ -385,7 +385,7 @@ class TestEnemyAIPatrolAndChase:
 
     def test_slime_ai_aggro_transition(self, tmp_path: Path):
         kernel = Kernel(tmp_path)
-        populate_demo_world_if_empty(kernel)
+        populate_demo_world_if_empty(kernel, template="dungeon")
 
         player = _find_entity_by_name(kernel, "Player")
         slime = _find_entity_by_name(kernel, "DungeonSlime")
@@ -410,7 +410,7 @@ class TestPotionButtonActionDispatch:
 
     def test_potion_button_action_dispatch(self, tmp_path: Path):
         kernel = Kernel(tmp_path)
-        populate_demo_world_if_empty(kernel)
+        populate_demo_world_if_empty(kernel, template="dungeon")
 
         player = _find_entity_by_name(kernel, "Player")
         toolkit = _find_entity_by_name(kernel, "AlchemistToolkit")
@@ -445,7 +445,7 @@ class TestPotionButtonActionDispatch:
 
     def test_potion_capping_and_safety(self, tmp_path: Path):
         kernel = Kernel(tmp_path)
-        populate_demo_world_if_empty(kernel)
+        populate_demo_world_if_empty(kernel, template="dungeon")
 
         player = _find_entity_by_name(kernel, "Player")
         toolkit = _find_entity_by_name(kernel, "AlchemistToolkit")
@@ -478,7 +478,7 @@ class TestOverheadUIBillboardSynchronization:
 
     def test_overhead_ui_slider_synchronization(self, tmp_path: Path):
         kernel = Kernel(tmp_path)
-        populate_demo_world_if_empty(kernel)
+        populate_demo_world_if_empty(kernel, template="dungeon")
 
         player = _find_entity_by_name(kernel, "Player")
         goblin = _find_entity_by_name(kernel, "Goblin")
@@ -519,7 +519,7 @@ class TestHeadlessSimulationRunner:
 
     def test_run_headless_simulation_integration(self, tmp_path: Path, capsys):
         kernel = Kernel(tmp_path)
-        populate_demo_world_if_empty(kernel)
+        populate_demo_world_if_empty(kernel, template="dungeon")
 
         # Run 5 ticks of headless simulation
         run_headless_simulation(kernel, ticks=5)
@@ -536,7 +536,7 @@ class TestShowcasePersistenceAndStaleSafety:
 
     def test_persistence_roundtrip_and_reload(self, tmp_path: Path):
         kernel = Kernel(tmp_path)
-        populate_demo_world_if_empty(kernel)
+        populate_demo_world_if_empty(kernel, template="dungeon")
 
         player = _find_entity_by_name(kernel, "Player")
         assert player is not None
@@ -555,7 +555,7 @@ class TestShowcasePersistenceAndStaleSafety:
         k2 = Kernel(tmp_path)
         k2.load_project()
         # Calling populate_demo_world_if_empty on non-empty world must NOT overwrite or duplicate
-        populate_demo_world_if_empty(k2)
+        populate_demo_world_if_empty(k2, template="dungeon")
 
         reloaded_player = _find_entity_by_name(k2, "Player")
         assert reloaded_player is not None
@@ -570,7 +570,7 @@ class TestShowcasePersistenceAndStaleSafety:
 
     def test_stale_handle_safety_after_deletion(self, tmp_path: Path):
         kernel = Kernel(tmp_path)
-        populate_demo_world_if_empty(kernel)
+        populate_demo_world_if_empty(kernel, template="dungeon")
 
         toolkit = _find_entity_by_name(kernel, "AlchemistToolkit")
         assert toolkit is not None

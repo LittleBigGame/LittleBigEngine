@@ -1,0 +1,13 @@
+{
+    "type": 1,
+    "data": {
+        "name": "OrbitalCompanionScript",
+        "source_path": "",
+        "code": "import math\n\ndef update(self, dt):\n    for weapon in self.children:\n        w_comp = weapon.get(\"Weapon\") or weapon.get(\"Shield\")\n        if w_comp:\n            rad = float(w_comp.get(\"orbit_radius\", 28.0))\n            spd = float(w_comp.get(\"orbit_speed\", 120.0))\n            cur_angle = (float(w_comp.get(\"angle\", 0.0)) + spd * dt) % 360.0\n            w_comp[\"angle\"] = cur_angle\n            weapon.Transform.x = rad * math.cos(math.radians(cur_angle))\n            weapon.Transform.y = rad * math.sin(math.radians(cur_angle))\n            weapon.Transform.rot_z = cur_angle\n",
+        "requires": [
+            "Transform"
+        ],
+        "symbols": {}
+    },
+    "name": "OrbitalCompanionScript"
+}

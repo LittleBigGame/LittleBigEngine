@@ -1,0 +1,21 @@
+{
+    "type": 0,
+    "data": {
+        "components": {
+            "UIContainer": {
+                "layout": "vertical",
+                "gap": 4.0,
+                "padding": 4.0,
+                "columns": 2,
+                "collapsible": false,
+                "collapsed": false
+            }
+        },
+        "resources": [],
+        "scripts": [],
+        "children": [],
+        "parent": "4b50196a90a06ca513cd8c98a580a283"
+    },
+    "name": "ComponentContainer",
+    "children": []
+}

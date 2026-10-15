@@ -15,13 +15,14 @@ Date: 15 October 2026. This describes verified behavior, not every future design
 | 7 — Editor reliability and overhead | Failures appear in a bounded error history and status bar. Reload-all is transactional and GUI reload requires confirmation when dirty. Logging filters before allocation and bounds history; hierarchy registry leaks and duplicate selection rebuilds are fixed. |
 | 8 — Tooling and handoff | Production, editor, tests and tools pass Ruff. All engine modules are checked for forbidden GUI/backend imports. Package metadata, optional editor/dev dependencies, an installable launcher and a normal README are present. |
 | 9 — Pure-UUID Exports & Property Components | Functions export under 128-bit hex UUIDs (`@export`). Dynamic `Property` components support computed properties, converters, and references with dynamic evaluation, cycle detection, read-only enforcement, and DPG inspector presentation. |
-| 10 — Showcase Mini-Game | "The Dungeon of Alchemia" in `Example World` with WASD/arrow keyboard input, linked multi-orbit physics (`Excalibur`, `OrbOfPower`, `ShieldSatellite`), reactive enemy AI with spatial state transitions, and an interactive `AlchemistToolkit` desktop HUD. |
+| 10 — Showcase Mini-Game | "The Dungeon of Alchemia" top-down showcase with WASD/arrow keyboard input, linked multi-orbit physics (`Excalibur`, `OrbOfPower`, `ShieldSatellite`), reactive enemy AI with spatial state transitions, and an interactive `AlchemistToolkit` desktop HUD. |
+| 11 — 2D Platformer & Parent Value Projection | "The Alchemical Jumper" 2D platformer default template with gravity, horizontal run, jump/double-jump impulse, AABB platform collision resolution, moving platform ride-along, coin pickups, enemy stomp, and hazard pit respawns. Scene View renders crisp rectangular platforms with grass ledges and golden coins/diamonds. Billboard UI widgets (`UISlider`) project live parent properties (`parent.LivesPercent`, `parent.HealthPercent`) dynamically. |
 
-All stabilization phases and feature extensions through Phase E are implemented.
+All stabilization phases and feature extensions through Phase E + 2D Platformer are implemented.
 
 ## Verification
 
-- Full suite: **441 passed, 12 skipped**, no failures or unexpected passes.
+- Full suite: **465 passed, 15 skipped**, no failures or unexpected passes.
 - Ruff: **passed** across `LBE editor tools tests main.py`.
 - Architecture import check: **passed**, all 14 engine modules.
 - Independent architecture review: **PASS**, no unresolved critical or major findings.
@@ -35,7 +36,7 @@ See [TESTING.md](TESTING.md) for commands and scope.
 
 `main.py` opens `Example World` beside its source file and Application `2e4b8702e1e9514338d026d79d39f704` by persistent ID. `--world` and `--application-id` select a different existing project/root. Missing selected data reports an error without creating another Application.
 
-The retained graph contains 24 resources, including 23 entities, with zero broken references. The 62 old Application trees and 1,366 exclusive resource files were archived during the earlier cleanup. Unrelated/shared files remain stored but are not mounted by the default startup.
+The retained graph contains 43 resources, including 38 entities, with zero broken references. The 62 old Application trees and 1,366 exclusive resource files were archived during the earlier cleanup. Unrelated/shared files remain stored but are not mounted by the default startup.
 
 Full pre-cleanup backup: `F:\ModEngine-backups\application-cleanup-20261014-202325\Example World`.
 

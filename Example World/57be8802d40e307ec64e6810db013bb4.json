@@ -1,0 +1,20 @@
+{
+    "type": 0,
+    "data": {
+        "components": {
+            "UITextInput": {
+                "label": "",
+                "text": "",
+                "hint": "Search hierarchy...",
+                "is_search": true,
+                "on_change": ""
+            }
+        },
+        "resources": [],
+        "scripts": [],
+        "children": [],
+        "parent": "3c8409753f94b420cb3b46e1367a613f"
+    },
+    "name": "SearchInput",
+    "children": []
+}

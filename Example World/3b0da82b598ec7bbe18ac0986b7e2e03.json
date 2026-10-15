@@ -1,0 +1,21 @@
+{
+    "type": 0,
+    "data": {
+        "components": {
+            "Transform": {
+                "x": 450.0,
+                "y": 130.0,
+                "z": 0.0
+            },
+            "Goal": {
+                "reached": false
+            }
+        },
+        "resources": [],
+        "scripts": [],
+        "children": [],
+        "parent": "9f5438fc0cf3339fbc662aadf414447c"
+    },
+    "name": "GoalFlag",
+    "children": []
+}

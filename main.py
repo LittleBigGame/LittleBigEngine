@@ -16,7 +16,7 @@ DEFAULT_APPLICATION_ID = "2e4b8702e1e9514338d026d79d39f704"
 DEFAULT_WORLD_PATH = Path(__file__).resolve().parent / "Example World"
 
 
-def populate_demo_world_if_empty(kernel) -> None:
+def populate_dungeon_world_if_empty(kernel) -> None:
     """Populate the world with 'The Dungeon of Alchemia' showcase scene hierarchy."""
     if any(kernel.is_entity(rid) for rid in kernel.resources):
         # Existing entities found, do not overwrite/inject demo world
@@ -534,6 +534,663 @@ def update(self, dt):
     kernel.save_dirty_resources()
 
 
+def populate_platformer_world_if_empty(kernel) -> None:
+    """Populate the world with 'The Alchemical Jumper' 2D platformer scene hierarchy."""
+    if any(kernel.is_entity(rid) for rid in kernel.resources):
+        for rid in kernel.resources:
+            if kernel.is_entity(rid):
+                proxy = kernel.get_entity_proxy(rid)
+                if not isinstance(proxy, Exception) and proxy.has("Transform"):
+                    proxy.transform.setdefault("x", 0.0)
+                    proxy.transform.setdefault("y", 0.0)
+                    proxy.transform.setdefault("z", 0.0)
+                    proxy.transform.setdefault("rot_z", 0.0)
+        return
+
+    # 1. Create Application Root
+    app_root = kernel.create_entity(
+        name="Application",
+        storage_id=bytes.fromhex(DEFAULT_APPLICATION_ID) if DEFAULT_APPLICATION_ID else None,
+    )
+
+    # 2. Create Game branch under Application
+    game_branch = kernel.create_entity(name="Game", parent_id=app_root)
+
+    UUID_HEALTH_GET = "a1000000000000000000000000000001"
+    UUID_HEALTH_SET = "a1000000000000000000000000000002"
+    UUID_COINS_GET = "a1000000000000000000000000000003"
+    UUID_COINS_SET = "a1000000000000000000000000000004"
+    UUID_SPEED_GET = "a1000000000000000000000000000005"
+    UUID_SPEED_SET = "a1000000000000000000000000000006"
+    UUID_DIST_GET = "a1000000000000000000000000000007"
+    UUID_HEAL_ACT = "a1000000000000000000000000000008"
+    UUID_SUPER_JUMP_ACT = "a1000000000000000000000000000009"
+    UUID_RESPAWN_ACT = "a100000000000000000000000000000a"
+    UUID_CHILD_HEALTH_GET = "a100000000000000000000000000000b"
+
+    # 3. Create Scripts with @export functions
+    alchemical_logic_code = f"""import math
+
+def _find_player(entity):
+    world = getattr(entity, "world", None)
+    if world is not None and hasattr(world, "query"):
+        for p in world.query("Health", "Stats"):
+            if "player" in (getattr(p, "name", "") or "").lower():
+                return p
+        for p in world.query("Health"):
+            if "player" in (getattr(p, "name", "") or "").lower():
+                return p
+    return None
+
+@export("{UUID_HEALTH_GET}")
+def health_percent_get(entity):
+    max_hp = float(entity.Health.max)
+    if max_hp <= 0.0:
+        return 0.0
+    return (float(entity.Health.current) / max_hp) * 100.0
+
+@export("{UUID_HEALTH_SET}")
+def health_percent_set(entity, val):
+    entity.Health.current = float(entity.Health.max) * (float(val) / 100.0)
+
+@export("{UUID_COINS_GET}")
+def coins_percent_get(entity):
+    stats = getattr(entity, "Stats", None)
+    if stats is None:
+        return 0.0
+    max_coins = float(getattr(stats, "max_coins", 0))
+    if max_coins <= 0.0:
+        return 0.0
+    return (float(getattr(stats, "coins", 0)) / max_coins) * 100.0
+
+@export("{UUID_COINS_SET}")
+def coins_percent_set(entity, val):
+    stats = getattr(entity, "Stats", None)
+    if stats is not None:
+        max_coins = float(getattr(stats, "max_coins", 0))
+        stats.coins = int(max_coins * (float(val) / 100.0))
+
+@export("{UUID_SPEED_GET}")
+def speed_meters_get(entity):
+    return float(entity.Stats.speed) / 100.0
+
+@export("{UUID_SPEED_SET}")
+def speed_meters_set(entity, val):
+    entity.Stats.speed = float(val) * 100.0
+
+@export("{UUID_DIST_GET}")
+def distance_to_player_get(entity):
+    player = _find_player(entity)
+    if player is not None:
+        return math.hypot(float(entity.Transform.x) - float(player.Transform.x), float(entity.Transform.y) - float(player.Transform.y))
+    return 0.0
+
+@export("{UUID_HEAL_ACT}")
+def heal_elixir_action(entity):
+    player = _find_player(entity)
+    if player is not None and player.has("Health"):
+        player.Health.current = min(float(player.Health.max), float(player.Health.current) + 1.0)
+
+@export("{UUID_SUPER_JUMP_ACT}")
+def super_jump_action(entity):
+    player = _find_player(entity)
+    if player is not None and player.has("PlatformerBody"):
+        cur_jf = float(player.PlatformerBody.get("jump_force", 380.0))
+        player.PlatformerBody["jump_force"] = cur_jf + 150.0 if cur_jf < 500.0 else 550.0
+
+@export("{UUID_RESPAWN_ACT}")
+def respawn_player_action(entity):
+    player = _find_player(entity)
+    if player is not None:
+        player.Transform.x = 100.0
+        player.Transform.y = 200.0
+        if player.has("PlatformerBody"):
+            player.PlatformerBody["vx"] = 0.0
+            player.PlatformerBody["vy"] = 0.0
+
+@export("{UUID_CHILD_HEALTH_GET}")
+def child_health_percent_get(entity):
+    parent = getattr(entity, "parent", None)
+    if parent is not None:
+        val = getattr(parent, "HealthPercent", getattr(parent, "LivesPercent", 100.0))
+        return float(val) / 100.0
+    return 1.0
+"""
+    alchemical_logic = kernel.create_script_resource(
+        name="AlchemicalLogic",
+        requires=[],
+        code=alchemical_logic_code,
+    )
+    kernel.attach_script(game_branch, alchemical_logic)
+
+    platformer_controller_code = """import math
+
+_idle_t = 0.0
+
+def update(self, dt):
+    global _idle_t
+    keys = getattr(kernel, "input_state", {}).get("keys", set())
+    body = self.PlatformerBody
+    spd = float(self.Stats.get("speed", 200.0))
+    jump_force = float(body.get("jump_force", 380.0))
+    gravity = float(body.get("gravity", 800.0))
+
+    if "A" in keys or "LEFT" in keys:
+        body["vx"] = -spd
+    elif "D" in keys or "RIGHT" in keys:
+        body["vx"] = spd
+    else:
+        cur_vx = float(body.get("vx", 0.0))
+        if abs(cur_vx) > 5.0:
+            body["vx"] = cur_vx * max(0.0, 1.0 - 10.0 * dt)
+        else:
+            _idle_t += dt
+            body["vx"] = math.sin(_idle_t * 1.5) * 35.0
+
+    jump_pressed = ("W" in keys or "UP" in keys or "SPACE" in keys)
+    was_jump = bool(body.get("_jump_was_down", False))
+    body["_jump_was_down"] = jump_pressed
+
+    if jump_pressed and not was_jump:
+        if bool(body.get("on_ground", False)):
+            body["vy"] = -jump_force
+            body["on_ground"] = False
+            body["can_double_jump"] = True
+        elif bool(body.get("can_double_jump", False)):
+            body["vy"] = -jump_force * 0.85
+            body["can_double_jump"] = False
+
+    cur_vy = float(body.get("vy", 0.0)) + gravity * dt
+    body["vy"] = min(800.0, cur_vy)
+
+    self.Transform.x += float(body.get("vx", 0.0)) * dt
+    self.Transform.y += float(body.get("vy", 0.0)) * dt
+
+    body["on_ground"] = False
+    player_x = float(self.Transform.x)
+    player_y = float(self.Transform.y)
+    player_foot = player_y + 16.0
+    vy = float(body.get("vy", 0.0))
+
+    if hasattr(self, "world") and hasattr(self.world, "query"):
+        for plat in self.world.query("Platform", "Transform"):
+            p_comp = plat.Platform
+            pw = float(p_comp.get("width", 80.0))
+            ph = float(p_comp.get("height", 20.0))
+            plat_x = float(plat.Transform.x)
+            plat_y = float(plat.Transform.y)
+            plat_top = plat_y - ph / 2.0
+            plat_left = plat_x - pw / 2.0
+            plat_right = plat_x + pw / 2.0
+
+            if (plat_left - 8.0) <= player_x <= (plat_right + 8.0):
+                if vy >= 0.0:
+                    tolerance = max(14.0, vy * dt + 6.0)
+                    if (plat_top - 6.0) <= player_foot <= (plat_top + tolerance):
+                        self.Transform.y = plat_top - 16.0
+                        body["vy"] = 0.0
+                        body["on_ground"] = True
+                        body["can_double_jump"] = True
+
+                        if plat.has("MovingPlatformData"):
+                            mp_spd = float(plat.MovingPlatformData.get("speed", 0.0))
+                            mp_dir = float(plat.MovingPlatformData.get("direction", 1.0))
+                            self.Transform.x += mp_spd * mp_dir * dt
+
+        for col in self.world.query("Collectible", "Transform"):
+            c_comp = col.Collectible
+            if not c_comp.get("collected", False):
+                dist = math.hypot(player_x - float(col.Transform.x), player_y - float(col.Transform.y))
+                if dist < 20.0:
+                    c_comp["collected"] = True
+                    self.Stats.coins = int(self.Stats.get("coins", 0)) + 1
+
+    if float(self.Transform.y) > 420.0:
+        self.Health.current = max(0, int(self.Health.current) - 1)
+        self.Transform.x = 100.0
+        self.Transform.y = 200.0
+        body["vx"] = 0.0
+        body["vy"] = 0.0
+
+    hp_bar = self.find_child("PlayerHealthBar")
+    if hp_bar and hp_bar.has("UISlider"):
+        max_h = max(1.0, float(self.Health.max))
+        hp_bar.UISlider["value"] = max(0.0, min(1.0, float(self.Health.current) / max_h))
+"""
+    platformer_controller = kernel.create_script_resource(
+        name="PlatformerController",
+        requires=["Transform", "Health", "Stats", "PlatformerBody"],
+        code=platformer_controller_code,
+    )
+
+    moving_platform_code = """def update(self, dt):
+    mp = self.MovingPlatformData
+    min_x = float(mp.get("min_x", 220.0))
+    max_x = float(mp.get("max_x", 400.0))
+    spd = float(mp.get("speed", 60.0))
+    dir_x = float(mp.get("direction", 1.0))
+
+    new_x = float(self.Transform.x) + spd * dir_x * dt
+    if new_x >= max_x:
+        new_x = max_x
+        mp["direction"] = -1.0
+    elif new_x <= min_x:
+        new_x = min_x
+        mp["direction"] = 1.0
+    self.Transform.x = new_x
+"""
+    moving_platform_script = kernel.create_script_resource(
+        name="MovingPlatformScript",
+        requires=["Transform", "Platform", "MovingPlatformData"],
+        code=moving_platform_code,
+    )
+
+    enemy_patrol_code = """import math
+
+def update(self, dt):
+    if float(self.Health.current) <= 0.0:
+        return
+    ai = self.AI
+    cx = float(ai.get("patrol_center_x", 400.0))
+    r = float(ai.get("radius", 45.0))
+    spd = float(ai.get("speed", 55.0))
+    ang = (float(ai.get("angle", 0.0)) + spd * dt) % 360.0
+    ai["angle"] = ang
+    self.Transform.x = cx + r * math.cos(math.radians(ang))
+
+    if hasattr(self, "world") and hasattr(self.world, "query"):
+        for player in self.world.query("PlatformerBody", "Transform"):
+            if "player" in (player.name or "").lower():
+                dist_x = abs(float(player.Transform.x) - float(self.Transform.x))
+                player_foot = float(player.Transform.y) + 16.0
+                enemy_top = float(self.Transform.y) - 16.0
+                if dist_x < 24.0 and 0.0 <= (player_foot - enemy_top) <= 20.0 and float(player.PlatformerBody.get("vy", 0.0)) > 0.0:
+                    self.Health.current = 0.0
+                    player.PlatformerBody["vy"] = -250.0
+
+    for c in self.children:
+        if c.has("UISlider"):
+            max_h = max(1.0, float(self.Health.max))
+            c.UISlider["value"] = max(0.0, min(1.0, float(self.Health.current) / max_h))
+"""
+    enemy_patrol_script = kernel.create_script_resource(
+        name="EnemyPatrolScript",
+        requires=["Transform", "Health", "AI"],
+        code=enemy_patrol_code,
+    )
+
+    orbital_companion_code = """import math
+
+def update(self, dt):
+    for weapon in self.children:
+        w_comp = weapon.get("Weapon") or weapon.get("Shield")
+        if w_comp:
+            rad = float(w_comp.get("orbit_radius", 28.0))
+            spd = float(w_comp.get("orbit_speed", 120.0))
+            cur_angle = (float(w_comp.get("angle", 0.0)) + spd * dt) % 360.0
+            w_comp["angle"] = cur_angle
+            weapon.Transform.x = rad * math.cos(math.radians(cur_angle))
+            weapon.Transform.y = rad * math.sin(math.radians(cur_angle))
+            weapon.Transform.rot_z = cur_angle
+"""
+    orbital_companion = kernel.create_script_resource(
+        name="OrbitalCompanionScript",
+        requires=["Transform"],
+        code=orbital_companion_code,
+    )
+
+    # 4. Create Player Entity
+    player = kernel.create_entity(
+        name="Player",
+        parent_id=game_branch,
+        components={
+            "Transform": {"x": 100.0, "y": 200.0, "z": 0.0, "rot_z": 0.0},
+            "Health": {"current": 3, "max": 3},
+            "Stats": {"speed": 200.0, "coins": 0, "max_coins": 5, "defense": 15},
+            "PlatformerBody": {
+                "vx": 0.0,
+                "vy": 0.0,
+                "gravity": 800.0,
+                "jump_force": 380.0,
+                "on_ground": True,
+                "can_double_jump": True,
+            },
+            "Property:HealthPercent": {
+                "getter": UUID_HEALTH_GET,
+                "setter": UUID_HEALTH_SET,
+                "presentation": "slider",
+                "presentation_args": {"min": 0.0, "max": 100.0},
+            },
+            "Property:LivesPercent": {
+                "getter": UUID_HEALTH_GET,
+                "setter": UUID_HEALTH_SET,
+                "presentation": "slider",
+                "presentation_args": {"min": 0.0, "max": 100.0},
+            },
+            "Property:CoinsPercent": {
+                "getter": UUID_COINS_GET,
+                "setter": UUID_COINS_SET,
+                "presentation": "slider",
+                "presentation_args": {"min": 0.0, "max": 100.0},
+            },
+            "Property:SpeedMeters": {
+                "getter": UUID_SPEED_GET,
+                "setter": UUID_SPEED_SET,
+                "presentation": "text",
+            },
+        },
+    )
+    kernel.attach_script(player, platformer_controller)
+    kernel.attach_script(player, orbital_companion)
+
+    kernel.create_entity(
+        name="PlayerNameTag",
+        parent_id=player,
+        components={
+            "Transform": {"x": 0.0, "y": -26.0, "z": 0.0},
+            "UIText": {"content": "Jumper Hero", "bullet": False},
+        },
+    )
+    kernel.create_entity(
+        name="HeroTag",
+        parent_id=player,
+        components={
+            "Transform": {"x": 0.0, "y": -38.0, "z": 0.0},
+            "UIText": {"content": "Hero", "bullet": False},
+        },
+    )
+    kernel.create_entity(
+        name="PlayerHealthBar",
+        parent_id=player,
+        components={
+            "Transform": {"x": 0.0, "y": -16.0, "z": 0.0},
+            "UISlider": {"label": "Lives", "value": 1.0, "min": 0.0, "max": 1.0},
+            "Property:Value": {
+                "getter": UUID_CHILD_HEALTH_GET,
+            },
+        },
+    )
+    kernel.create_entity(
+        name="Excalibur",
+        parent_id=player,
+        components={
+            "Weapon": {"damage": 45, "range": 1.5, "element": "Light", "orbit_radius": 28.0, "orbit_speed": 120.0, "angle": 0.0},
+            "Transform": {"x": 28.0, "y": 0.0, "z": 0.0, "rot_z": 0.0},
+        },
+    )
+
+    # 5. Platforms
+    kernel.create_entity(
+        name="GroundMain",
+        parent_id=game_branch,
+        components={
+            "Transform": {"x": 250.0, "y": 340.0, "z": 0.0},
+            "Platform": {"width": 500.0, "height": 30.0, "one_way": False},
+        },
+    )
+    kernel.create_entity(
+        name="PlatformLow",
+        parent_id=game_branch,
+        components={
+            "Transform": {"x": 140.0, "y": 280.0, "z": 0.0},
+            "Platform": {"width": 100.0, "height": 18.0, "one_way": True},
+        },
+    )
+    kernel.create_entity(
+        name="PlatformMid",
+        parent_id=game_branch,
+        components={
+            "Transform": {"x": 280.0, "y": 220.0, "z": 0.0},
+            "Platform": {"width": 110.0, "height": 18.0, "one_way": True},
+        },
+    )
+    kernel.create_entity(
+        name="PlatformHigh",
+        parent_id=game_branch,
+        components={
+            "Transform": {"x": 420.0, "y": 160.0, "z": 0.0},
+            "Platform": {"width": 120.0, "height": 18.0, "one_way": True},
+        },
+    )
+    moving_plat = kernel.create_entity(
+        name="MovingPlatform",
+        parent_id=game_branch,
+        components={
+            "Transform": {"x": 320.0, "y": 260.0, "z": 0.0},
+            "Platform": {"width": 90.0, "height": 16.0, "one_way": True},
+            "MovingPlatformData": {"min_x": 220.0, "max_x": 400.0, "speed": 60.0, "direction": 1.0},
+        },
+    )
+    kernel.attach_script(moving_plat, moving_platform_script)
+
+    # 6. Collectibles
+    kernel.create_entity(
+        name="Coin1",
+        parent_id=game_branch,
+        components={
+            "Transform": {"x": 140.0, "y": 245.0, "z": 0.0},
+            "Collectible": {"type": "coin", "value": 1, "collected": False},
+        },
+    )
+    kernel.create_entity(
+        name="Coin2",
+        parent_id=game_branch,
+        components={
+            "Transform": {"x": 280.0, "y": 185.0, "z": 0.0},
+            "Collectible": {"type": "coin", "value": 1, "collected": False},
+        },
+    )
+    kernel.create_entity(
+        name="Coin3",
+        parent_id=game_branch,
+        components={
+            "Transform": {"x": 420.0, "y": 125.0, "z": 0.0},
+            "Collectible": {"type": "coin", "value": 1, "collected": False},
+        },
+    )
+
+    # Goal Flag
+    kernel.create_entity(
+        name="GoalFlag",
+        parent_id=game_branch,
+        components={
+            "Transform": {"x": 450.0, "y": 130.0, "z": 0.0},
+            "Goal": {"reached": False},
+        },
+    )
+
+    # 7. Goblin Entity
+    goblin = kernel.create_entity(
+        name="Goblin",
+        parent_id=game_branch,
+        components={
+            "Transform": {"x": 400.0, "y": 200.0, "z": 0.0},
+            "Health": {"current": 50.0, "max": 50.0},
+            "AI": {"aggro_radius": 150.0, "patrol_center_x": 400.0, "patrol_center_y": 200.0, "radius": 45.0, "angle": 0.0, "state": "patrol", "speed": 55.0},
+            "Property:DistanceToPlayer": {
+                "getter": UUID_DIST_GET,
+                "presentation": "text",
+            },
+            "Property:HealthPercent": {
+                "getter": UUID_HEALTH_GET,
+                "setter": UUID_HEALTH_SET,
+                "presentation": "slider",
+                "presentation_args": {"min": 0.0, "max": 100.0},
+            },
+        },
+    )
+    kernel.attach_script(goblin, enemy_patrol_script)
+    kernel.create_entity(
+        name="GoblinHP",
+        parent_id=goblin,
+        components={
+            "Transform": {"x": 0.0, "y": -22.0, "z": 0.0},
+            "UISlider": {"label": "Goblin HP", "value": 1.0, "min": 0.0, "max": 1.0},
+        },
+    )
+    kernel.create_entity(
+        name="HPTag",
+        parent_id=goblin,
+        components={
+            "Transform": {"x": 0.0, "y": -34.0, "z": 0.0},
+            "UIText": {"content": "HP", "bullet": False},
+        },
+    )
+
+    # 8. AlchemistToolkit Panel
+    toolkit = kernel.create_entity(
+        name="AlchemistToolkit",
+        parent_id=game_branch,
+        components={
+            "Panel": {"title": "Alchemist Toolkit", "panel_type": "custom", "minimized": False},
+            "UIContainer": {"layout": "vertical", "gap": 6.0, "padding": 8.0},
+        },
+    )
+    kernel.create_ui_entity(
+        name="ToolkitHeader",
+        component_type="UIText",
+        component_props={"content": "🧪 Alchemical Lab Controls", "bullet": False},
+        parent_id=toolkit,
+    )
+    potion_bar = kernel.create_ui_entity(
+        name="PotionBar",
+        component_type="UIContainer",
+        component_props={"layout": "horizontal", "gap": 4.0},
+        parent_id=toolkit,
+    )
+    kernel.create_ui_entity(
+        name="SuperJumpBtn",
+        component_type="UIButton",
+        component_props={"label": "Super Jump (+150)", "width": 140.0, "on_click": UUID_SUPER_JUMP_ACT},
+        parent_id=potion_bar,
+    )
+    kernel.create_ui_entity(
+        name="RespawnBtn",
+        component_type="UIButton",
+        component_props={"label": "Respawn", "width": 95.0, "on_click": UUID_RESPAWN_ACT},
+        parent_id=potion_bar,
+    )
+    kernel.create_ui_entity(
+        name="HealBtn",
+        component_type="UIButton",
+        component_props={"label": "Drink Elixir (+1 HP)", "width": 140.0, "on_click": UUID_HEAL_ACT},
+        parent_id=potion_bar,
+    )
+    kernel.create_ui_entity(
+        name="StatusDisplay",
+        component_type="UIText",
+        component_props={"content": "Platformer Mode: Active", "bullet": False},
+        parent_id=toolkit,
+    )
+
+    # 9. GameGUI
+    gui_container = kernel.create_ui_entity(
+        name="GameGUI",
+        component_type="UIContainer",
+        component_props={"layout": "vertical", "gap": 6.0, "padding": 8.0},
+        parent_id=game_branch,
+    )
+    kernel.create_ui_entity(
+        name="Button",
+        component_type="UIButton",
+        component_props={"label": "Action", "width": 120.0},
+        parent_id=gui_container,
+    )
+
+    # 10. Editor Branch
+    editor_branch = kernel.create_entity(name="Editor", parent_id=app_root)
+    hierarchy_panel = kernel.create_entity(
+        name="Hierarchy Panel",
+        parent_id=editor_branch,
+        components={
+            "Panel": {"title": "Hierarchy", "panel_type": "hierarchy", "minimized": False},
+        },
+    )
+    kernel.create_ui_entity(
+        name="SearchInput",
+        component_type="UITextInput",
+        component_props={"hint": "Search hierarchy...", "is_search": True, "label": ""},
+        parent_id=hierarchy_panel,
+    )
+    filter_bar = kernel.create_ui_entity(
+        name="FilterBar",
+        component_type="UIContainer",
+        component_props={"layout": "horizontal", "gap": 4.0},
+        parent_id=hierarchy_panel,
+    )
+    kernel.create_ui_entity(
+        name="AllFilter",
+        component_type="UIButton",
+        component_props={"label": "All", "width": 45.0},
+        parent_id=filter_bar,
+    )
+    kernel.create_ui_entity(
+        name="GameFilter",
+        component_type="UIButton",
+        component_props={"label": "Game World", "width": 75.0},
+        parent_id=filter_bar,
+    )
+    kernel.create_ui_entity(
+        name="ToolsFilter",
+        component_type="UIButton",
+        component_props={"label": "UI & Tools", "width": 75.0},
+        parent_id=filter_bar,
+    )
+    kernel.create_ui_entity(
+        name="TreeContainer",
+        component_type="UIContainer",
+        component_props={"layout": "vertical"},
+        parent_id=hierarchy_panel,
+    )
+
+    inspector_panel = kernel.create_entity(
+        name="Inspector Panel",
+        parent_id=editor_branch,
+        components={
+            "Panel": {"title": "Inspector", "panel_type": "inspector", "minimized": False, "locked": False},
+        },
+    )
+    header_bar = kernel.create_ui_entity(
+        name="HeaderBar",
+        component_type="UIContainer",
+        component_props={"layout": "horizontal", "gap": 4.0},
+        parent_id=inspector_panel,
+    )
+    kernel.create_ui_entity(
+        name="TitleText",
+        component_type="UIText",
+        component_props={"content": "Inspector"},
+        parent_id=header_bar,
+    )
+    kernel.create_ui_entity(
+        name="FocusBtn",
+        component_type="UIButton",
+        component_props={"label": "Focus", "width": 50.0},
+        parent_id=header_bar,
+    )
+    kernel.create_ui_entity(
+        name="LockBtn",
+        component_type="UIButton",
+        component_props={"label": "Lock", "width": 50.0},
+        parent_id=header_bar,
+    )
+    kernel.create_ui_entity(
+        name="ComponentContainer",
+        component_type="UIContainer",
+        component_props={"layout": "vertical"},
+        parent_id=inspector_panel,
+    )
+
+    kernel.save_dirty_resources()
+
+
+def populate_demo_world_if_empty(kernel, template: str = "platformer") -> None:
+    """Populate the demo world using the chosen template ('platformer' or 'dungeon')."""
+    if template == "dungeon":
+        return populate_dungeon_world_if_empty(kernel)
+    return populate_platformer_world_if_empty(kernel)
+
+
 def run_headless_simulation(kernel, ticks: int = 10, dt: float = 1.0 / 60.0) -> None:
     """Run a headless simulation loop printing entity states and script updates."""
     print("=" * 65)
@@ -621,6 +1278,15 @@ def main() -> None:
         type=int,
         default=10,
         help="Number of simulation ticks to run in headless mode (default: 10)",
+    )
+    parser.add_argument(
+        "--demo",
+        "--template",
+        dest="template",
+        type=str,
+        default="platformer",
+        choices=["platformer", "dungeon"],
+        help="Demo world template to populate if empty: 'platformer' or 'dungeon' (default: platformer)",
     )
     args = parser.parse_args()
 

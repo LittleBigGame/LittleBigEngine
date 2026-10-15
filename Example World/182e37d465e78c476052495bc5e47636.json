@@ -1,0 +1,15 @@
+{
+    "type": 1,
+    "data": {
+        "name": "EnemyPatrolScript",
+        "source_path": "",
+        "code": "import math\n\ndef update(self, dt):\n    if float(self.Health.current) <= 0.0:\n        return\n    ai = self.AI\n    cx = float(ai.get(\"patrol_center_x\", 400.0))\n    r = float(ai.get(\"radius\", 45.0))\n    spd = float(ai.get(\"speed\", 55.0))\n    ang = (float(ai.get(\"angle\", 0.0)) + spd * dt) % 360.0\n    ai[\"angle\"] = ang\n    self.Transform.x = cx + r * math.cos(math.radians(ang))\n\n    if hasattr(self, \"world\") and hasattr(self.world, \"query\"):\n        for player in self.world.query(\"PlatformerBody\", \"Transform\"):\n            if \"player\" in (player.name or \"\").lower():\n                dist_x = abs(float(player.Transform.x) - float(self.Transform.x))\n                player_foot = float(player.Transform.y) + 16.0\n                enemy_top = float(self.Transform.y) - 16.0\n                if dist_x < 24.0 and 0.0 <= (player_foot - enemy_top) <= 20.0 and float(player.PlatformerBody.get(\"vy\", 0.0)) > 0.0:\n                    self.Health.current = 0.0\n                    player.PlatformerBody[\"vy\"] = -250.0\n\n    for c in self.children:\n        if c.has(\"UISlider\"):\n            max_h = max(1.0, float(self.Health.max))\n            c.UISlider[\"value\"] = max(0.0, min(1.0, float(self.Health.current) / max_h))\n",
+        "requires": [
+            "Transform",
+            "Health",
+            "AI"
+        ],
+        "symbols": {}
+    },
+    "name": "EnemyPatrolScript"
+}

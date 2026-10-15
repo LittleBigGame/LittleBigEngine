@@ -383,74 +383,150 @@ class ViewportPanel:
         rot_rad = math.radians(transform["rot_z"])
         radius = 16.0 * max(0.5, min(2.0, self.cam_zoom))
 
-        # Color scheme based on entity role/name
-        name_lower = name.lower()
-        if "player" in name_lower or "hero" in name_lower:
-            fill_color = (65, 135, 245, 230)
-            border_color = (120, 180, 255, 255)
-        elif "weapon" in name_lower or "sword" in name_lower or "excalibur" in name_lower:
-            fill_color = (50, 205, 190, 230)
-            border_color = (100, 245, 230, 255)
-        elif "goblin" in name_lower or "enemy" in name_lower or "monster" in name_lower:
-            fill_color = (235, 80, 70, 230)
-            border_color = (255, 140, 130, 255)
-        else:
-            fill_color = (135, 110, 210, 230)
-            border_color = (180, 160, 240, 255)
+        platform_comp = comps.get("Platform") or comps.get("platform")
+        collectible_comp = comps.get("Collectible") or comps.get("collectible")
 
-        # Draw AI aggro radius if present
-        ai_comp = comps.get("AI") or comps.get("ai")
-        if isinstance(ai_comp, Mapping) and "aggro_radius" in ai_comp:
-            aggro_r = float(ai_comp["aggro_radius"]) * self.cam_zoom
-            dpg.draw_circle(
-                center=(sx, sy),
-                radius=aggro_r,
-                color=(235, 120, 80, 70),
-                fill=(235, 120, 80, 25),
-                thickness=1.0,
+        if isinstance(platform_comp, Mapping):
+            pw = float(platform_comp.get("width", 80.0)) * self.cam_zoom
+            ph = float(platform_comp.get("height", 20.0)) * self.cam_zoom
+            pmin = (sx - pw / 2.0, sy - ph / 2.0)
+            pmax = (sx + pw / 2.0, sy + ph / 2.0)
+
+            # Selection highlight: if is_selected: draw rectangle slightly expanded with yellow outline
+            if is_selected:
+                dpg.draw_rectangle(
+                    pmin=(pmin[0] - 3.0, pmin[1] - 3.0),
+                    pmax=(pmax[0] + 3.0, pmax[1] + 3.0),
+                    color=(255, 215, 60, 255),
+                    thickness=2.0,
+                    parent=self.drawlist_tag,
+                )
+
+            # Platform body
+            dpg.draw_rectangle(
+                pmin=pmin,
+                pmax=pmax,
+                fill=(42, 48, 60, 240),
+                color=(60, 70, 85, 255),
+                thickness=1.5,
                 parent=self.drawlist_tag,
             )
 
-        # Selection glow ring
-        if is_selected:
-            dpg.draw_circle(
-                center=(sx, sy),
-                radius=radius + 5.0,
-                color=(255, 215, 60, 255),
+            # Top grass ledge
+            dpg.draw_line(
+                p1=(pmin[0], pmin[1]),
+                p2=(pmax[0], pmin[1]),
+                color=(75, 210, 110, 255),
                 thickness=2.5,
                 parent=self.drawlist_tag,
             )
 
-        # Entity Body Circle
-        dpg.draw_circle(
-            center=(sx, sy),
-            radius=radius,
-            fill=fill_color,
-            color=border_color,
-            thickness=1.8,
-            parent=self.drawlist_tag,
-        )
+            # Label below platform
+            label_text = f"{name} [{entity_id}]"
+            dpg.draw_text(
+                pos=(sx - len(label_text) * 3.2, pmax[1] + 3.0),
+                text=label_text,
+                size=12,
+                color=(200, 205, 215, 220),
+                parent=self.drawlist_tag,
+            )
+        elif isinstance(collectible_comp, Mapping):
+            if collectible_comp.get("collected", False):
+                return
+            c_radius = 8.0 * self.cam_zoom
+            if is_selected:
+                dpg.draw_circle(
+                    center=(sx, sy),
+                    radius=c_radius + 4.0,
+                    color=(255, 215, 60, 255),
+                    thickness=2.0,
+                    parent=self.drawlist_tag,
+                )
+            dpg.draw_circle(
+                center=(sx, sy),
+                radius=c_radius,
+                fill=(255, 215, 0, 230),
+                color=(255, 245, 160, 255),
+                thickness=1.5,
+                parent=self.drawlist_tag,
+            )
+            label_text = f"{name} [{entity_id}]"
+            dpg.draw_text(
+                pos=(sx - len(label_text) * 3.2, sy + c_radius + 3.0),
+                text=label_text,
+                size=11,
+                color=(240, 230, 180, 220),
+                parent=self.drawlist_tag,
+            )
+        else:
+            # Color scheme based on entity role/name
+            name_lower = name.lower()
+            if "player" in name_lower or "hero" in name_lower:
+                fill_color = (65, 135, 245, 230)
+                border_color = (120, 180, 255, 255)
+            elif "weapon" in name_lower or "sword" in name_lower or "excalibur" in name_lower:
+                fill_color = (50, 205, 190, 230)
+                border_color = (100, 245, 230, 255)
+            elif "goblin" in name_lower or "enemy" in name_lower or "monster" in name_lower:
+                fill_color = (235, 80, 70, 230)
+                border_color = (255, 140, 130, 255)
+            else:
+                fill_color = (135, 110, 210, 230)
+                border_color = (180, 160, 240, 255)
 
-        # Rotation Heading Indicator
-        hx = sx + math.cos(rot_rad) * (radius + 8.0)
-        hy = sy + math.sin(rot_rad) * (radius + 8.0)
-        dpg.draw_line(
-            p1=(sx, sy),
-            p2=(hx, hy),
-            color=(255, 255, 255, 220),
-            thickness=2.0,
-            parent=self.drawlist_tag,
-        )
+            # Draw AI aggro radius if present
+            ai_comp = comps.get("AI") or comps.get("ai")
+            if isinstance(ai_comp, Mapping) and "aggro_radius" in ai_comp:
+                aggro_r = float(ai_comp["aggro_radius"]) * self.cam_zoom
+                dpg.draw_circle(
+                    center=(sx, sy),
+                    radius=aggro_r,
+                    color=(235, 120, 80, 70),
+                    fill=(235, 120, 80, 25),
+                    thickness=1.0,
+                    parent=self.drawlist_tag,
+                )
 
-        # Name & ID label
-        label_text = f"{name} [{entity_id}]"
-        dpg.draw_text(
-            pos=(sx - len(label_text) * 3.2, sy + radius + 3.0),
-            text=label_text,
-            size=13,
-            color=(220, 225, 235, 255),
-            parent=self.drawlist_tag,
-        )
+            # Selection glow ring
+            if is_selected:
+                dpg.draw_circle(
+                    center=(sx, sy),
+                    radius=radius + 5.0,
+                    color=(255, 215, 60, 255),
+                    thickness=2.5,
+                    parent=self.drawlist_tag,
+                )
+
+            # Entity Body Circle
+            dpg.draw_circle(
+                center=(sx, sy),
+                radius=radius,
+                fill=fill_color,
+                color=border_color,
+                thickness=1.8,
+                parent=self.drawlist_tag,
+            )
+
+            # Rotation Heading Indicator
+            hx = sx + math.cos(rot_rad) * (radius + 8.0)
+            hy = sy + math.sin(rot_rad) * (radius + 8.0)
+            dpg.draw_line(
+                p1=(sx, sy),
+                p2=(hx, hy),
+                color=(255, 255, 255, 220),
+                thickness=2.0,
+                parent=self.drawlist_tag,
+            )
+
+            # Name & ID label
+            label_text = f"{name} [{entity_id}]"
+            dpg.draw_text(
+                pos=(sx - len(label_text) * 3.2, sy + radius + 3.0),
+                text=label_text,
+                size=13,
+                color=(220, 225, 235, 255),
+                parent=self.drawlist_tag,
+            )
 
         # World-Space Overhead UI billboarded screen-aligned above entity
         def _draw_widget(
@@ -475,8 +551,38 @@ class ViewportPanel:
                 zoom_scale = max(0.5, min(2.0, self.cam_zoom))
                 bar_w = 40.0 * zoom_scale
                 bar_h = 5.0 * zoom_scale
+                val = None
                 try:
-                    val = max(0.0, min(1.0, float(slider_comp.get("value", 1.0))))
+                    proxy = self.session.get_entity_proxy(target_cid)
+                    if proxy is not None:
+                        for attr_name in ("value", "Value", "HealthPercent"):
+                            try:
+                                raw_v = getattr(proxy, attr_name, None)
+                                if raw_v is not None:
+                                    val = float(raw_v) / 100.0 if attr_name == "HealthPercent" else float(raw_v)
+                                    break
+                            except Exception:
+                                pass
+
+                        if val is None and proxy.parent is not None:
+                            try:
+                                parent_proxy = proxy.parent
+                                parent_val = getattr(parent_proxy, "LivesPercent", getattr(parent_proxy, "HealthPercent", None))
+                                if parent_val is not None:
+                                    val = float(parent_val) / 100.0
+                            except Exception:
+                                pass
+                except Exception:
+                    pass
+
+                if val is None:
+                    try:
+                        val = float(slider_comp.get("value", 1.0))
+                    except (ValueError, TypeError):
+                        val = 1.0
+
+                try:
+                    val = max(0.0, min(1.0, float(val)))
                 except (ValueError, TypeError):
                     val = 1.0
 
@@ -523,7 +629,24 @@ class ViewportPanel:
                     )
 
             elif text_comp is not None:
-                content = str(text_comp.get("content", ""))
+                content = None
+                try:
+                    proxy = self.session.get_entity_proxy(target_cid)
+                    if proxy is not None:
+                        for attr_name in ("content", "text"):
+                            try:
+                                raw_c = getattr(proxy, attr_name, None)
+                                if raw_c is not None:
+                                    content = str(raw_c)
+                                    break
+                            except Exception:
+                                pass
+                except Exception:
+                    pass
+
+                if content is None:
+                    content = str(text_comp.get("content", ""))
+
                 if content:
                     dpg.draw_text(
                         pos=(px - len(content) * 3.2, py),
@@ -647,6 +770,17 @@ class ViewportPanel:
                 wx = transform["x"]
                 wy = transform["y"]
             sx, sy = self._world_to_screen(wx, wy, cw, ch)
+            platform_comp = comps.get("Platform") or comps.get("platform")
+            if isinstance(platform_comp, Mapping):
+                pw = float(platform_comp.get("width", 80.0)) * self.cam_zoom
+                ph = float(platform_comp.get("height", 20.0)) * self.cam_zoom
+                if (sx - pw / 2.0) <= local_mx <= (sx + pw / 2.0) and (sy - ph / 2.0) <= local_my <= (sy + ph / 2.0):
+                    dist = math.hypot(local_mx - sx, local_my - sy)
+                    if dist < closest_dist:
+                        closest_dist = dist
+                        closest_id = rid
+                continue
+
             dist = math.hypot(local_mx - sx, local_my - sy)
             if dist < 25.0 and dist < closest_dist:
                 closest_dist = dist

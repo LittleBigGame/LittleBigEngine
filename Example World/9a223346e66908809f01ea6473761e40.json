@@ -1,0 +1,81 @@
+{
+    "type": 0,
+    "data": {
+        "components": {
+            "Transform": {
+                "x": 101.48831459514452,
+                "y": 255.0,
+                "z": 0.0,
+                "rot_z": 0.0
+            },
+            "Health": {
+                "current": 3,
+                "max": 3
+            },
+            "Stats": {
+                "speed": 200.0,
+                "coins": 0,
+                "max_coins": 5,
+                "defense": 15
+            },
+            "PlatformerBody": {
+                "vx": 4.36361566848297,
+                "vy": 0.0,
+                "gravity": 800.0,
+                "jump_force": 380.0,
+                "on_ground": true,
+                "can_double_jump": true,
+                "_jump_was_down": false
+            },
+            "Property:HealthPercent": {
+                "getter": "a1000000000000000000000000000001",
+                "setter": "a1000000000000000000000000000002",
+                "presentation": "slider",
+                "presentation_args": {
+                    "min": 0.0,
+                    "max": 100.0
+                }
+            },
+            "Property:LivesPercent": {
+                "getter": "a1000000000000000000000000000001",
+                "setter": "a1000000000000000000000000000002",
+                "presentation": "slider",
+                "presentation_args": {
+                    "min": 0.0,
+                    "max": 100.0
+                }
+            },
+            "Property:CoinsPercent": {
+                "getter": "a1000000000000000000000000000003",
+                "setter": "a1000000000000000000000000000004",
+                "presentation": "slider",
+                "presentation_args": {
+                    "min": 0.0,
+                    "max": 100.0
+                }
+            },
+            "Property:SpeedMeters": {
+                "getter": "a1000000000000000000000000000005",
+                "setter": "a1000000000000000000000000000006",
+                "presentation": "text"
+            }
+        },
+        "resources": [],
+        "scripts": [
+            "9a8c127acadd8a6830388ae41ff87f00",
+            "0fdff977039905a1e8f9bf6ad5a1d704"
+        ],
+        "children": [
+            "fd875e463ff6326084c59f108c746a4f",
+            "1f063b358f822c416f4cadb4424040a2",
+            "308f634aaf034fb675eb152c072bd77c"
+        ],
+        "parent": "9f5438fc0cf3339fbc662aadf414447c"
+    },
+    "name": "Player",
+    "children": [
+        "fd875e463ff6326084c59f108c746a4f",
+        "1f063b358f822c416f4cadb4424040a2",
+        "308f634aaf034fb675eb152c072bd77c"
+    ]
+}
