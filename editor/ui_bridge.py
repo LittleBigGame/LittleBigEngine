@@ -9,9 +9,13 @@ import dearpygui.dearpygui as dpg
 from LBE.types import Error, RuntimeID
 from .session import EditorSession
 
+NON_VISUAL_COMPONENTS: set[str] = {"property"}
+
 
 class UIBridgePanel:
     """Dockable panel rendering live interactive Dear PyGui previews of engine UI trees."""
+
+    non_visual_exclusions: set[str] = {"property"}
 
     def __init__(self, session: EditorSession, tag: str = "window_ui_preview") -> None:
         self.session = session
@@ -78,10 +82,31 @@ class UIBridgePanel:
         self.selected_mount_id = self._mount_options.get(app_data)
         self.rebuild()
 
+    def _is_non_visual(self, entity_id: RuntimeID) -> bool:
+        comps = self.session.get_components(entity_id)
+        visual_ui = {
+            "uicontainer", "uipanel", "uibutton", "uislider", "uitextinput", "uitext",
+            "container", "button", "slider", "textinput", "text_input", "text", "panel",
+        }
+        has_visual = any(c.lower() in visual_ui for c in comps)
+        if not has_visual:
+            if any(
+                c.lower() in NON_VISUAL_COMPONENTS
+                or c.lower() in self.non_visual_exclusions
+                or c.lower().startswith("property:")
+                for c in comps
+            ):
+                return True
+        return False
+
     def _get_all_uicontainers(self) -> list[RuntimeID]:
         containers: list[RuntimeID] = []
         for rid in sorted(self.session.kernel.resources.keys()):
-            if self.session.kernel.is_entity(rid) and self._has_component(rid, "UIContainer"):
+            if (
+                self.session.kernel.is_entity(rid)
+                and not self._is_non_visual(rid)
+                and self._has_component(rid, "UIContainer")
+            ):
                 containers.append(rid)
         return containers
 
@@ -112,15 +137,21 @@ class UIBridgePanel:
     def _find_first_ui_root(self) -> RuntimeID | None:
         # Check scene roots with UIContainer first
         for rid in self.session.get_root_entities():
-            if self._has_component(rid, "UIContainer"):
+            if not self._is_non_visual(rid) and self._has_component(rid, "UIContainer"):
                 return rid
         # Then any entity with UIContainer
         for rid in sorted(self.session.kernel.resources.keys()):
-            if self.session.kernel.is_entity(rid) and self._has_component(rid, "UIContainer"):
+            if (
+                self.session.kernel.is_entity(rid)
+                and not self._is_non_visual(rid)
+                and self._has_component(rid, "UIContainer")
+            ):
                 return rid
         # Fallback: check any root entity with any UI component
         ui_types = {"uibutton", "uislider", "uitextinput", "uitext"}
         for rid in self.session.get_root_entities():
+            if self._is_non_visual(rid):
+                continue
             comps = self.session.get_components(rid)
             if any(c.lower() in ui_types for c in comps):
                 return rid
@@ -140,6 +171,8 @@ class UIBridgePanel:
         active_panel_rids: set[RuntimeID] = set()
         for rid in sorted(self.session.kernel.resources.keys()):
             if not self.session.kernel.is_entity(rid):
+                continue
+            if self._is_non_visual(rid):
                 continue
             comps = self.session.get_components(rid)
             panel_comp = self._get_ui_comp(comps, "UIPanel")
@@ -215,6 +248,9 @@ class UIBridgePanel:
         visited.add(entity_id)
 
         if not self.session.kernel.is_entity(entity_id):
+            return
+
+        if self._is_non_visual(entity_id):
             return
 
         comps = self.session.get_components(entity_id)

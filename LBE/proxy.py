@@ -361,11 +361,20 @@ class WorldProxy:
 class EntityProxy:
     """Wraps an entity RuntimeID and provides ergonomic, tracked component access."""
 
+    _evaluating_properties: set[tuple[RuntimeID, str]] = set()
+
     def __init__(self, kernel: Kernel | Any, entity_id: RuntimeID) -> None:
         object.__setattr__(self, "_kernel", kernel)
         object.__setattr__(self, "_entity_id", entity_id)
         object.__setattr__(self, "kernel", kernel)
-        object.__setattr__(self, "runtime_id", entity_id)
+        eval_set = getattr(kernel, "_evaluating_properties", None)
+        if eval_set is None:
+            eval_set = set()
+            try:
+                kernel._evaluating_properties = eval_set
+            except Exception:
+                pass
+        object.__setattr__(self, "_evaluating_properties", eval_set if eval_set is not None else EntityProxy._evaluating_properties)
 
     @property
     def id(self) -> RuntimeID:
@@ -511,7 +520,52 @@ class EntityProxy:
                 return key
         return None
 
-    def __getattr__(self, name: str) -> ComponentProxy:
+    def _find_property_component(self, name: str) -> dict[str, Any] | None:
+        components = self._kernel.get_components(self._entity_id)
+        if isinstance(components, Error) or not isinstance(components, (dict, MappingProxyType)):
+            return None
+
+        name_lower = name.lower()
+
+        # 1. Component named "Property:<name>" (case-insensitive on name)
+        for comp_name, comp_val in components.items():
+            if comp_name.lower().startswith("property:"):
+                prop_key = comp_name.split(":", 1)[1].strip()
+                if prop_key.lower() == name_lower:
+                    if isinstance(comp_val, (dict, MappingProxyType, ComponentProxy, Mapping)):
+                        res = dict(comp_val)
+                        if not res.get("name"):
+                            res["name"] = prop_key
+                        return res
+
+        # 2. Component named "Property" (case-insensitive)
+        for comp_name, comp_val in components.items():
+            if comp_name.lower() == "property" and isinstance(comp_val, (dict, MappingProxyType, ComponentProxy, Mapping)):
+                # 2a. Single property schema with "name" field
+                if str(comp_val.get("name", "")).lower() == name_lower:
+                    return dict(comp_val)
+                # 2b. Multiple properties mapped inside "Property" component dict
+                if name in comp_val and isinstance(comp_val[name], (dict, MappingProxyType, ComponentProxy, Mapping)):
+                    res = dict(comp_val[name])
+                    if not res.get("name"):
+                        res["name"] = name
+                    return res
+                for sub_k, sub_v in comp_val.items():
+                    if sub_k.lower() == name_lower and isinstance(sub_v, (dict, MappingProxyType, ComponentProxy, Mapping)):
+                        res = dict(sub_v)
+                        if not res.get("name"):
+                            res["name"] = sub_k
+                        return res
+
+        # 3. Any component starting with "Property" or "property" where comp_val["name"] == name
+        for comp_name, comp_val in components.items():
+            if comp_name.lower().startswith("property") and isinstance(comp_val, (dict, MappingProxyType, ComponentProxy, Mapping)):
+                if str(comp_val.get("name", "")).lower() == name_lower:
+                    return dict(comp_val)
+
+        return None
+
+    def __getattr__(self, name: str) -> Any:
         if name.startswith("_"):
             raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
         self._ensure_alive()
@@ -521,6 +575,23 @@ class EntityProxy:
             if not isinstance(comp, Error):
                 return comp
             raise AttributeError(f"Entity {self._entity_id} component error: {comp.message}")
+
+        prop_comp = self._find_property_component(name)
+        if prop_comp is not None:
+            key = (self._entity_id, name)
+            if key in self._evaluating_properties:
+                raise RuntimeError(f"Circular property evaluation detected for entity {self._entity_id} property '{name}'")
+            self._evaluating_properties.add(key)
+            try:
+                getter_ref = prop_comp.get("getter", "")
+                res = self._kernel.resolve_function_export(getter_ref)
+                if isinstance(res, Error):
+                    raise AttributeError(f"Property '{name}' getter error: {res.description}")
+                getter_fn, _s_rid = res
+                return getter_fn(self)
+            finally:
+                self._evaluating_properties.discard(key)
+
         raise AttributeError(f"Entity {self._entity_id} has no component or attribute '{name}'")
 
     def __setattr__(self, name: str, value: Any) -> None:
@@ -534,6 +605,19 @@ class EntityProxy:
             prop.fset(self, value)
             return
         self._ensure_alive()
+
+        prop_comp = self._find_property_component(name)
+        if prop_comp is not None:
+            if setter := prop_comp.get("setter"):
+                res = self._kernel.resolve_function_export(setter)
+                if isinstance(res, Error):
+                    raise AttributeError(f"Property '{name}' setter error: {res.description}")
+                setter_fn, _s_rid = res
+                setter_fn(self, value)
+                return
+            else:
+                raise AttributeError(f"Property '{name}' is read-only (no setter defined)")
+
         comp_name = self._find_component_name(name)
         target_name = comp_name if comp_name is not None else name
         err = self.set(target_name, value)
@@ -548,38 +632,51 @@ class EntityProxy:
         if isinstance(prop, property):
             raise AttributeError(f"can't delete attribute '{name}'")
         self._ensure_alive()
+        if self._find_property_component(name) is not None:
+            raise AttributeError(f"can't delete attribute '{name}'")
         comp_name = self._find_component_name(name)
         target_name = comp_name if comp_name is not None else name
         err = self.remove(target_name)
         if isinstance(err, Error):
             raise AttributeError(f"Failed to remove component '{name}': {err.message}")
 
-    def __getitem__(self, name: str) -> ComponentProxy:
+    def __getitem__(self, name: str) -> Any:
         if not self.is_alive:
             raise KeyError(f"Entity {self._entity_id} has been destroyed and is no longer valid.")
         comp_name = self._find_component_name(name)
-        if comp_name is None:
-            raise KeyError(f"Component '{name}' not found on Entity {self._entity_id}")
-        comp = self._kernel.get_component(self._entity_id, comp_name)
-        if isinstance(comp, Error):
-            raise KeyError(f"Component '{name}' error on Entity {self._entity_id}: {comp.message}")
-        return comp
+        if comp_name is not None:
+            comp = self._kernel.get_component(self._entity_id, comp_name)
+            if isinstance(comp, Error):
+                raise KeyError(f"Component '{name}' error on Entity {self._entity_id}: {comp.message}")
+            return comp
+        prop_comp = self._find_property_component(name)
+        if prop_comp is not None:
+            try:
+                return getattr(self, name)
+            except AttributeError as ex:
+                raise KeyError(str(ex)) from ex
+        raise KeyError(f"Component '{name}' not found on Entity {self._entity_id}")
 
     def get(self, name: str, default: Any = None) -> Any:
         if not self.is_alive:
             return default
         comp_name = self._find_component_name(name)
-        if comp_name is None:
-            return default
-        comp = self._kernel.get_component(self._entity_id, comp_name)
-        if isinstance(comp, Error):
-            return default
-        return comp
+        if comp_name is not None:
+            comp = self._kernel.get_component(self._entity_id, comp_name)
+            if isinstance(comp, Error):
+                return default
+            return comp
+        if self._find_property_component(name) is not None:
+            try:
+                return getattr(self, name)
+            except (AttributeError, RuntimeError):
+                return default
+        return default
 
     def has(self, name: str) -> bool:
         if not self.is_alive:
             return False
-        return self._find_component_name(name) is not None
+        return self._find_component_name(name) is not None or self._find_property_component(name) is not None
 
     def set(self, name: str, data: dict[str, Any]) -> None | Error:
         if not self.is_alive:

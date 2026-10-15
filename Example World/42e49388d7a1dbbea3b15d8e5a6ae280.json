@@ -1,0 +1,15 @@
+{
+    "type": 1,
+    "data": {
+        "name": "HeroController",
+        "source_path": "",
+        "code": "import math\n\n_anim_t = 0.0\n\ndef update(self, dt):\n    global _anim_t\n    keys = getattr(kernel, \"input_state\", {}).get(\"keys\", set())\n    if keys:\n        dx, dy = 0.0, 0.0\n        if \"W\" in keys or \"UP\" in keys:\n            dy -= 1.0\n        if \"S\" in keys or \"DOWN\" in keys:\n            dy += 1.0\n        if \"A\" in keys or \"LEFT\" in keys:\n            dx -= 1.0\n        if \"D\" in keys or \"RIGHT\" in keys:\n            dx += 1.0\n        if dx != 0.0 or dy != 0.0:\n            length = math.hypot(dx, dy)\n            spd = float(self.Stats.speed)\n            self.Transform.x += (dx / length) * spd * dt\n            self.Transform.y += (dy / length) * spd * dt\n    else:\n        _anim_t += dt\n        self.Transform.x += math.sin(_anim_t * 1.5) * 20.0 * dt\n        self.Transform.y += math.cos(_anim_t * 1.5) * 20.0 * dt\n\n    self.Transform.x = max(40.0, min(600.0, float(self.Transform.x)))\n    self.Transform.y = max(40.0, min(400.0, float(self.Transform.y)))\n\n    hp_bar = self.find_child(\"PlayerHealthBar\")\n    if hp_bar and hp_bar.has(\"UISlider\"):\n        hp_bar.UISlider[\"value\"] = max(0.0, min(1.0, float(self.HealthPercent) / 100.0))\n",
+        "requires": [
+            "Transform",
+            "Health",
+            "Stats"
+        ],
+        "symbols": {}
+    },
+    "name": "HeroController"
+}

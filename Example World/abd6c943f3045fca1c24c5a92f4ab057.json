@@ -8,8 +8,8 @@
                 "z": 0.0
             },
             "UISlider": {
-                "label": "HP",
-                "value": 0.8,
+                "label": "Goblin HP",
+                "value": 1.0,
                 "min": 0.0,
                 "max": 1.0
             }
@@ -19,5 +19,6 @@
         "children": [],
         "parent": "6efe997432e8008d5b2ca61a97245a18"
     },
-    "name": "GoblinHP"
+    "name": "GoblinHP",
+    "children": []
 }

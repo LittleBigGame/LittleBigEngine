@@ -1,0 +1,18 @@
+{
+    "type": 0,
+    "data": {
+        "components": {
+            "UIText": {
+                "content": "?? Alchemical Lab Controls",
+                "color": null,
+                "bullet": false
+            }
+        },
+        "resources": [],
+        "scripts": [],
+        "children": [],
+        "parent": "4dd5acc85c38e87e5f5244d26e185ffb"
+    },
+    "name": "ToolkitHeader",
+    "children": []
+}

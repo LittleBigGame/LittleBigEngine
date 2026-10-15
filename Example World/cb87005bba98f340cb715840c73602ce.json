@@ -8,7 +8,7 @@
                 "z": 0.0
             },
             "UIText": {
-                "content": "Hero",
+                "content": "Alchemist Hero",
                 "bullet": false
             }
         },
@@ -17,5 +17,6 @@
         "children": [],
         "parent": "11e37198c01b8eb8e8ea48d2caa76e16"
     },
-    "name": "PlayerNameTag"
+    "name": "PlayerNameTag",
+    "children": []
 }

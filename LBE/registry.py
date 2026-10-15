@@ -205,6 +205,10 @@ def delete_resource(self, runtime_id: RuntimeID) -> bool | Error:
     storage_id = self.resource_storage_ids.pop(resolved_id, None)
     if storage_id is not None:
         self.resource_runtime_ids.pop(storage_id, None)
+        if hasattr(self, "function_exports") and isinstance(self.function_exports, dict):
+            stale_exports = [k for k, v in self.function_exports.items() if v[0] == storage_id]
+            for k in stale_exports:
+                self.function_exports.pop(k, None)
 
     self._script_cache.pop(resolved_id, None)
     self._script_module_cache.pop(resolved_id, None)

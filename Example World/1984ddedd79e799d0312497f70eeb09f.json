@@ -1,0 +1,52 @@
+{
+    "type": 0,
+    "data": {
+        "components": {
+            "Transform": {
+                "x": 248.74961871438936,
+                "y": 333.1425545323287,
+                "z": 0.0
+            },
+            "Health": {
+                "current": 35.0,
+                "max": 35.0
+            },
+            "AI": {
+                "aggro_radius": 120.0,
+                "patrol_center_x": 260.0,
+                "patrol_center_y": 300.0,
+                "radius": 35.0,
+                "angle": 108.75,
+                "state": "patrol",
+                "speed": 40.0
+            },
+            "Property:DistanceToPlayer": {
+                "getter": "a1000000000000000000000000000007",
+                "presentation": "text"
+            },
+            "Property:HealthPercent": {
+                "getter": "a1000000000000000000000000000001",
+                "setter": "a1000000000000000000000000000002",
+                "presentation": "slider",
+                "presentation_args": {
+                    "min": 0.0,
+                    "max": 100.0
+                }
+            }
+        },
+        "resources": [],
+        "scripts": [
+            "235f62ccc3d939c523eb8529274bafb8"
+        ],
+        "children": [
+            "d934f3a59efe236e8a451bc6485e8b91",
+            "e60d7c2b2034e30016b6b00415002f02"
+        ],
+        "parent": "ad9de20217d7f1cde6ac81f65ce4bddf"
+    },
+    "name": "DungeonSlime",
+    "children": [
+        "d934f3a59efe236e8a451bc6485e8b91",
+        "e60d7c2b2034e30016b6b00415002f02"
+    ]
+}

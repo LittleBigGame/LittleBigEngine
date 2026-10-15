@@ -1,0 +1,22 @@
+{
+    "type": 0,
+    "data": {
+        "components": {
+            "Transform": {
+                "x": 0.0,
+                "y": -10.0,
+                "z": 0.0
+            },
+            "UIText": {
+                "content": "? Arcane",
+                "bullet": false
+            }
+        },
+        "resources": [],
+        "scripts": [],
+        "children": [],
+        "parent": "f343dc176736d749e77bb5c6d9454656"
+    },
+    "name": "OrbGlow",
+    "children": []
+}

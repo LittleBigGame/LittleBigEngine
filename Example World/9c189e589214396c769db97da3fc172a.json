@@ -1,0 +1,20 @@
+{
+    "type": 0,
+    "data": {
+        "components": {
+            "UIButton": {
+                "label": "Swiftness Tonic",
+                "width": 120.0,
+                "height": 0.0,
+                "on_click": "a100000000000000000000000000000a",
+                "enabled": true
+            }
+        },
+        "resources": [],
+        "scripts": [],
+        "children": [],
+        "parent": "d9ff2c1028c9798c2fd4985176dd0eb9"
+    },
+    "name": "SpeedPotionBtn",
+    "children": []
+}

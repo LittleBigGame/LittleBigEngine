@@ -20,9 +20,41 @@ from .types import (
     InvalidResourceDataError,
     EntityTypeMismatchError,
     MissingComponentRequirementError,
+    BrokenReferenceError,
     Entity,
     Script,
 )
+
+
+def export(uuid_or_name: str | Callable | None = None) -> Any:
+    """Decorator to mark a function as an exported LBE function with an associated UUID."""
+    if callable(uuid_or_name):
+        fn = uuid_or_name
+        setattr(fn, "_lbe_export_uuid", getattr(fn, "__name__", ""))
+        return fn
+
+    def decorator(fn: Callable) -> Callable:
+        uuid_str = uuid_or_name if uuid_or_name is not None else getattr(fn, "__name__", "")
+        setattr(fn, "_lbe_export_uuid", str(uuid_str))
+        return fn
+
+    return decorator
+
+
+def _clean_hex_uuid(val: Any) -> str | None:
+    if not isinstance(val, (str, bytes)):
+        return None
+    if isinstance(val, bytes):
+        val = val.hex()
+    s = str(val).replace("-", "").strip().lower()
+    if len(s) in (32, 64):
+        try:
+            bytes.fromhex(s)
+            return s
+        except ValueError:
+            return None
+    return None
+
 
 def resolve_proxy(self, resource_type: int, storage_id_hex: str) -> Any | Error:
     """Resolve a resource by type and hex StorageID into a proxy or loaded resource."""
@@ -79,6 +111,7 @@ def execute_script(
 
     module = types.ModuleType(filename)
     module.__dict__["__builtins__"] = __builtins__
+    module.__dict__["export"] = export
     if extra_globals:
         module.__dict__.update(extra_globals)
     RuntimeBinder.bind_module(module, source, self, filename=filename)
@@ -202,16 +235,104 @@ def get_script_proxy(self, script_id: RuntimeID) -> ScriptProxy | Error:
     return ScriptProxy(self, resolved_id)
 
 
-def get_script_module(self, script_id: RuntimeID) -> dict[str, Any] | Error:
+def _scan_module_exports(self, script_id: RuntimeID, namespace: dict[str, Any]) -> None:
+    if not hasattr(self, "function_exports"):
+        self.function_exports = {}
+    sid = self.get_storage_id(script_id)
+    if isinstance(sid, Error):
+        return
+
+    exports_map = namespace.get("__exports__")
+    if isinstance(exports_map, dict):
+        for exp_k, exp_v in exports_map.items():
+            clean_k = _clean_hex_uuid(exp_k)
+            fn_sym = exp_v if isinstance(exp_v, str) else getattr(exp_v, "__name__", "")
+            if clean_k and fn_sym:
+                self.function_exports[clean_k] = (sid, fn_sym)
+
+    for func_name, obj in namespace.items():
+        if callable(obj):
+            export_uuid = getattr(obj, "_lbe_export_uuid", None)
+            if export_uuid is not None:
+                clean_uuid = _clean_hex_uuid(export_uuid)
+                if clean_uuid:
+                    self.function_exports[clean_uuid] = (sid, func_name)
+                else:
+                    raw = str(export_uuid).strip().lower()
+                    if raw:
+                        self.function_exports[raw] = (sid, func_name)
+            else:
+                clean_name = _clean_hex_uuid(func_name)
+                if clean_name:
+                    self.function_exports[clean_name] = (sid, func_name)
+
+
+def resolve_function_export(self, fn_uuid_hex: str | bytes) -> tuple[Callable, RuntimeID] | Error:
+    """Resolve an exported function UUID into (callable, script_runtime_id)."""
+    if not hasattr(self, "function_exports"):
+        self.function_exports = {}
+
+    if isinstance(fn_uuid_hex, bytes):
+        key = fn_uuid_hex.hex().lower()
+    else:
+        clean = _clean_hex_uuid(fn_uuid_hex)
+        key = clean if clean is not None else str(fn_uuid_hex).strip().lower()
+
+    if key not in self.function_exports:
+        for rid, res in list(self.resources.items()):
+            if isinstance(res, (dict, MappingProxyType)) and res.get("type") == Script:
+                mod = self.get_script_module(rid)
+                if not isinstance(mod, Error):
+                    _scan_module_exports(self, rid, mod)
+                if key in self.function_exports:
+                    break
+
+    if key not in self.function_exports:
+        return Error(
+            message=f"Exported function UUID '{fn_uuid_hex}' not found",
+            description=f"Exported function UUID '{fn_uuid_hex}' not found",
+            data={"fn_uuid_hex": fn_uuid_hex},
+            code=BrokenReferenceError,
+        )
+
+    script_sid, _ = self.function_exports[key]
+    mod = self.get_script_module(script_sid)
+    if isinstance(mod, Error):
+        return mod
+
+    # Re-read function_exports after get_script_module in case the module was recompiled/renamed
+    script_sid, fn_name = self.function_exports.get(key, (script_sid, ""))
+
+    func = mod.get(fn_name) if isinstance(mod, dict) else getattr(mod, fn_name, None)
+    if not callable(func):
+        return Error(
+            message="Exported function not callable",
+            description=f"Exported function '{fn_name}' in script is not callable or not found",
+            data={"fn_uuid_hex": fn_uuid_hex, "script_sid": script_sid, "fn_name": fn_name},
+            code=BrokenReferenceError,
+        )
+
+    script_rid = self.get_resource_id(script_sid)
+    if isinstance(script_rid, Error):
+        return script_rid
+
+    return func, script_rid
+
+
+def get_script_module(self, script_id: RuntimeID | StorageID | str) -> dict[str, Any] | Error:
     """Prevent recursive activation of mutually dependent script modules."""
-    if script_id in self._scripts_activating:
+    resolved = self._resolve_script_id(script_id)
+    if isinstance(resolved, Error):
+        return resolved
+    _sid, _sid_hex, runtime_id = resolved
+    if runtime_id in self._scripts_activating:
         return Error("Script module compilation error", "Cyclic top-level script activation",
-                     {"script_id": script_id}, InvalidResourceDataError)
-    self._scripts_activating.add(script_id)
+                     {"script_id": runtime_id}, InvalidResourceDataError)
+    self._scripts_activating.add(runtime_id)
     try:
-        return _activate_script_module(self, script_id)
+        return _activate_script_module(self, runtime_id)
     finally:
-        self._scripts_activating.discard(script_id)
+        self._scripts_activating.discard(runtime_id)
 
 
 def _activate_script_module(self, script_id: RuntimeID) -> dict[str, Any] | Error:
@@ -251,6 +372,7 @@ def _activate_script_module(self, script_id: RuntimeID) -> dict[str, Any] | Erro
             if cached is not None and self._script_mtime_cache.get(script_id) == file_mtime:
                 self._script_reload_errors.pop(script_id, None)
                 self._script_failed_sources.pop(script_id, None)
+                _scan_module_exports(self, script_id, cached[1])
                 return cached[1]
             code = path.read_text(encoding="utf-8")
         except (OSError, UnicodeError) as ex:
@@ -261,6 +383,7 @@ def _activate_script_module(self, script_id: RuntimeID) -> dict[str, Any] | Erro
         if cached is not None and cached[0] == code:
             self._script_reload_errors.pop(script_id, None)
             self._script_failed_sources.pop(script_id, None)
+            _scan_module_exports(self, script_id, cached[1])
             return cached[1]
 
     fingerprint = (source_path, code, file_mtime)
@@ -280,7 +403,7 @@ def _activate_script_module(self, script_id: RuntimeID) -> dict[str, Any] | Erro
         return reject(error)
 
     snapshot = self._snapshot_loaded_state()
-    namespace = {"__builtins__": __builtins__, "kernel": self}
+    namespace = {"__builtins__": __builtins__, "kernel": self, "export": export}
     try:
         for resource_type, storage_id_hex in dependencies:
             proxy = self.resolve_proxy(resource_type, storage_id_hex)
@@ -305,6 +428,7 @@ def _activate_script_module(self, script_id: RuntimeID) -> dict[str, Any] | Erro
     if data.get("symbols") != symbols:
         self.resources[script_id]["data"]["symbols"] = symbols
         self.mark_dirty(script_id)
+    _scan_module_exports(self, script_id, namespace)
     return namespace
 
 

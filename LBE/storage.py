@@ -645,6 +645,11 @@ def _snapshot_loaded_state(self) -> dict[str, Any]:
         "_script_failed_sources": self._script_failed_sources.copy(),
         "_script_mtime_cache": self._script_mtime_cache.copy(),
         "_method_sig_cache": self._method_sig_cache.copy(),
+        "function_exports": getattr(self, "function_exports", {}).copy(),
+        "input_state": {
+            "keys": set(getattr(self, "input_state", {}).get("keys", set())),
+            "mouse": getattr(self, "input_state", {}).get("mouse", (0.0, 0.0)),
+        },
     }
 
 
@@ -674,6 +679,13 @@ def _restore_loaded_state(self, snapshot: dict[str, Any]) -> None:
     self._script_mtime_cache = snapshot.get("_script_mtime_cache", self._script_mtime_cache).copy()
     self._method_sig_cache = snapshot.get("_method_sig_cache", self._method_sig_cache).copy()
     self.broken_references = snapshot.get("broken_references", self.broken_references).copy()
+    if hasattr(self, "function_exports") and "function_exports" in snapshot:
+        self.function_exports = snapshot["function_exports"].copy()
+    if "input_state" in snapshot:
+        self.input_state = {
+            "keys": set(snapshot["input_state"].get("keys", set())),
+            "mouse": snapshot["input_state"].get("mouse", (0.0, 0.0)),
+        }
 
 
 @contextlib.contextmanager

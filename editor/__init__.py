@@ -9,6 +9,7 @@ from .pills import (
     get_pill_theme,
     parse_reference_pill,
     rename_script_function_display_name,
+    render_function_export_pill,
 )
 from .session import EditorSession
 from .storage_panel import StoragePanel
@@ -56,4 +57,5 @@ __all__ = [
     "get_pill_theme",
     "parse_reference_pill",
     "rename_script_function_display_name",
+    "render_function_export_pill",
 ]

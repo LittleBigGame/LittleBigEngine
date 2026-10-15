@@ -66,6 +66,13 @@ UI_SCHEMAS: dict[str, dict[str, Any]] = {
         "minimized": False,
         "closable": True,
     },
+    "Property": {
+        "name": "",
+        "getter": "",          # 32-char hex UUID of exported getter function
+        "setter": "",          # Optional 32-char hex UUID of exported setter function
+        "presentation": "default",  # "default", "slider", "text", "toggle", "color"
+        "presentation_args": {},
+    },
 }
 
 UI_COMPONENT_NAMES: dict[str, str] = {
@@ -75,6 +82,7 @@ UI_COMPONENT_NAMES: dict[str, str] = {
     "uitextinput": "UITextInput",
     "uitext": "UIText",
     "uipanel": "UIPanel",
+    "property": "Property",
 }
 
 UI_COMPONENT_ALIASES: dict[str, str] = {
@@ -86,9 +94,11 @@ UI_COMPONENT_ALIASES: dict[str, str] = {
     "text_input": "UITextInput",
     "text": "UIText",
     "panel": "UIPanel",
+    "prop": "Property",
 }
 
 UI_EVENT_HANDLER_REGEX = re.compile(r"^<\|1\|(?P<sid>[0-9a-fA-F]+)\|>\.(?P<fn>[a-zA-Z_][a-zA-Z0-9_]*)$")
+HEX_UUID_REGEX = re.compile(r"^[0-9a-fA-F]{32}$|^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
 
 
 def _validate_handler_ref(canonical_name: str, field: str, ref: Any) -> Error | None:
@@ -109,25 +119,26 @@ def _validate_handler_ref(canonical_name: str, field: str, ref: Any) -> Error | 
     if ref_stripped == "":
         return None
     match = UI_EVENT_HANDLER_REGEX.match(ref_stripped)
-    if not match:
+    if not match and not HEX_UUID_REGEX.match(ref_stripped):
         err = Error(
             message="Invalid UI event handler reference",
-            description=f"UI component '{canonical_name}' field '{field}' reference '{ref}' is invalid. Must match '<|1|<storage_id_hex>|>.<function_name>'",
+            description=f"UI component '{canonical_name}' field '{field}' reference '{ref}' is invalid. Must match '<|1|<storage_id_hex>|>.<function_name>' or 32-character export UUID",
             data={"component_name": canonical_name, "field": field, "value": ref},
             code=InvalidResourceDataError,
         )
         logger.trace(f"Validation failed: UI component '{canonical_name}' field '{field}' invalid reference", channel="ui", error=err)
         return err
-    sid = match.group("sid")
-    if len(sid) not in (32, 64):
-        err = Error(
-            message="Invalid UI event handler reference",
-            description=f"UI component '{canonical_name}' field '{field}' reference '{ref}' has invalid hex storage ID length ({len(sid)}). Must be 32 or 64 hex characters!",
-            data={"component_name": canonical_name, "field": field, "value": ref},
-            code=InvalidResourceDataError,
-        )
-        logger.trace(f"Validation failed: UI component '{canonical_name}' field '{field}' invalid hex length", channel="ui", error=err)
-        return err
+    if match:
+        sid = match.group("sid")
+        if len(sid) not in (32, 64):
+            err = Error(
+                message="Invalid UI event handler reference",
+                description=f"UI component '{canonical_name}' field '{field}' reference '{ref}' has invalid hex storage ID length ({len(sid)}). Must be 32 or 64 hex characters!",
+                data={"component_name": canonical_name, "field": field, "value": ref},
+                code=InvalidResourceDataError,
+            )
+            logger.trace(f"Validation failed: UI component '{canonical_name}' field '{field}' invalid hex length", channel="ui", error=err)
+            return err
     return None
 
 
@@ -140,7 +151,10 @@ class ValidateUI:
 
         canonical_name = UI_COMPONENT_ALIASES.get(component_name.lower())
         if canonical_name is None:
-            return None
+            if component_name.lower().startswith("property:"):
+                canonical_name = "Property"
+            else:
+                return None
 
         # Exempt internal workstation panels from standard UIPanel validation:
         if canonical_name == "UIPanel" and isinstance(component_data, Mapping) and "panel_type" in component_data:
@@ -523,6 +537,113 @@ class ValidateUI:
                     logger.trace("Validation failed: UIPanel invalid closable", channel="ui", error=err)
                     return err
 
+        elif canonical_name == "Property":
+            if component_data == UI_SCHEMAS.get("Property") or (component_data.get("name") == "" and component_data.get("getter") == ""):
+                return None
+
+            name = component_data.get("name")
+            if not name and component_name.lower().startswith("property:"):
+                name = component_name.split(":", 1)[1].strip()
+            if not isinstance(name, str) or not name.strip():
+                err = Error(
+                    message="Invalid UI component data",
+                    description=f"Property component 'name' must be a non-empty string, got {name!r}!",
+                    data={"component_name": canonical_name, "field": "name", "value": name},
+                    code=InvalidResourceDataError,
+                )
+                logger.trace("Validation failed: Property invalid name", channel="ui", error=err)
+                return err
+
+            getter = component_data.get("getter")
+            if not isinstance(getter, str):
+                err = Error(
+                    message="Invalid UI component data",
+                    description=f"Property component 'getter' must be a 32-character hex string, got {type(getter).__name__}!",
+                    data={"component_name": canonical_name, "field": "getter", "value": getter},
+                    code=InvalidResourceDataError,
+                )
+                logger.trace("Validation failed: Property invalid getter type", channel="ui", error=err)
+                return err
+            getter_clean = getter.replace("-", "").strip()
+            if len(getter_clean) not in (32, 64):
+                err = Error(
+                    message="Invalid UI component data",
+                    description=f"Property component 'getter' hex string length must be 32 or 64 characters, got {len(getter_clean)}!",
+                    data={"component_name": canonical_name, "field": "getter", "value": getter},
+                    code=InvalidResourceDataError,
+                )
+                logger.trace("Validation failed: Property invalid getter length", channel="ui", error=err)
+                return err
+            try:
+                bytes.fromhex(getter_clean)
+            except ValueError:
+                err = Error(
+                    message="Invalid UI component data",
+                    description=f"Property component 'getter' is not a valid hex string: '{getter}'!",
+                    data={"component_name": canonical_name, "field": "getter", "value": getter},
+                    code=InvalidResourceDataError,
+                )
+                logger.trace("Validation failed: Property invalid getter hex", channel="ui", error=err)
+                return err
+
+            if "setter" in component_data:
+                setter = component_data["setter"]
+                if setter is not None and setter != "":
+                    if not isinstance(setter, str):
+                        err = Error(
+                            message="Invalid UI component data",
+                            description=f"Property component 'setter' must be a hex string or empty string, got {type(setter).__name__}!",
+                            data={"component_name": canonical_name, "field": "setter", "value": setter},
+                            code=InvalidResourceDataError,
+                        )
+                        logger.trace("Validation failed: Property invalid setter type", channel="ui", error=err)
+                        return err
+                    setter_clean = setter.replace("-", "").strip()
+                    if len(setter_clean) not in (32, 64):
+                        err = Error(
+                            message="Invalid UI component data",
+                            description=f"Property component 'setter' hex string length must be 32 or 64 characters, got {len(setter_clean)}!",
+                            data={"component_name": canonical_name, "field": "setter", "value": setter},
+                            code=InvalidResourceDataError,
+                        )
+                        logger.trace("Validation failed: Property invalid setter length", channel="ui", error=err)
+                        return err
+                    try:
+                        bytes.fromhex(setter_clean)
+                    except ValueError:
+                        err = Error(
+                            message="Invalid UI component data",
+                            description=f"Property component 'setter' is not a valid hex string: '{setter}'!",
+                            data={"component_name": canonical_name, "field": "setter", "value": setter},
+                            code=InvalidResourceDataError,
+                        )
+                        logger.trace("Validation failed: Property invalid setter hex", channel="ui", error=err)
+                        return err
+
+            if "presentation" in component_data:
+                pres = component_data["presentation"]
+                if not isinstance(pres, str):
+                    err = Error(
+                        message="Invalid UI component data",
+                        description=f"Property component 'presentation' must be a string, got {type(pres).__name__}!",
+                        data={"component_name": canonical_name, "field": "presentation", "value": pres},
+                        code=InvalidResourceDataError,
+                    )
+                    logger.trace("Validation failed: Property invalid presentation", channel="ui", error=err)
+                    return err
+
+            if "presentation_args" in component_data:
+                pargs = component_data["presentation_args"]
+                if not isinstance(pargs, Mapping):
+                    err = Error(
+                        message="Invalid UI component data",
+                        description=f"Property component 'presentation_args' must be a mapping, got {type(pargs).__name__}!",
+                        data={"component_name": canonical_name, "field": "presentation_args", "value": pargs},
+                        code=InvalidResourceDataError,
+                    )
+                    logger.trace("Validation failed: Property invalid presentation_args", channel="ui", error=err)
+                    return err
+
         return None
 
     ui_component = validate_ui_component
@@ -676,43 +797,49 @@ def trigger_ui_event(
                     return err
 
                 match = UI_EVENT_HANDLER_REGEX.match(handler_ref.strip())
-                if not match:
+                if not match and not HEX_UUID_REGEX.match(handler_ref.strip()):
                     err = Error(
                         message="Invalid UI event handler reference",
-                        description=f"Handler reference '{handler_ref}' does not match expected pattern '<|1|<storage_id>|>.<function_name>'",
+                        description=f"Handler reference '{handler_ref}' does not match expected pattern '<|1|<storage_id>|>.<function_name>' or 32-character hex UUID",
                         data={"entity_id": curr_id, "event_name": event_name, "handler_ref": handler_ref},
                         code=InvalidResourceDataError,
                     )
                     logger.trace("Failed to trigger UI event: invalid reference format", channel="ui", error=err, entity_id=curr_id)
                     return err
 
-                sid_hex = match.group("sid")
-                fn_name = match.group("fn")
+                if match:
+                    sid_hex = match.group("sid")
+                    fn_name = match.group("fn")
 
-                script_proxy = self.resolve_proxy(Script, sid_hex)
-                if isinstance(script_proxy, Error):
-                    return script_proxy
+                    script_proxy = self.resolve_proxy(Script, sid_hex)
+                    if isinstance(script_proxy, Error):
+                        return script_proxy
 
-                try:
-                    func = getattr(script_proxy, fn_name)
-                except AttributeError as ex:
-                    err = Error(
-                        message="UI event handler failed",
-                        description=f"Function '{fn_name}' not found on script proxy: {ex}",
-                        data={"entity_id": curr_id, "handler_ref": handler_ref, "error": str(ex)},
-                        code=InvalidResourceDataError,
-                    )
-                    logger.trace("Failed to trigger UI event: function not found", channel="ui", error=err, entity_id=curr_id)
-                    return err
-                except (Exception, SystemExit) as ex:
-                    err = Error(
-                        message="UI event handler failed",
-                        description=str(ex),
-                        data={"entity_id": curr_id, "handler_ref": handler_ref, "error": str(ex)},
-                        code=InvalidResourceDataError,
-                    )
-                    logger.trace("Failed to trigger UI event: error resolving function", channel="ui", error=err, entity_id=curr_id)
-                    return err
+                    try:
+                        func = getattr(script_proxy, fn_name)
+                    except AttributeError as ex:
+                        err = Error(
+                            message="UI event handler failed",
+                            description=f"Function '{fn_name}' not found on script proxy: {ex}",
+                            data={"entity_id": curr_id, "handler_ref": handler_ref, "error": str(ex)},
+                            code=InvalidResourceDataError,
+                        )
+                        logger.trace("Failed to trigger UI event: function not found", channel="ui", error=err, entity_id=curr_id)
+                        return err
+                    except (Exception, SystemExit) as ex:
+                        err = Error(
+                            message="UI event handler failed",
+                            description=str(ex),
+                            data={"entity_id": curr_id, "handler_ref": handler_ref, "error": str(ex)},
+                            code=InvalidResourceDataError,
+                        )
+                        logger.trace("Failed to trigger UI event: error resolving function", channel="ui", error=err, entity_id=curr_id)
+                        return err
+                else:
+                    exp_res = self.resolve_function_export(handler_ref.strip())
+                    if isinstance(exp_res, Error):
+                        return exp_res
+                    func, _s_rid = exp_res
 
                 if not callable(func):
                     err = Error(

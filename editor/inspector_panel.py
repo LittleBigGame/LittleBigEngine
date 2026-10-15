@@ -7,7 +7,7 @@ import json
 from typing import Any
 import dearpygui.dearpygui as dpg
 
-from LBE.types import Error, RuntimeID
+from LBE.types import Error, InvalidResourceDataError, RuntimeID
 from LBE.proxy import _unwrap
 from .context_menu import open_context_menu
 from .pills import (
@@ -16,6 +16,7 @@ from .pills import (
     get_pill_theme,
     parse_reference_pill,
     rename_script_function_display_name,
+    render_function_export_pill,
 )
 from .session import EditorSession
 from .theme import get_card_theme
@@ -422,6 +423,15 @@ class InspectorPanel:
     def _render_component_card(
         self, entity_id: RuntimeID, comp_name: str, comp_data: dict[str, Any]
     ) -> None:
+        is_property = (
+            comp_name.lower() == "property"
+            or comp_name.lower().startswith("property:")
+            or (isinstance(comp_data, Mapping) and "getter" in comp_data)
+        )
+        if is_property:
+            self._render_property_card(entity_id, comp_name, comp_data)
+            return
+
         with dpg.collapsing_header(
             label=f"Component: {comp_name}",
             parent=self.content_tag,
@@ -483,6 +493,212 @@ class InspectorPanel:
                                 callback=self._on_add_field,
                                 user_data=(entity_id, comp_name, fn_tag, ft_tag, fv_tag),
                             )
+
+    def _render_property_card(
+        self, entity_id: RuntimeID, comp_name: str, comp_data: dict[str, Any]
+    ) -> None:
+        if ":" in comp_name and comp_name.lower().startswith("property:"):
+            prop_name = comp_name.split(":", 1)[1].strip()
+            if isinstance(comp_data, Mapping) and comp_data.get("name"):
+                prop_name = str(comp_data["name"]).strip()
+        elif isinstance(comp_data, Mapping) and comp_data.get("name"):
+            prop_name = str(comp_data["name"]).strip()
+        elif comp_name.lower() != "property":
+            prop_name = comp_name
+        else:
+            prop_name = "Property"
+
+        with dpg.collapsing_header(
+            label=f"Property: {prop_name}",
+            parent=self.content_tag,
+            default_open=True,
+        ) as header:
+            dpg.bind_item_theme(header, get_card_theme(selected=False))
+            with dpg.table(
+                header_row=False,
+                policy=dpg.mvTable_SizingStretchProp,
+                borders_innerH=False,
+                borders_innerV=False,
+                borders_outerH=False,
+                borders_outerV=False,
+            ):
+                dpg.add_table_column(init_width_or_weight=0.55)
+                dpg.add_table_column(init_width_or_weight=0.45)
+                with dpg.table_row():
+                    field_count = len(comp_data) if isinstance(comp_data, Mapping) else 0
+                    dpg.add_text(f"Fields ({field_count}):", color=(150, 155, 170))
+                    dpg.add_button(
+                        label="Remove",
+                        width=-1,
+                        callback=self._on_remove_component,
+                        user_data=(entity_id, comp_name),
+                    )
+
+            # -----------------------------------------------------------------
+            # Current Live Evaluated Value
+            # -----------------------------------------------------------------
+            eval_val = None
+            eval_error = None
+            proxy = self.session.get_entity_proxy(entity_id)
+            if proxy is not None:
+                try:
+                    eval_val = getattr(proxy, prop_name)
+                except Exception as ex:
+                    eval_error = str(ex)
+            else:
+                eval_error = f"Entity {entity_id} proxy not available"
+
+            if eval_error is not None:
+                dpg.add_text(f"[⚠️ Evaluation Error: {eval_error}]", color=(255, 120, 100, 255))
+            else:
+                dpg.add_text(f"Value: {eval_val}", color=(120, 215, 255))
+
+                presentation = ""
+                presentation_args: dict[str, Any] = {}
+                if isinstance(comp_data, Mapping):
+                    presentation = str(comp_data.get("presentation", comp_data.get("presentation_type", "text"))).lower()
+                    raw_args = comp_data.get("presentation_args")
+                    if isinstance(raw_args, Mapping):
+                        presentation_args = dict(raw_args)
+
+                has_setter = bool(isinstance(comp_data, Mapping) and comp_data.get("setter"))
+
+                if presentation == "slider":
+                    min_val = float(presentation_args.get("min", comp_data.get("min", 0.0) if isinstance(comp_data, Mapping) else 0.0))
+                    max_val = float(presentation_args.get("max", comp_data.get("max", 100.0) if isinstance(comp_data, Mapping) else 100.0))
+                    cur_val = float(eval_val) if isinstance(eval_val, (int, float)) and not isinstance(eval_val, bool) else min_val
+                    cur_val = max(min_val, min(max_val, cur_val))
+                    dpg.add_slider_float(
+                        label=prop_name,
+                        min_value=min_val,
+                        max_value=max_val,
+                        clamped=True,
+                        default_value=cur_val,
+                        enabled=has_setter,
+                        width=-1,
+                        callback=self._on_property_value_changed,
+                        user_data=(entity_id, prop_name, "float"),
+                    )
+                    if not has_setter:
+                        dpg.add_text("[🔒 Read-Only]", color=(160, 160, 175))
+                else:  # presentation == "text" or default
+                    if has_setter:
+                        if isinstance(eval_val, float):
+                            dpg.add_input_float(
+                                label=prop_name,
+                                default_value=eval_val,
+                                format="%.4f",
+                                width=-1,
+                                callback=self._on_property_value_changed,
+                                user_data=(entity_id, prop_name, "float"),
+                            )
+                        elif isinstance(eval_val, int) and not isinstance(eval_val, bool):
+                            dpg.add_input_int(
+                                label=prop_name,
+                                default_value=eval_val,
+                                width=-1,
+                                callback=self._on_property_value_changed,
+                                user_data=(entity_id, prop_name, "int"),
+                            )
+                        elif isinstance(eval_val, bool):
+                            dpg.add_checkbox(
+                                label=prop_name,
+                                default_value=eval_val,
+                                callback=self._on_property_value_changed,
+                                user_data=(entity_id, prop_name, "bool"),
+                            )
+                        else:
+                            dpg.add_input_text(
+                                label=prop_name,
+                                default_value=str(eval_val) if eval_val is not None else "",
+                                width=-1,
+                                callback=self._on_property_value_changed,
+                                user_data=(entity_id, prop_name, "str"),
+                            )
+                    else:
+                        with dpg.group(horizontal=True):
+                            dpg.add_text(f"{eval_val}", color=(200, 220, 255))
+                            dpg.add_text("[🔒 Read-Only]", color=(160, 160, 175))
+
+            # -----------------------------------------------------------------
+            # Binding Pills
+            # -----------------------------------------------------------------
+            dpg.add_spacer(height=4)
+            dpg.add_text("Bindings:", color=(150, 170, 210))
+            getter_ref = comp_data.get("getter") if isinstance(comp_data, Mapping) else None
+            setter_ref = comp_data.get("setter") if isinstance(comp_data, Mapping) else None
+
+            with dpg.group(horizontal=True):
+                dpg.add_text("Getter:", color=(150, 155, 170))
+                if getter_ref:
+                    rendered = render_function_export_pill(
+                        str(getter_ref),
+                        self.session.kernel,
+                        callback=self._open_pill_info_modal,
+                    )
+                    if not rendered:
+                        dpg.add_text(str(getter_ref), color=(200, 200, 200))
+                else:
+                    dpg.add_text("(None)", color=(150, 155, 170))
+
+            with dpg.group(horizontal=True):
+                dpg.add_text("Setter:", color=(150, 155, 170))
+                if setter_ref:
+                    rendered = render_function_export_pill(
+                        str(setter_ref),
+                        self.session.kernel,
+                        callback=self._open_pill_info_modal,
+                    )
+                    if not rendered:
+                        dpg.add_text(str(setter_ref), color=(200, 200, 200))
+                else:
+                    dpg.add_text("(None - Read-Only)", color=(150, 155, 170))
+
+            # -----------------------------------------------------------------
+            # Raw Configuration
+            # -----------------------------------------------------------------
+            dpg.add_spacer(height=4)
+            with dpg.tree_node(label="+ Raw Configuration", default_open=False):
+                if isinstance(comp_data, Mapping):
+                    self._render_fields(entity_id, comp_name, comp_data, path=[])
+
+                    with dpg.tree_node(label="+ Add Field", default_open=False):
+                        fn_tag = f"{self.tag}_prop_new_fn_{entity_id}_{comp_name}"
+                        ft_tag = f"{self.tag}_prop_new_ft_{entity_id}_{comp_name}"
+                        fv_tag = f"{self.tag}_prop_new_fv_{entity_id}_{comp_name}"
+                        if dpg.does_item_exist(fn_tag):
+                            dpg.delete_item(fn_tag)
+                        if dpg.does_item_exist(ft_tag):
+                            dpg.delete_item(ft_tag)
+                        if dpg.does_item_exist(fv_tag):
+                            dpg.delete_item(fv_tag)
+                        with dpg.table(
+                            header_row=False,
+                            policy=dpg.mvTable_SizingStretchProp,
+                            borders_innerH=False,
+                            borders_innerV=False,
+                            borders_outerH=False,
+                            borders_outerV=False,
+                        ):
+                            dpg.add_table_column(init_width_or_weight=0.35)
+                            dpg.add_table_column(init_width_or_weight=0.30)
+                            dpg.add_table_column(init_width_or_weight=0.25)
+                            dpg.add_table_column(init_width_or_weight=0.10)
+                            with dpg.table_row():
+                                dpg.add_input_text(hint="Field", width=-1, tag=fn_tag)
+                                dpg.add_combo(
+                                    items=["float", "int", "str", "bool", "dict"],
+                                    default_value="float",
+                                    width=-1,
+                                    tag=ft_tag,
+                                )
+                                dpg.add_input_text(hint="Val", width=-1, tag=fv_tag)
+                                dpg.add_button(
+                                    label="+",
+                                    width=-1,
+                                    callback=self._on_add_field,
+                                    user_data=(entity_id, comp_name, fn_tag, ft_tag, fv_tag),
+                                )
 
     def _render_fields(
         self,
@@ -882,4 +1098,42 @@ class InspectorPanel:
 
         self._on_field_value_changed(input_tag, ref_value, (entity_id, comp_name, curr_path, "str"))
         self.rebuild()
+
+    def _on_property_value_changed(
+        self, sender: Any, app_data: Any, user_data: Any
+    ) -> None:
+        entity_id, prop_name, val_type = user_data
+        proxy = self.session.get_entity_proxy(entity_id)
+        if proxy is None:
+            return
+
+        val: Any = app_data
+        if val_type == "float":
+            try:
+                val = float(app_data)
+            except (ValueError, TypeError):
+                return
+        elif val_type == "int":
+            try:
+                val = int(app_data)
+            except (ValueError, TypeError):
+                return
+        elif val_type == "bool":
+            val = bool(app_data)
+        elif val_type == "str":
+            val = str(app_data)
+
+        try:
+            setattr(proxy, prop_name, val)
+        except Exception as ex:
+            self.session.report_errors(
+                Error(
+                    message="Property Setter Error",
+                    description=str(ex),
+                    data={"entity_id": entity_id, "property": prop_name},
+                    code=InvalidResourceDataError,
+                )
+            )
+        self.session.refresh()
+
 

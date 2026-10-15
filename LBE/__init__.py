@@ -19,6 +19,7 @@ from .integrity import (
 )
 from .proxy import EntityProxy, ComponentProxy, WorldProxy, ScriptProxy, BoundScriptProxy, TrackedList, ReadOnlySequence
 from .preprocessor import ReferencePreprocessor, RuntimeBinder, LBEReferenceSyntaxError, extract_script_symbols
+from .scripts import export
 from .kernel import Kernel
 
 __all__ = [
@@ -32,4 +33,5 @@ __all__ = [
     "Validate", "ValidateUI", "UI_SCHEMAS", "UI_COMPONENT_NAMES", "UI_COMPONENT_ALIASES", "UI_EVENT_HANDLER_REGEX",
     "EntityProxy", "ComponentProxy", "WorldProxy", "ScriptProxy", "BoundScriptProxy", "TrackedList", "ReadOnlySequence",
     "ReferencePreprocessor", "RuntimeBinder", "LBEReferenceSyntaxError", "extract_script_symbols",
+    "export",
 ]

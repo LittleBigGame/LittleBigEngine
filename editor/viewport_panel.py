@@ -10,6 +10,20 @@ import dearpygui.dearpygui as dpg
 from LBE.types import RuntimeID
 from .session import EditorSession
 
+KEY_MAP: dict[int, str] = {
+    getattr(dpg, "mvKey_W", 87): "W",
+    getattr(dpg, "mvKey_S", 83): "S",
+    getattr(dpg, "mvKey_A", 65): "A",
+    getattr(dpg, "mvKey_D", 68): "D",
+    getattr(dpg, "mvKey_Up", 38): "UP",
+    getattr(dpg, "mvKey_Down", 40): "DOWN",
+    getattr(dpg, "mvKey_Left", 37): "LEFT",
+    getattr(dpg, "mvKey_Right", 39): "RIGHT",
+    getattr(dpg, "mvKey_Spacebar", 32): "SPACE",
+}
+if hasattr(dpg, "mvKey_Space"):
+    KEY_MAP[getattr(dpg, "mvKey_Space")] = "SPACE"
+
 
 class ViewportPanel:
     """Dockable panel hosting the real-time Scene View canvas and simulation controls."""
@@ -125,6 +139,8 @@ class ViewportPanel:
                     dpg.add_mouse_wheel_handler(callback=self._on_mouse_wheel)
                     dpg.add_mouse_drag_handler(button=1, callback=self._on_mouse_drag)
                     dpg.add_mouse_drag_handler(button=2, callback=self._on_mouse_drag)
+                    dpg.add_key_down_handler(callback=self._on_key_down)
+                    dpg.add_key_release_handler(callback=self._on_key_release)
 
         self.redraw()
         return self.tag
@@ -201,6 +217,22 @@ class ViewportPanel:
         self.cam_focus_y -= dy / self.cam_zoom
         dpg.reset_mouse_drag_delta(button)
         self.redraw()
+
+    def _on_key_down(self, sender: str | int = 0, app_data: Any = 0) -> None:
+        key_code = app_data[0] if isinstance(app_data, (list, tuple)) and app_data else app_data
+        key = KEY_MAP.get(key_code)
+        if key and hasattr(self.session.kernel, "input_state"):
+            keys = self.session.kernel.input_state.get("keys")
+            if isinstance(keys, set):
+                keys.add(key)
+
+    def _on_key_release(self, sender: str | int = 0, app_data: Any = 0) -> None:
+        key_code = app_data[0] if isinstance(app_data, (list, tuple)) and app_data else app_data
+        key = KEY_MAP.get(key_code)
+        if key and hasattr(self.session.kernel, "input_state"):
+            keys = self.session.kernel.input_state.get("keys")
+            if isinstance(keys, set):
+                keys.discard(key)
 
     def redraw(self) -> None:
         """Clear and redraw the canvas with grid, axes, and entities."""

@@ -1,0 +1,25 @@
+{
+    "type": 0,
+    "data": {
+        "components": {
+            "Shield": {
+                "defense_boost": 12,
+                "orbit_radius": 26.0,
+                "orbit_speed": 80.0,
+                "angle": 123.33333333333321
+            },
+            "Transform": {
+                "x": -14.28723342984091,
+                "y": 21.72268309673638,
+                "z": 0.0,
+                "rot_z": 123.33333333333321
+            }
+        },
+        "resources": [],
+        "scripts": [],
+        "children": [],
+        "parent": "11e37198c01b8eb8e8ea48d2caa76e16"
+    },
+    "name": "ShieldSatellite",
+    "children": []
+}

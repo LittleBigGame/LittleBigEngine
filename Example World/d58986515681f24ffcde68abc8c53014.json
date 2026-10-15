@@ -5,13 +5,16 @@
             "Weapon": {
                 "damage": 45,
                 "range": 1.5,
-                "element": "Light"
+                "element": "Light",
+                "orbit_radius": 32.0,
+                "orbit_speed": 120.0,
+                "angle": 50.0
             },
             "Transform": {
-                "x": 20.0,
-                "y": 0.0,
+                "x": 20.56920350996926,
+                "y": 24.513422179807296,
                 "z": 0.0,
-                "rot_z": 0.0
+                "rot_z": 50.0
             }
         },
         "resources": [],
@@ -19,5 +22,6 @@
         "children": [],
         "parent": "11e37198c01b8eb8e8ea48d2caa76e16"
     },
-    "name": "Excalibur"
+    "name": "Excalibur",
+    "children": []
 }

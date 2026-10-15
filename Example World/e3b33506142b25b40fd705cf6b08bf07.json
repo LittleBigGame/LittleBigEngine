@@ -1,0 +1,22 @@
+{
+    "type": 0,
+    "data": {
+        "components": {
+            "Transform": {
+                "x": 0.0,
+                "y": -34.0,
+                "z": 0.0
+            },
+            "UIText": {
+                "content": "HP",
+                "bullet": false
+            }
+        },
+        "resources": [],
+        "scripts": [],
+        "children": [],
+        "parent": "6efe997432e8008d5b2ca61a97245a18"
+    },
+    "name": "HPTag",
+    "children": []
+}

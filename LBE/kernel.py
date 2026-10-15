@@ -51,6 +51,8 @@ class Kernel:
         self._scripts_activating: set[RuntimeID] = set()
         self._script_mtime_cache: dict[RuntimeID, int] = {}
         self._method_sig_cache: dict[tuple[RuntimeID, str], tuple[int, str | None]] = {}
+        self.function_exports: dict[str, tuple[StorageID, str]] = {}
+        self.input_state: dict[str, Any] = {"keys": set(), "mouse": (0.0, 0.0)}
 
         logger.trace(
             f"Initialized Kernel at '{folder_location}'",
@@ -315,9 +317,13 @@ class Kernel:
         """Get a ScriptProxy for a script resource in memory."""
         return scripts.get_script_proxy(self, script_id)
 
-    def get_script_module(self, script_id: RuntimeID) -> dict[str, Any] | Error:
+    def get_script_module(self, script_id: RuntimeID | StorageID | str) -> dict[str, Any] | Error:
         """Load, bind, and execute a script resource module, returning its namespace globals."""
         return scripts.get_script_module(self, script_id)
+
+    def resolve_function_export(self, fn_uuid_hex: str | bytes) -> tuple[Callable, RuntimeID] | Error:
+        """Resolve an exported function UUID into (callable, script_runtime_id)."""
+        return scripts.resolve_function_export(self, fn_uuid_hex)
 
     def update_script_source(self, script_id: RuntimeID, source: str) -> None | Error:
         """Validate and replace editable script source without changing its source mode."""

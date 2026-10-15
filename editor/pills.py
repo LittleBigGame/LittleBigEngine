@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+from collections.abc import Mapping
 from dataclasses import dataclass
 import io
 from pathlib import Path
@@ -70,13 +71,92 @@ class PillData:
 def parse_reference_pill(ref_str: str, kernel: Any) -> PillData | None:
     """Parse reference string into a PillData projection if it matches LittleBigEngine syntax.
 
-    Matches `<|res_type|sid_hex|>` or `<|res_type|sid_hex|>.fn_name`.
+    Matches `<|res_type|sid_hex|>` or `<|res_type|sid_hex|>.fn_name`,
+    or a plain 32-character hex exported function UUID (or in kernel.function_exports).
     Queries kernel for resource name and function display names.
     """
     if not isinstance(ref_str, str):
         return None
 
-    match = PILL_REF_REGEX.match(ref_str.strip())
+    raw_ref = ref_str.strip()
+    s_clean = raw_ref.lower()
+    hex_clean = s_clean.replace("-", "")
+    is_plain_hex = len(hex_clean) == 32 and all(c in "0123456789abcdef" for c in hex_clean)
+
+    if kernel is not None and hasattr(kernel, "function_exports"):
+        export_key = None
+        if s_clean in kernel.function_exports:
+            export_key = s_clean
+        elif hex_clean in kernel.function_exports:
+            export_key = hex_clean
+        elif is_plain_hex and hasattr(kernel, "resolve_function_export"):
+            kernel.resolve_function_export(hex_clean)
+            if hex_clean in kernel.function_exports:
+                export_key = hex_clean
+            elif s_clean in kernel.function_exports:
+                export_key = s_clean
+
+        if export_key is not None:
+            script_sid, fn_name = kernel.function_exports[export_key]
+            sid_hex = script_sid.hex().lower() if hasattr(script_sid, "hex") else str(script_sid).lower()
+            sid_bytes = script_sid if isinstance(script_sid, (bytes, bytearray)) else bytes.fromhex(sid_hex)
+
+            script_name = f"Script_{sid_hex[:8]}"
+            symbols: dict[str, str] = {}
+            rid = None
+            if hasattr(kernel, "get_resource_id"):
+                candidate = kernel.get_resource_id(sid_bytes)
+                if not isinstance(candidate, Error):
+                    rid = candidate
+
+            if rid is None and hasattr(kernel, "resource_storage_ids"):
+                for c_rid, s_val in kernel.resource_storage_ids.items():
+                    if isinstance(s_val, (bytes, bytearray)) and s_val.hex().lower() == sid_hex:
+                        rid = c_rid
+                        break
+
+            if rid is not None:
+                res = None
+                if hasattr(kernel, "get_resource"):
+                    candidate_res = kernel.get_resource(rid)
+                    if not isinstance(candidate_res, Error):
+                        res = candidate_res
+                if res is None and hasattr(kernel, "resources") and rid in kernel.resources:
+                    res = kernel.resources[rid]
+
+                if isinstance(res, (dict, Mapping)):
+                    r_name = res.get("name")
+                    if r_name:
+                        script_name = r_name
+                    elif hasattr(kernel, "is_entity") and kernel.is_entity(rid):
+                        script_name = f"Entity_{rid}"
+                    else:
+                        script_name = f"Script_{rid}"
+
+                if hasattr(kernel, "get_script_proxy"):
+                    proxy = kernel.get_script_proxy(rid)
+                    if not isinstance(proxy, Error) and proxy is not None and hasattr(proxy, "symbols"):
+                        symbols = proxy.symbols
+
+                if not symbols and isinstance(res, (dict, Mapping)):
+                    s_data = res.get("data", {})
+                    if isinstance(s_data, dict):
+                        symbols = s_data.get("symbols", {})
+                        if not symbols and "code" in s_data:
+                            symbols = extract_script_symbols(s_data["code"])
+
+            display_name = symbols.get(fn_name, fn_name) if symbols else fn_name
+
+            return PillData(
+                res_type=Script,
+                storage_id_hex=sid_hex,
+                res_name=script_name,
+                fn_symbol=fn_name,
+                fn_display_name=display_name,
+                raw_ref=ref_str,
+            )
+
+    match = PILL_REF_REGEX.match(raw_ref)
     if not match:
         return None
 
@@ -86,7 +166,6 @@ def parse_reference_pill(ref_str: str, kernel: Any) -> PillData | None:
 
     res_type = int(match.group("res_type"))
     fn = match.group("fn")
-    raw_ref = ref_str.strip()
 
     res_name = f"Resource_{sid_hex[:8]}" if res_type != Script else f"Script_{sid_hex[:8]}"
     symbols: dict[str, str] = {}
@@ -169,6 +248,43 @@ def parse_reference_pill(ref_str: str, kernel: Any) -> PillData | None:
         fn_display_name=fn_display_name,
         raw_ref=raw_ref,
     )
+
+
+def render_function_export_pill(
+    fn_uuid_hex: str,
+    kernel: Any,
+    callback: Any = None,
+    user_data: Any = None,
+) -> bool:
+    """Render a visual pill button for an exported function UUID if valid.
+
+    Displays [ ⚡ fn_display_name ] (or [ ⚡ ScriptName :: fn_name ]) with tooltip showing underlying UUID hex.
+    Returns True if rendered, False if fn_uuid_hex is not a valid export.
+    """
+    if not isinstance(fn_uuid_hex, str) or not fn_uuid_hex.strip():
+        return False
+
+    pill = parse_reference_pill(fn_uuid_hex, kernel)
+    if pill is None or pill.res_type != Script:
+        return False
+
+    if pill.fn_display_name and pill.fn_display_name != pill.fn_symbol:
+        label = f"[ ⚡ {pill.fn_display_name} ]"
+    elif pill.res_name and pill.fn_symbol:
+        label = f"[ ⚡ {pill.res_name} :: {pill.fn_symbol} ]"
+    else:
+        label = f"[ ⚡ {pill.fn_display_name or pill.fn_symbol or pill.res_name} ]"
+
+    kwargs: dict[str, Any] = {}
+    if callback is not None:
+        kwargs["callback"] = callback
+        kwargs["user_data"] = user_data if user_data is not None else pill
+
+    btn = dpg.add_button(label=label, **kwargs)
+    dpg.bind_item_theme(btn, get_pill_theme())
+    with dpg.tooltip(btn):
+        dpg.add_text(f"Export UUID: {fn_uuid_hex.strip()}")
+    return True
 
 
 def get_available_function_pills(kernel: Any) -> list[PillData]:

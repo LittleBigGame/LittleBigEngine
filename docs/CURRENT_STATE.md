@@ -14,12 +14,14 @@ Date: 15 October 2026. This describes verified behavior, not every future design
 | 6 — Script activation | Compile and bind before activation; failed reloads retain the last working module and expose diagnostics. Kernel state modified by rejected activation is rolled back. Source edits retain inline/external mode. |
 | 7 — Editor reliability and overhead | Failures appear in a bounded error history and status bar. Reload-all is transactional and GUI reload requires confirmation when dirty. Logging filters before allocation and bounds history; hierarchy registry leaks and duplicate selection rebuilds are fixed. |
 | 8 — Tooling and handoff | Production, editor, tests and tools pass Ruff. All engine modules are checked for forbidden GUI/backend imports. Package metadata, optional editor/dev dependencies, an installable launcher and a normal README are present. |
+| 9 — Pure-UUID Exports & Property Components | Functions export under 128-bit hex UUIDs (`@export`). Dynamic `Property` components support computed properties, converters, and references with dynamic evaluation, cycle detection, read-only enforcement, and DPG inspector presentation. |
+| 10 — Showcase Mini-Game | "The Dungeon of Alchemia" in `Example World` with WASD/arrow keyboard input, linked multi-orbit physics (`Excalibur`, `OrbOfPower`, `ShieldSatellite`), reactive enemy AI with spatial state transitions, and an interactive `AlchemistToolkit` desktop HUD. |
 
-All eight stabilization phases are implemented. They do not encompass the future feature backlog below.
+All stabilization phases and feature extensions through Phase E are implemented.
 
 ## Verification
 
-- Full suite: **384 passed, 8 skipped**, no failures or unexpected passes.
+- Full suite: **441 passed, 12 skipped**, no failures or unexpected passes.
 - Ruff: **passed** across `LBE editor tools tests main.py`.
 - Architecture import check: **passed**, all 14 engine modules.
 - Independent architecture review: **PASS**, no unresolved critical or major findings.

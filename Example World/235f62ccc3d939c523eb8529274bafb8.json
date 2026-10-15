@@ -1,0 +1,15 @@
+{
+    "type": 1,
+    "data": {
+        "name": "EnemyAI",
+        "source_path": "",
+        "code": "import math\n\ndef update(self, dt):\n    dist = float(self.DistanceToPlayer)\n    aggro = float(self.AI.get(\"aggro_radius\", 150.0))\n    if dist < aggro:\n        self.AI[\"state\"] = \"chase\"\n        player = next((p for p in self.world.query(\"Health\", \"Stats\") if \"player\" in (p.name or \"\").lower()), None)\n        if player:\n            dx = float(player.Transform.x) - float(self.Transform.x)\n            dy = float(player.Transform.y) - float(self.Transform.y)\n            l = max(0.001, math.hypot(dx, dy))\n            spd = float(self.AI.get(\"speed\", 50.0))\n            self.Transform.x += (dx / l) * spd * dt\n            self.Transform.y += (dy / l) * spd * dt\n    else:\n        self.AI[\"state\"] = \"patrol\"\n        ang = (float(self.AI.get(\"angle\", 0.0)) + 45.0 * dt) % 360.0\n        self.AI[\"angle\"] = ang\n        cx = float(self.AI.get(\"patrol_center_x\", 380.0))\n        cy = float(self.AI.get(\"patrol_center_y\", 180.0))\n        r = float(self.AI.get(\"radius\", 45.0))\n        self.Transform.x = cx + r * math.cos(math.radians(ang))\n        self.Transform.y = cy + r * math.sin(math.radians(ang))\n\n    for c in self.children:\n        if c.has(\"UISlider\"):\n            c.UISlider[\"value\"] = max(0.0, min(1.0, float(self.HealthPercent) / 100.0))\n",
+        "requires": [
+            "Transform",
+            "Health",
+            "AI"
+        ],
+        "symbols": {}
+    },
+    "name": "EnemyAI"
+}
