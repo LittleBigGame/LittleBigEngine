@@ -6,6 +6,7 @@ Zero unicode font glyph dependencies.
 """
 
 from __future__ import annotations
+from typing import Any
 
 import dearpygui.dearpygui as dpg
 

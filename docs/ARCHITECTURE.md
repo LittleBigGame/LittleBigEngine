@@ -53,6 +53,18 @@ When a legacy resource folder has no manifest, root entities are discovered dete
 
 This phase does not implement schema migration, generation-aware runtime handles, or automatic file-watcher reload. Those remain separate architectural changes.
 
+### Implemented stabilization boundaries — 15 October 2026
+
+The current Kernel owns the authoritative registry, resource dictionaries, generations and caches. Its public methods delegate to ordinary functions in `registry.py`, `storage.py`, `world.py`, `scripts.py` and `ui.py`; those modules introduce no second component store or manager-owned scene graph. Runtime identity is now generation-aware, with issuance high-water marks that are deliberately not rolled back.
+
+Resource transaction snapshots retain original container identities and shallow contents, restoring nested dicts/lists in place on failure. This preserves component references cached by a working script. Intentionally replaced or removed component views still fail attachment checks.
+
+Script activation compiles and resolves candidates before publishing a module cache. Rejected activation restores Kernel state and leaves the last working module callable. Source edits preserve inline/external ownership. Python remains trusted host-process code; a separate preview process is not implemented by this stabilization phase.
+
+Project saves stage resources and the manifest together, publish the manifest last, and restore already-published files on an ordinary write failure. Failed restoration retains its recovery directory and reports the failure. Crash journaling and concurrent writers remain future storage work.
+
+The editor owns confirmation dialogs, a bounded error history, status presentation and panel lifecycle. UI schemas and adapters remain a capability module with compatibility exports, consistent with accepted ADR-014. See `CURRENT_STATE.md` for verified capabilities and explicit limits.
+
 ## LBE references (design, not yet implemented)
 Stored LBE-extended Python may contain a special expression:
 

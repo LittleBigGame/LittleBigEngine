@@ -161,7 +161,8 @@ class StoragePanel:
         self.session.save_all_resources()
 
     def _on_reload_all(self) -> None:
-        self.session.reload_all_resources()
+        from .dialogs import confirm_reload
+        confirm_reload(self.session)
 
     def _on_save_single(self, sender: str | int, app_data: Any, user_data: RuntimeID) -> None:
         self.session.save_resource(user_data)

@@ -8,8 +8,6 @@ Universal right-click menu operating in 3 structured layers:
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-import copy
 from typing import Any
 import dearpygui.dearpygui as dpg
 
@@ -279,4 +277,5 @@ def _on_toggle_play(session: EditorSession, popup_tag: str) -> None:
 
 def _on_reload_all(session: EditorSession, popup_tag: str) -> None:
     _close_popup(popup_tag)
-    session.reload_all_resources()
+    from .dialogs import confirm_reload
+    confirm_reload(session)

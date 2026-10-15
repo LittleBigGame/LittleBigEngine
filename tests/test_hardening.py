@@ -74,6 +74,49 @@ def test_aborted_transaction_handles_never_address_later_entities(tmp_path):
     assert not kernel.is_valid_runtime_id(aborted)
 
 
+def test_aborted_replacement_handle_stays_invalid_after_later_reuse(tmp_path):
+    kernel = Kernel(tmp_path)
+    original = kernel.create_entity(name="Original")
+    with pytest.raises(RuntimeError):
+        with kernel.transaction():
+            assert kernel.delete_entity(original) is True
+            aborted = kernel.create_entity(name="Aborted")
+            raise RuntimeError("abort")
+    assert kernel.is_valid_runtime_id(original)
+    assert kernel.delete_entity(original) is True
+    replacement = kernel.create_entity(name="Replacement")
+    assert replacement != aborted
+    assert not kernel.is_valid_runtime_id(aborted)
+
+
+def test_failed_script_activation_never_reissues_its_created_handles(tmp_path):
+    kernel = Kernel(tmp_path)
+    script = kernel.create_script_resource(name="Bad", code="kernel.create_entity()\nraise RuntimeError('bad')")
+    next_slot = kernel.runtime_idx
+    aborted_handle = (1 << 32) | next_slot
+    assert isinstance(kernel.get_script_module(script), Error)
+    replacement = kernel.create_entity()
+    assert replacement != aborted_handle
+    assert not kernel.is_valid_runtime_id(aborted_handle)
+
+
+def test_rejected_activation_preserves_component_views_cached_by_working_module(tmp_path):
+    kernel = Kernel(tmp_path)
+    entity = kernel.create_entity(components={"Health": {"value": 10}})
+    script = kernel.create_script_resource(
+        name="CachedHealth",
+        code=f"health = kernel.get_component({entity}, 'Health')\ndef update(): health['value'] += 1",
+    )
+    previous = kernel.get_script_module(script)
+    previous["update"]()
+    data = copy.deepcopy(kernel.resources[script]["data"])
+    data["code"] = f"kernel.get_component({entity}, 'Health')['value'] = 0\nraise RuntimeError('bad')"
+    kernel.mutate_resource(script, data)
+    assert kernel.get_script_module(script) is previous
+    previous["update"]()
+    assert kernel.get_component(entity, "Health")["value"] == 12
+
+
 def test_detached_component_views_fail_instead_of_losing_writes(tmp_path):
     kernel = Kernel(tmp_path)
     entity = kernel.create_entity(components={"Stats": {"values": [1]}})
@@ -143,3 +186,73 @@ def test_batch_save_rolls_back_earlier_files_when_later_publish_fails(tmp_path, 
     assert {path: path.read_bytes() for path in tmp_path.glob("*.json")} == originals
     assert kernel.dirty_runtime_ids == {first, second}
     assert not list(tmp_path.glob(".lbe-save-*"))
+
+
+def test_external_source_reverted_to_original_clears_reload_error(tmp_path):
+    source = tmp_path / "logic.py"
+    source.write_text("value = 42", encoding="utf-8")
+    original_time = source.stat().st_mtime_ns
+    kernel = Kernel(tmp_path)
+    script = kernel.create_script_resource(name="Logic", source_path="logic.py")
+    previous = kernel.get_script_module(script)
+    source.write_text("def broken(:", encoding="utf-8")
+    os.utime(source, ns=(original_time + 1_000_000, original_time + 1_000_000))
+    assert kernel.get_script_module(script) is previous
+    assert script in kernel.get_diagnostics()["script_reload_errors"]
+    source.write_text("value = 42", encoding="utf-8")
+    os.utime(source, ns=(original_time, original_time))
+    assert kernel.get_script_module(script) is previous
+    assert kernel.get_diagnostics()["script_reload_errors"] == {}
+
+
+def test_failed_source_write_preserves_external_file_and_payload(tmp_path, monkeypatch):
+    source = tmp_path / "logic.py"
+    source.write_text("value = 1", encoding="utf-8")
+    kernel = Kernel(tmp_path)
+    script = kernel.create_script_resource(name="Logic", source_path="logic.py")
+    original = copy.deepcopy(kernel.resources[script]["data"])
+
+    def fail_replace(path, target):
+        raise PermissionError("Locked source file")
+
+    monkeypatch.setattr(Path, "replace", fail_replace)
+    assert isinstance(kernel.update_script_source(script, "value = 2"), Error)
+    assert source.read_text(encoding="utf-8") == "value = 1"
+    assert kernel.resources[script]["data"] == original
+    assert not list(tmp_path.glob("*.lbe.tmp"))
+
+
+def test_reload_all_is_atomic_and_reports_failure(tmp_path):
+    kernel = Kernel(tmp_path)
+    first = kernel.create_entity(components={"Health": {"value": 1}})
+    second = kernel.create_entity(components={"Health": {"value": 2}})
+    assert kernel.save_dirty_resources() is None
+    kernel.set_component(first, "Health", {"value": 100})
+    before = copy.deepcopy(kernel.resources)
+    sid = kernel.get_storage_id(second)
+    (tmp_path / f"{sid.hex()}.json").write_text("{bad json", encoding="utf-8")
+    session = EditorSession(kernel)
+    assert session.reload_all_resources()
+    assert kernel.resources == before
+    assert kernel.is_dirty(first)
+    assert session.errors[-1].message == "Resource reload failed"
+
+
+def test_dirty_reload_confirmation_requires_explicit_discard(tmp_path, monkeypatch):
+    from unittest.mock import MagicMock
+    from editor import dialogs
+
+    session = EditorSession(Kernel(tmp_path))
+    session.kernel.create_entity()
+    action = MagicMock()
+    ui = MagicMock()
+    ui.does_item_exist.return_value = False
+    monkeypatch.setattr(dialogs, "dpg", ui)
+    dialogs.confirm_reload(session, action)
+    action.assert_not_called()
+    discard = next(
+        call.kwargs["callback"] for call in ui.add_button.call_args_list
+        if call.kwargs["label"] == "Discard and reload"
+    )
+    discard()
+    action.assert_called_once()

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-import copy
 import json
 from typing import Any
 import dearpygui.dearpygui as dpg
@@ -19,7 +18,7 @@ from .pills import (
     rename_script_function_display_name,
 )
 from .session import EditorSession
-from .theme import get_card_theme, get_flyout_theme
+from .theme import get_card_theme
 
 
 class InspectorPanel:

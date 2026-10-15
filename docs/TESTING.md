@@ -1,60 +1,50 @@
-# Verification gates and test roadmap
+# Verification
 
-## Currently executable (this ZIP)
+Date: 15 October 2026. Python 3.13+ is required. Verification was run with Python 3.14.4 on Windows.
 
-From the project root (Python **3.13+**):
+## Commands
 
-```bash
-python -m pip install pytest ruff
-python -m pytest -q
-python tools/check_architecture.py
-ruff check tools tests
+From the repository root:
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest -q -p no:cacheprovider
+.\.venv\Scripts\ruff.exe check LBE editor tools tests main.py
+.\.venv\Scripts\python.exe tools/check_architecture.py
+git diff --check
 ```
 
-The package's own imports use modern `type` syntax; older Python interpreters will fail to parse it.
+Install the declared development tools with `python -m pip install -e ".[dev]"`; add the `editor` extra for Dear PyGui.
 
-- `tests/test_kernel_baseline.py`: smoke-tested existing entity create/set/save/reload and two-way IDs; includes explicitly **xfail** known defects. `xfail` is not a fix or proof the defect has disappeared.
-- `tests/test_api_contract.py`: checks selected currently exposed surface signatures, to detect accidental API removals until an approved migration.
-- `tests/test_project_persistence.py`: verifies the format-version-1 project manifest, deterministic legacy root discovery, startup idempotency, broken-reference diagnostics, recursive child dependencies and fatal-load rollback.
-- `tools/check_architecture.py`: AST-based check for forbidden dependencies in the kernel/integrity/types, not a general architecture theorem prover.
-- GitHub Actions runs these checks when code is pushed or a PR is opened. It does not itself enforce branch protection: configure required checks and reviews in GitHub settings if desired.
-- Ruff checking is initially restricted to support code (`tools/` and `tests/`) because legacy source has not been lint-refactored.
+## Latest results
 
-## Known failing behaviors to fix with tests
-1. Mutating a returned component dictionary bypasses dirty tracking and save.
-2. A failed recursive dependency load can leave registered parent resources.
-3. `bytes` IDs in `dependencies` can fail JSON serialization.
-4. `LBE/Queue.py` import fails for undefined type aliases.
-5. Runtime handle recycle (future) must not allow stale references.
-6. Logging must be optional in hot paths and profiling must demonstrate costs.
+- Full integrated suite: **384 passed, 8 planned skips**, no failures or unexpected passes.
+- Ruff: **passed** across engine, editor, tests, tools and launcher.
+- Architecture checker: **passed**, all 14 engine modules. GUI/editor/backend imports are rejected in engine code.
+- Independent review: **PASS**, no unresolved critical or major findings within the stabilization changes.
+- Packaging: **passed**, a `littlebigengine-0.1.0-py3-none-any.whl` built from an isolated source copy.
+- Real Dear PyGui setup: **passed** on a temporary copy of the retained world. A hidden viewport and the Hierarchy, Inspector and Scene panels were created and torn down. This verifies real bindings and lifecycle setup, not a full visual/user-interaction audit.
+- Default startup from another working directory: selected Application ID loaded 24 resources, including 23 entities, without creating a demo world.
 
-## Required future tests (not possible with today's archive)
-- Exported reusable function registry and cross-system calls.
-- Reference parser rejects malformed syntax/unknown IDs/wrong resource kind; preserves strings and comments.
-- Rename/move function without breaking a UID-based call site; signature change is detected.
-- Save and reload JSON with versioned schemas, migrations and canonical IDs.
-- Dependency cycles, optional links, failed load rollback and duplicate IDs.
-- Runtime handle generation and registry-scope isolation.
-- Hot reload with rollback, isolated runtime preview failure, editor still usable offline.
-- Benchmarks for high-frequency ECS queries and reference-call overhead.
+## Important regression coverage
 
-## Completion evidence
-A code change requires recorded commands and actual results. A subagent returns tests it ran; a separate test agent reproduces or expands coverage. Review findings are classified `CRITICAL`, `MAJOR`, `MINOR` or `PASS` with file-level evidence. Any unresolved critical finding blocks integration; major findings require developer decision. Never treat documentation alone as a passing quality gate.
+- `test_project_persistence.py`: manifest validation, discovery, broken references, selected-root startup, missing-root preservation and fatal load rollback.
+- `test_transactional_graph.py`: parent/child consistency, cycle prevention, subtree deletion, transaction rollback and write/replace failure injection.
+- `test_hardening.py`: last-working-module fallback, recovery, source-write failure, external source mode, transactional identity high-water marks, cached component reference preservation, editor errors, dirty-reload confirmation, bounded logging and batch publication rollback.
+- `test_proxy_mutation.py`: immutable reads, tracked nested lists/maps, stale handles and durable writes.
+- Script/UI/editor suites: callable identity, reference preprocessing, event dispatch, panel lifecycle and editor-session behavior.
 
-### Phase 1 persistence verification — 14 October 2026
+The old Queue import xfail was replaced by active coverage after correcting its type aliases. Eight feature stubs remain intentionally skipped; see [CURRENT_STATE.md](CURRENT_STATE.md).
 
-Run from `F:\ModEngine` using the local Python 3.14 environment:
+## Independent review findings resolved
 
-- `.venv\Scripts\python.exe -m pytest tests\test_project_persistence.py -q -p no:cacheprovider`: **40 passed, 3 skipped**.
-- `.venv\Scripts\python.exe -m pytest -q -p no:cacheprovider`: **325 passed, 21 skipped, 1 xpassed**.
-- `.venv\Scripts\python.exe tools\check_architecture.py`: **passed**.
-- `.venv\Scripts\ruff.exe check tools tests\test_project_persistence.py`: **passed**.
-- `git diff --check`: **passed**.
+The reviewer reproduced two defects beyond the earlier test suite: a handle from an aborted replacement could be reissued later, and restoring copied resource dictionaries detached views held by the retained working script module. Allocation high-water marks now survive every rollback. Snapshot restoration repairs the original nested dictionaries/lists in place. New regression tests cover both cases; independent nested-rollback probes passed.
 
-Independent read-only review: **PASS**, with no unresolved critical, major or minor findings in the persistence changes. Separate probes checked dependency-first hierarchy traversal with cycles and finite depths, and rollback after invalid UTF-8 while preserving an existing registry.
+## Performance measurement
 
-The full `ruff check tools tests` gate remains failing with **69 existing findings outside the persistence suite**. The queue import XPASS remains a known annotation/lifecycle concern. The three persistence skips cover future schema migration, project unload/reload handle safety, and file-watcher-driven manifest reload. These results do not verify the desktop UI manually or implement the wider architecture roadmap.
+A local diagnostic over 1,000 entities measured 100,000 component reads in 0.1249 seconds and 100 component queries in 0.0615 seconds, with zero trace records retained at the default INFO level. No portable timing threshold or claim of constant-time queries is implied.
 
-### Application cleanup and pinned startup — 14 October 2026
+## Completion policy
 
-After adding selection by persistent ID and cleaning duplicate application data: persistence suite **44 passed, 3 skipped**; full integrated suite **331 passed, 19 skipped, 1 xpassed**. Architecture and scoped Ruff checks pass. Independent review of root selection and saving unloaded roots: **PASS**. A zero-tick startup from a different working directory opened only the retained Application's 24 resources. A full backup was hash-verified before archiving duplicate files; retained resource bytes were checked against that backup after cleanup.
+Run tests appropriate to the changed behavior, then the full suite, lint and architecture checks. Add failure-path coverage for reproducible defects. An independent reviewer must inspect the actual changes without implementing their own fixes. Critical findings block completion; major findings require resolution or a recorded developer decision.
+
+Tests use temporary projects. Do not run scratch experiments or project scripts against the active world as verification. A successful test run does not establish process isolation, crash recovery, safe concurrent writers or future schema migration.

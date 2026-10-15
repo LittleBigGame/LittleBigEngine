@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import math
 from collections.abc import Mapping
 from typing import Any
 import dearpygui.dearpygui as dpg
@@ -10,8 +9,8 @@ import dearpygui.dearpygui as dpg
 from LBE.types import Error, RuntimeID
 from .context_menu import open_context_menu
 from .session import EditorSession
-from .theme import get_card_theme, get_flyout_theme, get_tree_content_theme
-from .vector_glyphs import draw_branch_lines, draw_chevron_down, draw_chevron_right, draw_radio_dot
+from .theme import get_card_theme, get_tree_content_theme
+from .vector_glyphs import draw_chevron_down, draw_chevron_right, draw_radio_dot
 
 # Layout metrics for letter-aligned vector card hierarchy
 ROW_HEIGHT = 22.0

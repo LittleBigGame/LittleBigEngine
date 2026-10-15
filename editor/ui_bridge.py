@@ -341,7 +341,7 @@ class UIBridgePanel:
             self._render_ui_entity(child_id, parent=parent, visited=visited)
 
     def _on_button_clicked(self, entity_id: RuntimeID) -> None:
-        self.session.kernel.trigger_ui_event(entity_id, "on_click")
+        self.session.report_errors(self.session.kernel.trigger_ui_event(entity_id, "on_click"), notify=False)
         self.session.refresh()
 
     def _on_slider_changed(self, entity_id: RuntimeID, new_val: Any) -> None:
@@ -349,7 +349,7 @@ class UIBridgePanel:
         comp = self._get_tracked_component(entity_id, "UISlider")
         if comp is not None and hasattr(comp, "__setitem__"):
             comp["value"] = val
-        self.session.kernel.trigger_ui_event(entity_id, "on_change", val)
+        self.session.report_errors(self.session.kernel.trigger_ui_event(entity_id, "on_change", val), notify=False)
         self._suppress_rebuild = True
         try:
             self.session.refresh()
@@ -361,7 +361,7 @@ class UIBridgePanel:
         comp = self._get_tracked_component(entity_id, "UITextInput")
         if comp is not None and hasattr(comp, "__setitem__"):
             comp["text"] = val
-        self.session.kernel.trigger_ui_event(entity_id, "on_change", val)
+        self.session.report_errors(self.session.kernel.trigger_ui_event(entity_id, "on_change", val), notify=False)
         self._suppress_rebuild = True
         try:
             self.session.refresh()

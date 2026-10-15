@@ -835,7 +835,7 @@ class TestPersistenceSafetyAndPlannedFeatures:
     def test_planned_hot_reload_manifest_syntax_rollback(self, tmp_path: Path):
         """If project.json is edited externally with invalid syntax, reload rejects it and retains prior manifest."""
         k = Kernel(tmp_path)
-        e = k.create_entity(name="Hero")
+        k.create_entity(name="Hero")
         k.save_dirty_resources()
         k.save_project()
         initial_manifest = k.manifest

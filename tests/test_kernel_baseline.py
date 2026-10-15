@@ -1,7 +1,6 @@
 from collections.abc import MutableMapping
 import importlib
 
-import pytest
 
 from LBE import Error, Kernel
 

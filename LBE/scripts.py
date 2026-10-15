@@ -249,6 +249,8 @@ def _activate_script_module(self, script_id: RuntimeID) -> dict[str, Any] | Erro
             file_mtime = path.stat().st_mtime_ns
             cached = self._script_module_cache.get(script_id)
             if cached is not None and self._script_mtime_cache.get(script_id) == file_mtime:
+                self._script_reload_errors.pop(script_id, None)
+                self._script_failed_sources.pop(script_id, None)
                 return cached[1]
             code = path.read_text(encoding="utf-8")
         except (OSError, UnicodeError) as ex:
@@ -257,6 +259,8 @@ def _activate_script_module(self, script_id: RuntimeID) -> dict[str, Any] | Erro
     else:
         cached = self._script_module_cache.get(script_id)
         if cached is not None and cached[0] == code:
+            self._script_reload_errors.pop(script_id, None)
+            self._script_failed_sources.pop(script_id, None)
             return cached[1]
 
     fingerprint = (source_path, code, file_mtime)
@@ -571,7 +575,7 @@ def run_entity_scripts(
                         func(dt)
                 else:
                     func()
-            except Exception as ex:
+            except (Exception, SystemExit) as ex:
                 err = Error(
                     message="Script method execution error",
                     description=f"Script '{s_res.get('name', s_rid)}' method '{method_name}' raised an error: {ex}",

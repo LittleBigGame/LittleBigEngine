@@ -77,7 +77,7 @@ class Logger:
         action: str | None = None,
         before: Any = None,
         after: Any = None,
-    ) -> LogRecord:
+    ) -> LogRecord | None:
         """Store enabled records in a bounded history and optionally print them."""
         if not self.is_enabled(level, channel):
             return None
@@ -116,7 +116,7 @@ class Logger:
         action: str | None = None,
         before: Any = None,
         after: Any = None,
-    ) -> LogRecord:
+    ) -> LogRecord | None:
         return self.log(
             TRACE,
             message,
@@ -137,7 +137,7 @@ class Logger:
         error: Exception | None = None,
         entity_id: Any = None,
         action: str | None = None,
-    ) -> LogRecord:
+    ) -> LogRecord | None:
         return self.log(DEBUG, message, channel, data=data, error=error, entity_id=entity_id, action=action)
 
     def info(
@@ -148,7 +148,7 @@ class Logger:
         error: Exception | None = None,
         entity_id: Any = None,
         action: str | None = None,
-    ) -> LogRecord:
+    ) -> LogRecord | None:
         return self.log(INFO, message, channel, data=data, error=error, entity_id=entity_id, action=action)
 
     def warn(
@@ -158,7 +158,7 @@ class Logger:
         data: Any = None,
         error: Exception | None = None,
         entity_id: Any = None,
-    ) -> LogRecord:
+    ) -> LogRecord | None:
         return self.log(WARN, message, channel, data=data, error=error, entity_id=entity_id)
 
     def error(
@@ -168,7 +168,7 @@ class Logger:
         error: Error | None = None,
         data: Any = None,
         entity_id: Any = None,
-    ) -> LogRecord:
+    ) -> LogRecord | None:
         return self.log(ERROR, message, channel, data=data, error=error, entity_id=entity_id)
 
     def fatal(
@@ -178,7 +178,7 @@ class Logger:
         error: Error | None = None,
         data: Any = None,
         entity_id: Any = None,
-    ) -> LogRecord:
+    ) -> LogRecord | None:
         return self.log(FATAL, message, channel, data=data, error=error, entity_id=entity_id)
 
     def get_history(self, entity_id: Any) -> list[LogRecord]:
@@ -189,7 +189,6 @@ class Logger:
         """Pretty-print the full provenance / timeline of an entity."""
         history = self.get_history(entity_id)
         RESET = "\033[0m"
-        BOLD = "\033[1m"
         CYAN = "\033[96m"
         GRAY = "\033[90m"
         YELLOW = "\033[93m"

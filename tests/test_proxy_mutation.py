@@ -10,6 +10,7 @@ Derives tests from observable user requirements and kernel contracts:
 """
 
 from collections.abc import MutableMapping, MutableSequence
+from pathlib import Path
 import copy
 import json
 from types import MappingProxyType

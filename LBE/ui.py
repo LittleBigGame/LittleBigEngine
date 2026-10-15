@@ -704,7 +704,7 @@ def trigger_ui_event(
                     )
                     logger.trace("Failed to trigger UI event: function not found", channel="ui", error=err, entity_id=curr_id)
                     return err
-                except Exception as ex:
+                except (Exception, SystemExit) as ex:
                     err = Error(
                         message="UI event handler failed",
                         description=str(ex),
@@ -754,7 +754,7 @@ def trigger_ui_event(
                             raise
                     else:
                         return func(*args, **kwargs)
-                except Exception as ex:
+                except (Exception, SystemExit) as ex:
                     err = Error(
                         message="UI event handler failed",
                         description=str(ex),

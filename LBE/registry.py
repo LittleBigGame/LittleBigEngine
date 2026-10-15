@@ -166,15 +166,17 @@ def get_fresh_runtime_id(self) -> RuntimeID:
     """Get the fresh runtime ID packed with generation counter."""
     if len(self.stale_runtime_ids) > 0:
         slot = self.stale_runtime_ids.pop()
-        gen = self._slot_generations.get(slot, 1)
+        gen = max(self._slot_generations.get(slot, 1), self._issued_generations.get(slot, 0) + 1)
+        self._slot_generations[slot] = gen
         logger.trace(f"Recycled stale slot {slot} (gen={gen})", channel="allocation", entity_id=slot)
     else:
         slot = self.runtime_idx
         self.runtime_idx += 1
-        gen = 1
+        gen = self._issued_generations.get(slot, 0) + 1
         self._slot_generations[slot] = gen
         logger.trace(f"Allocated fresh slot {slot} (gen={gen})", channel="allocation", entity_id=slot)
 
+    self._issued_generations[slot] = gen
     self._active_slots.add(slot)
     handle = (gen << 32) | slot
     return handle

@@ -454,12 +454,16 @@ class EditorSession:
         return res
 
     def reload_all_resources(self) -> list[Error]:
-        """Reload all resources from disk."""
+        """Reload all resources together, preserving the previous state if any read fails."""
         errors: list[Error] = []
-        for rid in list(self.kernel.resources.keys()):
-            err = self.kernel.reload_resource(rid)
-            if isinstance(err, Error):
-                errors.append(err)
+        try:
+            with self.kernel.transaction():
+                for rid in list(self.kernel.resources.keys()):
+                    err = self.kernel.reload_resource(rid)
+                    if isinstance(err, Error):
+                        raise err
+        except Error as error:
+            errors.append(error)
         self.report_errors(errors, notify=False)
         self._notify_state_changed()
         return errors

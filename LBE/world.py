@@ -11,7 +11,6 @@ from typing import Any
 import copy
 
 from .logger import logger
-from .integrity import Validate
 from .ui import ValidateUI
 from .proxy import ComponentProxy, EntityProxy, ReadOnlySequence, _unwrap
 from .views import _make_readonly_view

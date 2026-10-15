@@ -615,10 +615,21 @@ def get_diagnostics(self) -> dict[str, Any]:
 
 def _snapshot_loaded_state(self) -> dict[str, Any]:
     """Capture registry state so a failed graph load or transaction can be rolled back."""
+    containers = []
+    pending = [self.resources]
+    seen = set()
+    while pending:
+        value = pending.pop()
+        if not isinstance(value, (dict, list)) or id(value) in seen:
+            continue
+        seen.add(id(value))
+        containers.append((value, value.copy()))
+        pending.extend(value.values() if isinstance(value, dict) else value)
     return {
         "resource_runtime_ids": self.resource_runtime_ids.copy(),
         "resource_storage_ids": self.resource_storage_ids.copy(),
-        "resources": {k: copy.deepcopy(v) for k, v in self.resources.items()},
+        "resources": self.resources,
+        "_container_snapshots": containers,
         "dirty_runtime_ids": self.dirty_runtime_ids.copy(),
         "stale_runtime_ids": self.stale_runtime_ids.copy(),
         "_slot_generations": self._slot_generations.copy(),
@@ -634,12 +645,17 @@ def _snapshot_loaded_state(self) -> dict[str, Any]:
         "_script_failed_sources": self._script_failed_sources.copy(),
         "_script_mtime_cache": self._script_mtime_cache.copy(),
         "_method_sig_cache": self._method_sig_cache.copy(),
-        "broken_references": self.broken_references.copy(),
     }
 
 
 def _restore_loaded_state(self, snapshot: dict[str, Any]) -> None:
     """Restore registry state captured by _snapshot_loaded_state."""
+    for container, original in snapshot.get("_container_snapshots", []):
+        if isinstance(container, dict):
+            container.clear()
+            container.update(original)
+        else:
+            container[:] = original
     self.resource_runtime_ids = snapshot["resource_runtime_ids"]
     self.resource_storage_ids = snapshot["resource_storage_ids"]
     self.resources = snapshot["resources"]
@@ -649,7 +665,6 @@ def _restore_loaded_state(self, snapshot: dict[str, Any]) -> None:
     self._active_slots = snapshot.get("_active_slots", self._active_slots).copy()
     self.runtime_idx = snapshot["runtime_idx"]
     self.manifest = snapshot.get("manifest", self.manifest)
-    self.broken_references = snapshot.get("broken_references", self.broken_references)
     self._unloaded_project_root_ids = snapshot.get("_unloaded_project_root_ids", self._unloaded_project_root_ids)
     self._script_cache = snapshot.get("_script_cache", self._script_cache).copy()
     self._script_module_cache = snapshot.get("_script_module_cache", self._script_module_cache).copy()
@@ -668,15 +683,7 @@ def transaction(self):
     try:
         yield self
     except Exception:
-        aborted_generations = dict(self._slot_generations)
-        allocated_count = self.runtime_idx
         self._restore_loaded_state(snapshot)
-        for slot, generation in aborted_generations.items():
-            if slot not in self._active_slots:
-                self._slot_generations[slot] = max(generation, self._slot_generations.get(slot, 0)) + 1
-                if slot not in self.stale_runtime_ids:
-                    self.stale_runtime_ids.append(slot)
-        self.runtime_idx = max(self.runtime_idx, allocated_count)
         raise
 
 

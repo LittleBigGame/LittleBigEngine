@@ -7,7 +7,7 @@ from types import MappingProxyType
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from .types import Error, RuntimeID, StorageID
+from .types import Error, RuntimeID, StorageID, RuntimeIDNotFoundOnMemoryError
 
 if TYPE_CHECKING:
     from .kernel import Kernel

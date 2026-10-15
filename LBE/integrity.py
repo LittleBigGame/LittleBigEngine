@@ -1,22 +1,20 @@
-from collections.abc import Mapping
-import re
 from typing import Any
 
 from .types import Error, InvalidResourceDataError, Entity
 from .logger import logger
 
 
+from .ui import (
+    UI_SCHEMAS as UI_SCHEMAS,
+    UI_COMPONENT_NAMES as UI_COMPONENT_NAMES,
+    UI_COMPONENT_ALIASES as UI_COMPONENT_ALIASES,
+    UI_EVENT_HANDLER_REGEX as UI_EVENT_HANDLER_REGEX,
+    ValidateUI,
+    _validate_handler_ref as _validate_handler_ref,
+)
+
 resource_data_requires = ("data", "type")
 resource_data_may_have = ("name", "dependencies", "metadata", "children")
-
-from .ui import (
-    UI_SCHEMAS,
-    UI_COMPONENT_NAMES,
-    UI_COMPONENT_ALIASES,
-    UI_EVENT_HANDLER_REGEX,
-    ValidateUI,
-    _validate_handler_ref,
-)
 
 
 class Validate:
@@ -301,4 +299,4 @@ class Validate:
     @staticmethod
     def ui_component(component_name: str, component_data: Any) -> Error | None:
         """Validate known UI component types when present on an entity."""
-        return ValidateUI.validate_ui_component(component_name, component_data)
+        return ValidateUI.validate_ui_component(component_name, component_data)

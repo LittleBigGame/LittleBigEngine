@@ -37,6 +37,7 @@ class Kernel:
         self.dirty_runtime_ids: set[RuntimeID] = set()
         self.stale_runtime_ids: list[int] = []
         self._slot_generations: dict[int, int] = {}
+        self._issued_generations: dict[int, int] = {}
         self._active_slots: set[int] = set()
         self.runtime_idx = 0
         self.manifest: ProjectManifest | None = None
