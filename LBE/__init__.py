@@ -25,6 +25,7 @@ from .preprocessor import (
     extract_script_symbols,
     project_source_to_display,
     project_display_to_source,
+    project_display_to_source_with_symbols,
 )
 from .scripts import export
 from .kernel import Kernel
@@ -40,6 +41,6 @@ __all__ = [
     "Validate", "ValidateUI", "UI_SCHEMAS", "UI_COMPONENT_NAMES", "UI_COMPONENT_ALIASES", "UI_EVENT_HANDLER_REGEX",
     "EntityProxy", "ComponentProxy", "WorldProxy", "ScriptProxy", "BoundScriptProxy", "TrackedList", "ReadOnlySequence",
     "ReferencePreprocessor", "RuntimeBinder", "LBEReferenceSyntaxError", "extract_script_symbols",
-    "project_source_to_display", "project_display_to_source",
+    "project_source_to_display", "project_display_to_source", "project_display_to_source_with_symbols",
     "export",
 ]

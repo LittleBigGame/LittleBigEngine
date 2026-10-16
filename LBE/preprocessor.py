@@ -7,6 +7,7 @@ import tokenize
 import types
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
+import uuid
 
 from .types import Error
 
@@ -159,14 +160,14 @@ class RuntimeBinder:
         return dependencies
 
 
-def extract_script_symbols(source: str) -> dict[str, str]:
+def extract_script_symbols(source: str, existing_symbols: dict[str, str] | None = None) -> dict[str, str]:
     """Extract top-level _fn_ functions and their human-readable display names from trailing comments.
 
     Parses top-level FunctionDef and AsyncFunctionDef whose names start with '_fn_'.
     Uses tokenize to extract the trailing comment '# <human_name>' on the exact line where
     the function definition header colon ':' occurs.
     Strips '#' and whitespace from the comment.
-    If no trailing comment, defaults to the symbol name itself ('_fn_<id>').
+    If no trailing comment, preserves existing_symbols mapping if available, or defaults to the symbol name itself ('_fn_<id>').
     Returns mapping: {"_fn_<id>": "<human_display_name>"}.
     """
     if not source or not source.strip():
@@ -192,6 +193,7 @@ def extract_script_symbols(source: str) -> dict[str, str]:
     }
 
     symbols: dict[str, str] = {}
+    existing = existing_symbols or {}
     tok_idx = 0
     num_tokens = len(tokens)
 
@@ -234,8 +236,9 @@ def extract_script_symbols(source: str) -> dict[str, str]:
             cleaned = comments_by_line[colon_line].strip().strip("#").strip()
             if cleaned:
                 display_name = cleaned
-        elif is_fn_prefixed and not colon_line:
-            display_name = node.name
+        elif existing:
+            clean_uuid = node.name.removeprefix("fn_").removeprefix("_fn_")
+            display_name = existing.get(node.name) or existing.get(clean_uuid.lower()) or node.name
 
         symbols[node.name] = display_name
         if export_uuid:
@@ -313,22 +316,71 @@ def project_source_to_display(
     return out, tokens
 
 
+def project_display_to_source_with_symbols(
+    display_code: str,
+    symbols: dict[str, str] | None = None,
+    kernel: Any = None,
+) -> tuple[str, dict[str, str]]:
+    """Transform human-readable display code back to persistent on-disk UUID source.
+
+    Maintains existing stable UUIDs for known functions, allocates fresh 32-hex UUIDs
+    for newly defined functions, updates the symbols dictionary, and maps entity references.
+    Returns (disk_source_code, updated_symbols).
+    """
+    syms = dict(symbols) if symbols else {}
+    inv: dict[str, str] = {}
+    for sym_key, disp_name in syms.items():
+        if disp_name and (sym_key.startswith("fn_") or sym_key.startswith("_fn_")):
+            inv[disp_name] = sym_key
+
+    # Discover newly defined functions via AST and allocate UUIDs
+    try:
+        tree = ast.parse(display_code)
+        for node in tree.body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                if node.name not in inv and not node.name.startswith(("fn_", "_fn_")):
+                    new_uuid = uuid.uuid4().hex
+                    sym_key = f"fn_{new_uuid}"
+                    syms[sym_key] = node.name
+                    syms[new_uuid] = node.name
+                    inv[node.name] = sym_key
+    except SyntaxError:
+        pass
+
+    out = display_code
+    for disp_name, sym_key in inv.items():
+        pat = re.compile(rf'(def|async\s+def)\s+{re.escape(disp_name)}\s*\(')
+        out = pat.sub(rf'\1 {sym_key}(', out)
+
+    # Map known entity references to <lbe.ref("sid", "name")>
+    if kernel is not None and hasattr(kernel, "resources"):
+        from collections.abc import Mapping
+        entity_name_map: dict[str, str] = {}
+        for rid, r in list(kernel.resources.items()):
+            if isinstance(r, (dict, Mapping)) and hasattr(kernel, "is_entity") and kernel.is_entity(rid):
+                ename = r.get("name")
+                if ename and ename.isidentifier():
+                    sid = kernel.get_storage_id(rid)
+                    if hasattr(sid, "hex"):
+                        entity_name_map[ename] = sid.hex().lower()
+
+        for ename, esid in entity_name_map.items():
+            # Match assignments like: target = Entity2 or target = Entity2\n
+            ref_assign_pat = re.compile(rf'(=\s*){re.escape(ename)}(\s*(?:#.*)?$)')
+            out = ref_assign_pat.sub(rf'\1<lbe.ref("{esid}", "{ename}")>\2', out)
+
+    if symbols is not None:
+        symbols.update(syms)
+
+    return out, syms
+
+
 def project_display_to_source(
     display_code: str,
     symbols: dict[str, str] | None = None,
     kernel: Any = None,
 ) -> str:
     """Transform human-readable display code back to persistent on-disk UUID source."""
-    syms = symbols or {}
-    out = display_code
-
-    # Inverse mapping for function definitions: display_name -> fn_<uuid>
-    for sym_key, disp_name in syms.items():
-        if not disp_name or sym_key == disp_name:
-            continue
-        if sym_key.startswith("fn_") or sym_key.startswith("_fn_"):
-            pat = re.compile(rf'(def|async\s+def)\s+{re.escape(disp_name)}\s*\(')
-            out = pat.sub(rf'\1 {sym_key}(', out)
-
+    out, _ = project_display_to_source_with_symbols(display_code, symbols=symbols, kernel=kernel)
     return out
 

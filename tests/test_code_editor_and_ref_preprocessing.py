@@ -254,3 +254,124 @@ class TestCodeEditorPanelIntegration:
         # Verify component was updated with the dropped setter UUID!
         comps = kernel.get_components(e_rid)
         assert comps["Property:Health"]["setter"] == new_setter_uuid
+
+    def test_normal_python_editing_saves_with_persistent_uuids(self, dpg_context, tmp_path: Path) -> None:
+        """Verify editing normal Python in the editor saves with durable UUIDs on disk."""
+        kernel = Kernel(tmp_path)
+        func_uuid = "a1000000000000000000000000000001"
+        s_rid = kernel.create_script_resource(
+            name="CombatLogic",
+            code=f"def fn_{func_uuid}(player):\n    return player.Health.current\n",
+        )
+        # Register symbol name
+        res = kernel.resources[s_rid]
+        res["data"]["symbols"] = {f"fn_{func_uuid}": "get_player_health"}
+
+        session = EditorSession(kernel)
+        panel = CodeEditorPanel(session)
+        panel.build()
+        panel.open_script(s_rid)
+
+        # 1. Verify editor displays projected normal Python (NO raw UUIDs in input buffer)
+        assert "def get_player_health(player):" in panel.current_display_code
+        assert f"fn_{func_uuid}" not in panel.current_display_code
+        assert dpg.get_value(f"{panel.tag}_input") == panel.current_display_code
+
+        # 2. User edits code like a normal Python editor: adds a new function
+        edited_code = (
+            "def get_player_health(player):\n"
+            "    return player.Health.current\n\n"
+            "def heal_boost(player):\n"
+            "    player.Health.current += 25.0\n"
+            "    return player.Health.current\n"
+        )
+        dpg.set_value(f"{panel.tag}_input", edited_code)
+
+        # 3. Apply & Save
+        panel._on_apply_code()
+
+        # 4. Verify disk code has persistent UUIDs
+        disk_code = panel.current_disk_code
+        assert f"def fn_{func_uuid}(player):" in disk_code
+        assert "def fn_" in disk_code
+        assert "def heal_boost" not in disk_code  # Converted to fn_<uuid> on disk!
+
+        # 5. Verify symbols contains both original and newly allocated UUID
+        symbols = panel.current_symbols
+        assert symbols.get(f"fn_{func_uuid}") == "get_player_health"
+        new_fn_keys = [k for k, v in symbols.items() if v == "heal_boost" and k.startswith("fn_")]
+        assert len(new_fn_keys) == 1
+        new_uuid = new_fn_keys[0].removeprefix("fn_")
+        assert len(new_uuid) == 32
+
+        # 6. Verify newly allocated function export was registered in kernel and executes!
+        res_export = kernel.resolve_function_export(new_uuid)
+        assert not isinstance(res_export, Error)
+        callable_fn, _ = res_export
+
+        class MockEntity:
+            class Health:
+                current = 50.0
+
+        mock_hero = MockEntity()
+        result = callable_fn(mock_hero)
+        assert result == 75.0
+        assert mock_hero.Health.current == 75.0
+
+    def test_syntax_highlighter_tokenization_and_colors(self, dpg_context, tmp_path: Path) -> None:
+        """Verify Python code tokenization preserves exact layout, colors, and interactive pills."""
+        kernel = Kernel(tmp_path)
+        func_uuid = "a1000000000000000000000000000001"
+        s_rid = kernel.create_script_resource(
+            name="TestScript",
+            code=f"def fn_{func_uuid}(x):\n    # Calculation\n    return x * 10.5\n",
+        )
+        session = EditorSession(kernel)
+        panel = CodeEditorPanel(session)
+        panel.build()
+        panel.open_script(s_rid)
+
+        code_sample = (
+            "def update_player(player: Entity):\n"
+            "    # Move player\n"
+            "    speed = 200.0\n"
+            "    if player.Health.current <= 0:\n"
+            "        return False\n"
+            "    return True"
+        )
+        token_lines = panel._parse_code_tokens(code_sample)
+        assert len(token_lines) == 6
+
+        # Check line 1 tokens
+        l1_texts = [t["text"] for t in token_lines[0]]
+        assert "".join(l1_texts) == "def update_player(player: Entity):"
+        # Check colors
+        def_tok = next(t for t in token_lines[0] if t["text"] == "def")
+        assert def_tok["color"] == (86, 156, 214, 255)  # Keyword blue
+        entity_tok = next(t for t in token_lines[0] if t["text"] == "Entity")
+        assert entity_tok["color"] == (78, 201, 176, 255)  # Type teal
+
+        # Check line 2 comment
+        l2_comment = next(t for t in token_lines[1] if t["text"] == "# Move player")
+        assert l2_comment["color"] == (106, 153, 85, 255)  # Comment green
+
+        # Check line 3 number
+        l3_num = next(t for t in token_lines[2] if t["text"] == "200.0")
+        assert l3_num["color"] == (181, 206, 168, 255)  # Number mint green
+
+    def test_split_view_mode_renders_both_panes(self, dpg_context, tmp_path: Path) -> None:
+        """Verify Split View mode provides both the text input and syntax canvas."""
+        kernel = Kernel(tmp_path)
+        s_rid = kernel.create_script_resource(
+            name="SplitLogic",
+            code="def fn_a10000000000000000000000000000001(x):\n    return x\n",
+        )
+        session = EditorSession(kernel)
+        panel = CodeEditorPanel(session)
+        panel.build()
+        panel.open_script(s_rid)
+
+        panel._on_mode_changed(None, "Split View")
+        assert panel.active_mode == "Split View"
+        assert dpg.does_item_exist(f"{panel.tag}_input")
+

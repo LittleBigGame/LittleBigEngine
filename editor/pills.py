@@ -46,25 +46,32 @@ def get_pill_theme() -> str:
     return tag
 
 
-def get_code_token_pill_theme() -> str:
+def get_code_token_pill_theme(token_type: str = "function") -> str:
     """Return a Dear PyGui theme for in-code reference tokens.
 
     Appears as pure text matching normal code color with transparent background and border.
     On hover, reveals a crisp outline border box, subtle background, and drag indicator.
     """
-    tag = "lbe_theme_code_token_pill"
+    tag = f"lbe_theme_code_token_{token_type}"
     if _is_theme_valid(tag):
         return tag
     if dpg.does_item_exist(tag):
         dpg.delete_item(tag)
+
+    text_col = (
+        (220, 220, 170, 255)
+        if token_type == "function"
+        else ((78, 201, 176, 255) if token_type == "entity" else (220, 225, 235, 255))
+    )
+
     with dpg.theme(tag=tag):
         with dpg.theme_component(dpg.mvButton):
             dpg.add_theme_color(dpg.mvThemeCol_Button, (0, 0, 0, 0))
-            dpg.add_theme_color(dpg.mvThemeCol_ButtonHovered, (35, 48, 68, 220))
-            dpg.add_theme_color(dpg.mvThemeCol_ButtonActive, (45, 68, 98, 255))
+            dpg.add_theme_color(dpg.mvThemeCol_ButtonHovered, (38, 56, 85, 235))
+            dpg.add_theme_color(dpg.mvThemeCol_ButtonActive, (48, 72, 110, 255))
             dpg.add_theme_color(dpg.mvThemeCol_Border, (0, 0, 0, 0))
             dpg.add_theme_color(dpg.mvThemeCol_BorderShadow, (0, 0, 0, 0))
-            dpg.add_theme_color(dpg.mvThemeCol_Text, (220, 225, 235, 255))
+            dpg.add_theme_color(dpg.mvThemeCol_Text, text_col)
             dpg.add_theme_style(dpg.mvStyleVar_FrameBorderSize, 1)
             dpg.add_theme_style(dpg.mvStyleVar_FrameRounding, 3)
             dpg.add_theme_style(dpg.mvStyleVar_FramePadding, 2, 0)
@@ -335,7 +342,7 @@ def render_code_token_pill(
         kwargs["user_data"] = user_data if user_data is not None else clean_uuid
 
     btn = dpg.add_button(**kwargs)
-    dpg.bind_item_theme(btn, get_code_token_pill_theme())
+    dpg.bind_item_theme(btn, get_code_token_pill_theme(token_type))
 
     with dpg.tooltip(btn):
         dpg.add_text(f"Persistent UUID: {clean_uuid}")
